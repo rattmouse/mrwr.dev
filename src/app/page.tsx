@@ -47,7 +47,8 @@ export default function Home() {
               }}
               onClick={() => setOpen(false)}
             >
-              <MenuListItem>
+              <MenuListItem
+               onClick={() => location.reload()}>
               Ratt
               <span role='img' aria-label='rat'>
               🐀
