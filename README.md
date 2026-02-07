@@ -1,5 +1,5 @@
 # mrwr.dev
-my official website -> [mrwr.dev](https://mrwr.dev)
+my website
 - mrwr are my initials
 - dev is my profession
 
