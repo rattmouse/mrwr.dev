@@ -44,7 +44,7 @@ export default function WelcomeWindow() {
         </WindowHeader>
 
         <WindowContent>
-          <p align='center'>
+          <p>
           coming soon
           </p>
         </WindowContent>

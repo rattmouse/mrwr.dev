@@ -13,7 +13,6 @@ export default function StyledComponentsRegistry({
 
   useServerInsertedHTML(() => {
     const styles = sheet.getStyleElement();
-    // @ts-expect-error styled-components internal
     sheet.instance.clearTag();
     return <>{styles}</>;
   });
