@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput } from "react95";
 import { Z } from "@/constants/zIndex";
 
+type WindowId = "welcome" | "about" | "projects" | "contact";
+
 type MenuAction = () => void;
 
 type MenuLeafItem = {
@@ -30,11 +32,7 @@ type MenuLevelProps = {
   depth?: number;
 };
 
-const isSeparator = (item: MenuItem): item is MenuSeparator =>
-  "separator" in item;
 
-const hasSubmenu = (item: MenuItem): item is MenuParentItem =>
-  "submenu" in item && Array.isArray(item.submenu) && item.submenu.length > 0;
 
 /**
  * Data shape:
@@ -46,6 +44,13 @@ const hasSubmenu = (item: MenuItem): item is MenuParentItem =>
  */
 function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
   const [openSubmenu, setOpenSubmenu] = useState<number | null>(null);
+  const [activeWindow, setActiveWindow] = useState<WindowId | null>("welcome");
+
+  const isSeparator = (item: MenuItem): item is MenuSeparator =>
+  "separator" in item;
+
+  const hasSubmenu = (item: MenuItem): item is MenuParentItem =>
+  "submenu" in item && Array.isArray(item.submenu) && item.submenu.length > 0;
 
   return (
     <MenuList
@@ -104,24 +109,42 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 }
 
 
-export default function StartMenu() {
+export default function StartMenu({
+    openWindow,
+  }: {
+    openWindow: (id: WindowId) => void;
+  }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
   const timerRef = useRef<number | null>(null);
   const lastSentRef = useRef<string>("");
 
+  const pick = (id: WindowId) => {
+    openWindow(id);
+    setOpen(false);
+  };
+
   const menuItems = [
     {
       label: "Programs",
-      submenu: [{ label: "soon 🐁" }],
+      submenu:
+      [
+        { label: "Welcome", onClick: () => pick("welcome")},
+        { label: "-Notepad-", disabled: true}
+      ],
     },
     {
       label: "Documents",
-      submenu: [{ label: "soon 🐀" }],
+      submenu:
+      [
+        { label: "About", onClick: () => pick("about")},
+        { label: "-Projects-", disabled: true},
+        { label: "Contact", onClick: () => pick("contact")}
+      ],
     },
     { separator: true },
-    { label: "Shut Down...", onClick={() => location.reload()} },
+    { label: "Shut Down...", onClick: () => location.reload() },
   ] satisfies MenuItem[];
 
   // Close on outside click
@@ -172,7 +195,7 @@ export default function StartMenu() {
   }, [query]);
 
   return (
-    <AppBar style={{ zIndex: Z.TASKBAR }}>
+    <AppBar style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: Z.TASKBAR }}>
       <Toolbar style={{ justifyContent: "space-between" }}>
         <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
           <Button
