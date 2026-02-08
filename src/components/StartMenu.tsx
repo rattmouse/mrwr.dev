@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput } from "react95";
 import { Z } from "@/constants/zIndex";
+import { Sizes } from "react95/dist/types";
 
 type WindowId = "welcome" | "about" | "projects" | "contact";
 
@@ -10,12 +11,16 @@ type MenuAction = () => void;
 
 type MenuLeafItem = {
   label: string;
+  icon: string;
+  size: Sizes;
   onClick?: MenuAction;
   disabled?: boolean;
 };
 
 type MenuParentItem = {
   label: string;
+  icon: string;
+  size: Sizes;
   submenu: MenuItem[]; // submenu can contain leaf items + separators too if you want
   disabled?: boolean;
 };
@@ -53,7 +58,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 
   return (
     <MenuList
-      style={{ minWidth: 140, zIndex: Z.START_MENU }}
+      style={{ minWidth: 200, zIndex: Z.START_MENU }}
       onMouseLeave={() => setOpenSubmenu(null)}
     >
       {items.map((item, idx) => {
@@ -62,13 +67,15 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
         }
 
         const itemHasSubmenu = hasSubmenu(item);
+        const itemIsLarge = item.size === "lg";
 
         return (
           <div
             key={`${depth}-${idx}-${item.label}`}
             style={{ position: "relative" }}
           >
-            <MenuListItem
+            <MenuListItem 
+              size={item.size}
               disabled={item.disabled}
               onMouseEnter={() => itemHasSubmenu && setOpenSubmenu(idx)}
               onClick={() => {
@@ -79,8 +86,9 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
                 }
               }}
             >
+              <img src={item.icon} width={itemIsLarge ? "48" : "24"}/>
               {item.label}
-              <span>{itemHasSubmenu ? " ▶" : ""}</span>
+              <span>{itemHasSubmenu ? " >" : ""}</span>
             </MenuListItem>
 
             {itemHasSubmenu && openSubmenu === idx && (
@@ -127,23 +135,27 @@ export default function StartMenu({
   const menuItems = [
     {
       label: "Programs",
+      icon: "../w95_programs.ico",
+      size: "lg",
       submenu:
         [
-          { label: "Welcome", onClick: () => pick("welcome") },
-          { label: "-Notepad-", disabled: true }
+          { label: "Welcome", icon: "../w95_desktop.ico", size: "sm", onClick: () => pick("welcome") },
+          { label: "-Notepad-", icon: "../w95_default.ico", size: "sm", disabled: true }
         ],
     },
     {
       label: "Documents",
+      size: "lg",
+      icon: "../w95_documents.ico",
       submenu:
         [
-          { label: "About", onClick: () => pick("about") },
-          { label: "-Projects-", disabled: true },
-          { label: "Contact", onClick: () => pick("contact") }
+          { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
+          { label: "-Projects-", icon: "../w95_default.ico", size: "sm", disabled: true },
+          { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
         ],
     },
     { separator: true },
-    { label: "Shut Down...", onClick: () => location.reload() },
+    { label: "Shut Down...", icon: "../w95_shutdown.ico", size: "lg", onClick: () => location.reload() },
   ] satisfies MenuItem[];
 
   // Close on outside click

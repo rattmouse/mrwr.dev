@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from 'react';
-import styled from 'styled-components';
 import StartMenu from "@/components/StartMenu";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 

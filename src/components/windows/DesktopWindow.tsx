@@ -23,7 +23,6 @@ export default function DesktopWindow({
   onToggleMaximize: () => void;
 }) {
 
-
   const title =
     id === "contact" ? "Contact" :
       id === "about" ? "About" :
