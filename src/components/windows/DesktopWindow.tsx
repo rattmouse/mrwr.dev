@@ -92,8 +92,13 @@ export default function DesktopWindow({
         </div>
       </WindowHeader>
       <WindowContent>
-
-        {id === "welcome" && <div>coming soon…</div>}
+        {id === "welcome" && 
+        <div>
+          coming soon…
+          <Anchor href='https://buymeacoffee.com/rattmouse' target='_blank'>
+            ☕
+          </Anchor>
+        </div>}
         {id === "about" &&
           <div>
             <ScrollView style={{ width: WINDOW_W - 44, height: WINDOW_H - 80}}>
@@ -143,7 +148,7 @@ export default function DesktopWindow({
               </li>
             </ul>
             <br />
-            <h1>socials:</h1>
+            <h1>social links:</h1>
             <ul>
               <li> - {' '}
               <Anchor href='https://instagram.com/ratt.mouse' target='_blank'>

@@ -44,7 +44,6 @@ type MenuLevelProps = {
  */
 function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
   const [openSubmenu, setOpenSubmenu] = useState<number | null>(null);
-  const [activeWindow, setActiveWindow] = useState<WindowId | null>("welcome");
 
   const isSeparator = (item: MenuItem): item is MenuSeparator =>
     "separator" in item;
