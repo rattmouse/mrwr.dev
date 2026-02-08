@@ -40,7 +40,7 @@ export default function DesktopWindow({
 
   const isMax = layout === "maximized";
   const isDocked = layout === "docked";
-  const isDocument = id === "contact" || id === "about";
+  const isDocument = id === "contact" || id === "about" || id == "projects";
 
   // Tune these to match your real taskbar size + desired margins
   const TASKBAR_H = 50;
@@ -140,7 +140,18 @@ export default function DesktopWindow({
             </div>
           )}
 
-          {id === "projects" && <div>github.com/rattmouse</div>}
+          {id === "projects" &&
+            <>
+              <h1>can't share most of them</h1>
+              <ul>
+                <li>
+                  - but this one is on{" "}
+                  <Anchor href="https://github.com/rattmouse/mrwr.dev" target="_blank">
+                    GitHub
+                  </Anchor>
+                </li>
+              </ul>
+            </>}
 
           {(id === "about" || id === "contact") && (
             // This wrapper is what actually controls the scroll area size
@@ -172,7 +183,7 @@ export default function DesktopWindow({
                           DigitalOcean
                         </Anchor>
                       </li>
-                                            <li>
+                      <li>
                         - some help from{" "}
                         <Anchor href="https://chatgpt.com/" target="_blank">
                           Chat GPT

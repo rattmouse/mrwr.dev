@@ -150,7 +150,7 @@ export default function StartMenu({
       submenu:
         [
           { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
-          { label: "-Projects-", icon: "../w95_default.ico", size: "sm", disabled: true },
+          { label: "Projects", icon: "../w95_default.ico", size: "sm", onClick: () => pick("projects") },
           { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
         ],
     },
