@@ -121,7 +121,7 @@ export default function StartMenu() {
       submenu: [{ label: "soon 🐀" }],
     },
     { separator: true },
-    { label: "Shut Down...", disabled: true },
+    { label: "Shut Down...", onClick={() => location.reload()} },
   ] satisfies MenuItem[];
 
   // Close on outside click
