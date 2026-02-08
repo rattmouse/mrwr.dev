@@ -90,84 +90,85 @@ export default function DesktopWindow({
           </Button>
         </div>
       </WindowHeader>
-      <WindowContent>
-        {id === "welcome" && 
-        <div>
-          coming soon…
-          <Anchor href='https://buymeacoffee.com/rattmouse' target='_blank'>
-            ☕
-          </Anchor>
-        </div>}
-        {id === "about" &&
-          <div>
-            <ScrollView style={{ width: WINDOW_W - 44, height: WINDOW_H - 80}}>
-            <h1>web app created by Matt Rouse</h1>
-            <ul>
-              <li> - ui created with {' '}
-              <Anchor href='https://react95.io/' target='_blank'>
-                react95
+      {!isDocked &&
+        <WindowContent>
+          {id === "welcome" &&
+            <div>
+              coming soon…
+              <Anchor href='https://buymeacoffee.com/rattmouse' target='_blank'>
+                ☕
               </Anchor>
-              </li>
-              <li> - built with {' '}
-              <Anchor href='https://nextjs.org/' target='_blank'>
-                Next.js
-              </Anchor> & {' '}
-              <Anchor href='https://react.dev/' target='_blank'>
-                React
-              </Anchor>
-              </li>
-              <li> - deployed on {' '}
-              <Anchor href='https://www.digitalocean.com/' target='_blank'>
-                DigitalOcean
-              </Anchor>
-              </li>
-            </ul>
-          </ScrollView>
-          </div>}
-        {id === "projects" && <div>github.com/rattmouse</div>}
-        {id === "contact" &&
-          <div>
-            <ScrollView style={{ width: WINDOW_W - 44, height: WINDOW_H - 80}}>
-            <h1>contact links:</h1>
-            <ul>
-              <li> - {' '}
-              <Anchor href='https://t.me/rattmouse' target='_blank'>
-                Telegram
-              </Anchor>
-              </li>
-              <li> - {' '}
-              <Anchor href='https://signal.me/#eu/rattmouse.113' target='_blank'>
-                Signal
-              </Anchor>
-              </li>
-              <li> - {' '}
-              <Anchor href='mailto:rattmouse@pm.me' target='_blank'>
-                rattmouse@pm.me
-              </Anchor>
-              </li>
-            </ul>
-            <br />
-            <h1>social links:</h1>
-            <ul>
-              <li> - {' '}
-              <Anchor href='https://instagram.com/ratt.mouse' target='_blank'>
-                Instagram
-              </Anchor>
-              </li>
-              <li> - {' '}
-              <Anchor href='https://www.linkedin.com/in/rattmouse/' target='_blank'>
-                LinkedIn
-              </Anchor>
-              </li>
-              <li> - {' '}
-              <Anchor href='https://discord.com/channels/@rattmouse' target='_blank'>
-                Discord
-              </Anchor>
-              </li>
-            </ul>
-            </ScrollView>
-          </div>}
-      </WindowContent>
+            </div>}
+          {id === "about" &&
+            <div>
+              <ScrollView style={{ width: WINDOW_W - 44, height: WINDOW_H - 80 }}>
+                <h1>web app created by Matt Rouse</h1>
+                <ul>
+                  <li> - ui created with {' '}
+                    <Anchor href='https://react95.io/' target='_blank'>
+                      react95
+                    </Anchor>
+                  </li>
+                  <li> - built with {' '}
+                    <Anchor href='https://nextjs.org/' target='_blank'>
+                      Next.js
+                    </Anchor> & {' '}
+                    <Anchor href='https://react.dev/' target='_blank'>
+                      React
+                    </Anchor>
+                  </li>
+                  <li> - deployed on {' '}
+                    <Anchor href='https://www.digitalocean.com/' target='_blank'>
+                      DigitalOcean
+                    </Anchor>
+                  </li>
+                </ul>
+              </ScrollView>
+            </div>}
+          {id === "projects" && <div>github.com/rattmouse</div>}
+          {id === "contact" &&
+            <div>
+              <ScrollView style={{ width: WINDOW_W - 44, height: WINDOW_H - 80 }}>
+                <h1>contact links:</h1>
+                <ul>
+                  <li> - {' '}
+                    <Anchor href='https://t.me/rattmouse' target='_blank'>
+                      Telegram
+                    </Anchor>
+                  </li>
+                  <li> - {' '}
+                    <Anchor href='https://signal.me/#eu/rattmouse.113' target='_blank'>
+                      Signal
+                    </Anchor>
+                  </li>
+                  <li> - {' '}
+                    <Anchor href='mailto:rattmouse@pm.me' target='_blank'>
+                      rattmouse@pm.me
+                    </Anchor>
+                  </li>
+                </ul>
+                <br />
+                <h1>social links:</h1>
+                <ul>
+                  <li> - {' '}
+                    <Anchor href='https://instagram.com/ratt.mouse' target='_blank'>
+                      Instagram
+                    </Anchor>
+                  </li>
+                  <li> - {' '}
+                    <Anchor href='https://www.linkedin.com/in/rattmouse/' target='_blank'>
+                      LinkedIn
+                    </Anchor>
+                  </li>
+                  <li> - {' '}
+                    <Anchor href='https://discord.com/channels/@rattmouse' target='_blank'>
+                      Discord
+                    </Anchor>
+                  </li>
+                </ul>
+              </ScrollView>
+            </div>}
+        </WindowContent>}
     </Window>
 
   );

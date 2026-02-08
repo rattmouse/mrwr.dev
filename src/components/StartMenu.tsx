@@ -58,7 +58,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 
   return (
     <MenuList
-      style={{ minWidth: 200, zIndex: Z.START_MENU }}
+      style={{ minWidth: 180, zIndex: Z.START_MENU }}
       onMouseLeave={() => setOpenSubmenu(null)}
     >
       {items.map((item, idx) => {
@@ -72,7 +72,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
         return (
           <div
             key={`${depth}-${idx}-${item.label}`}
-            style={{ position: "relative" }}
+            style={{ position: "relative"}}
           >
             <MenuListItem 
               size={item.size}
