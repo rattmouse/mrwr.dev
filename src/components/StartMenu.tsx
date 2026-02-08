@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput } from "react95";
+import { Z } from "@/constants/zIndex";
 
 /**
  * Data shape:
@@ -16,7 +17,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }) {
 
   return (
     <MenuList
-      style={{ minWidth: 140 }}
+      style={{ minWidth: 140, zIndex: Z.START_MENU }}
       onMouseLeave={() => setOpenSubmenu(null)}
     >
       {items.map((item, idx) => {
@@ -52,7 +53,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }) {
                   position: "absolute",
                   left: "100%",
                   top: 0,
-                  zIndex: 9999
+                  zIndex: Z.START_SUBMENU
                 }}
                 onMouseEnter={() => setOpenSubmenu(idx)}
               >
@@ -111,7 +112,7 @@ export default function StartMenu() {
   ];
 
   return (
-    <AppBar>
+    <AppBar style={{ zIndex: Z.TASKBAR }}>
       <Toolbar style={{ justifyContent: "space-between" }}>
         <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
           <Button
@@ -123,7 +124,7 @@ export default function StartMenu() {
           </Button>
 
           {open && (
-            <div style={{ position: "absolute", left: 0, top: "100%", zIndex: 9999 }}>
+            <div style={{ position: "absolute", left: 0, top: "100%"}}>
               <MenuLevel items={menuItems} onLeafClick={() => setOpen(false)} />
             </div>
           )}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button, Window, WindowHeader, WindowContent } from "react95";
+import { Z } from "@/constants/zIndex";
 
 export default function WelcomeWindow() {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -26,7 +27,7 @@ export default function WelcomeWindow() {
         top: pos.y,
       }}
     >
-      <Window resizable style={{ width: 280 }}>
+      <Window resizable style={{ width: 280, zIndex: Z.WINDOW }}>
         <WindowHeader style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>mrwr.dev</span>
 
