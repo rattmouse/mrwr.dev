@@ -5,13 +5,14 @@ import {
   Anchor,
   Button,
   ScrollView,
+  TextInput,
   Window,
   WindowHeader,
   WindowContent,
 } from "react95";
 import { Z } from "@/constants/zIndex";
 
-type WindowId = "welcome" | "about" | "projects" | "contact";
+type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad";
 type Layout = "normal" | "docked" | "maximized";
 
 export default function DesktopWindow({
@@ -31,12 +32,14 @@ export default function DesktopWindow({
 }) {
   const title =
     id === "contact"
-      ? "Contact"
+      ? "contact.txt"
       : id === "about"
-        ? "About"
+        ? "about.txt"
         : id === "projects"
-          ? "Projects"
-          : "mrwr.dev";
+          ? "projects.txt"
+          : id == "notepad"
+            ? "notepad.exe"
+            : "mrwr.dev";
 
   const isMax = layout === "maximized";
   const isDocked = layout === "docked";
@@ -44,7 +47,7 @@ export default function DesktopWindow({
 
   // Tune these to match your real taskbar size + desired margins
   const TASKBAR_H = 50;
-  const GAP = 16;
+  const GAP = 8;
 
   const NORMAL_W = 280;
   const NORMAL_H = isDocument ? 200 : 100;
@@ -137,6 +140,12 @@ export default function DesktopWindow({
               <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
                 ☕
               </Anchor>
+            </div>
+          )}
+
+          {id === "notepad" && (
+            <div>
+              <TextInput multiline />
             </div>
           )}
 

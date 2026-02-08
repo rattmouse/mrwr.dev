@@ -5,7 +5,7 @@ import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput }
 import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
 
-type WindowId = "welcome" | "about" | "projects" | "contact";
+type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad";
 
 type MenuAction = () => void;
 
@@ -140,7 +140,7 @@ export default function StartMenu({
       submenu:
         [
           { label: "Welcome", icon: "../w95_desktop.ico", size: "sm", onClick: () => pick("welcome") },
-          { label: "-Notepad-", icon: "../w95_default.ico", size: "sm", disabled: true }
+          { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") }
         ],
     },
     {
