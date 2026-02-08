@@ -54,37 +54,37 @@ export default function DesktopWindow({
 
   const style: React.CSSProperties = isMax
     ? {
+      position: "absolute",
+      top: TASKBAR_H + GAP,
+      left: GAP,
+      width: `calc(100vw - ${GAP * 2}px)`,
+      height: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
+      zIndex: Z.WINDOW,
+      display: "flex",
+      flexDirection: "column",
+    }
+    : isDocked
+      ? {
         position: "absolute",
-        top: TASKBAR_H + GAP,
         left: GAP,
-        width: `calc(100vw - ${GAP * 2}px)`,
-        height: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
+        bottom: GAP,
+        width: DOCK_W,
+        height: DOCK_H,
         zIndex: Z.WINDOW,
         display: "flex",
         flexDirection: "column",
       }
-    : isDocked
-      ? {
-          position: "absolute",
-          left: GAP,
-          bottom: GAP,
-          width: DOCK_W,
-          height: DOCK_H,
-          zIndex: Z.WINDOW,
-          display: "flex",
-          flexDirection: "column",
-        }
       : {
-          position: "absolute",
-          left: "50%",
-          top: `calc(50% + ${TASKBAR_H / 2}px)`,
-          transform: "translate(-50%, -50%)",
-          width: NORMAL_W,
-          height: NORMAL_H,
-          zIndex: Z.WINDOW,
-          display: "flex",
-          flexDirection: "column",
-        };
+        position: "absolute",
+        left: "50%",
+        top: `calc(50% + ${TASKBAR_H / 2}px)`,
+        transform: "translate(-50%, -50%)",
+        width: NORMAL_W,
+        height: NORMAL_H,
+        zIndex: Z.WINDOW,
+        display: "flex",
+        flexDirection: "column",
+      };
 
   return (
     <Window style={style}>
@@ -170,6 +170,12 @@ export default function DesktopWindow({
                         - deployed on{" "}
                         <Anchor href="https://www.digitalocean.com/" target="_blank">
                           DigitalOcean
+                        </Anchor>
+                      </li>
+                                            <li>
+                        - some help from{" "}
+                        <Anchor href="https://chatgpt.com/" target="_blank">
+                          Chat GPT
                         </Anchor>
                       </li>
                     </ul>
