@@ -47,10 +47,10 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
   const [activeWindow, setActiveWindow] = useState<WindowId | null>("welcome");
 
   const isSeparator = (item: MenuItem): item is MenuSeparator =>
-  "separator" in item;
+    "separator" in item;
 
   const hasSubmenu = (item: MenuItem): item is MenuParentItem =>
-  "submenu" in item && Array.isArray(item.submenu) && item.submenu.length > 0;
+    "submenu" in item && Array.isArray(item.submenu) && item.submenu.length > 0;
 
   return (
     <MenuList
@@ -110,10 +110,10 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 
 
 export default function StartMenu({
-    openWindow,
-  }: {
-    openWindow: (id: WindowId) => void;
-  }) {
+  openWindow,
+}: {
+  openWindow: (id: WindowId) => void;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
@@ -129,19 +129,19 @@ export default function StartMenu({
     {
       label: "Programs",
       submenu:
-      [
-        { label: "Welcome", onClick: () => pick("welcome")},
-        { label: "-Notepad-", disabled: true}
-      ],
+        [
+          { label: "Welcome", onClick: () => pick("welcome") },
+          { label: "-Notepad-", disabled: true }
+        ],
     },
     {
       label: "Documents",
       submenu:
-      [
-        { label: "About", onClick: () => pick("about")},
-        { label: "-Projects-", disabled: true},
-        { label: "Contact", onClick: () => pick("contact")}
-      ],
+        [
+          { label: "About", onClick: () => pick("about") },
+          { label: "-Projects-", disabled: true },
+          { label: "Contact", onClick: () => pick("contact") }
+        ],
     },
     { separator: true },
     { label: "Shut Down...", onClick: () => location.reload() },
@@ -207,7 +207,7 @@ export default function StartMenu({
           </Button>
 
           {open && (
-            <div style={{ position: "absolute", left: 0, top: "100%"}}>
+            <div style={{ position: "absolute", left: 0, top: "100%" }}>
               <MenuLevel items={menuItems} onLeafClick={() => setOpen(false)} />
             </div>
           )}
@@ -216,7 +216,7 @@ export default function StartMenu({
         <TextInput
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search..."
-          width={150}  />
+          width={150} />
       </Toolbar>
     </AppBar>
   );

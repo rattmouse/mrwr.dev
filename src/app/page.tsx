@@ -1,18 +1,6 @@
 "use client";
 
 import React, { useState } from 'react';
-import {
-  AppBar,
-  Button,
-  MenuList,
-  MenuListItem,
-  Separator,
-  TextInput,
-  Toolbar,
-  Window,
-  WindowContent,
-  WindowHeader
-} from 'react95';
 import styled from 'styled-components';
 import StartMenu from "@/components/StartMenu";
 import DesktopWindow from "@/components/windows/DesktopWindow";

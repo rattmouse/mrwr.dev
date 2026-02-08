@@ -8,10 +8,10 @@ const OUT_DIR = path.join(__dirname, ".");
 
 app.use(express.json());
 app.use(express.static(OUT_DIR, {
-    extensions: ["html"],
-    etag: true,
-    maxAge: "1h",
-  })
+  extensions: ["html"],
+  etag: true,
+  maxAge: "1h",
+})
 );
 
 // Fallback to index.html for “routes” (not real files)
