@@ -14,10 +14,12 @@ import {
   WindowHeader
 } from 'react95';
 import styled from 'styled-components';
+import StartMenu from "@/components/StartMenu";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 
 export default function Home() {
    const [open, setOpen] = useState(false);
+   const [programsOpen, setProgramsOpen] = useState(false);
 
   return (
     <main
@@ -27,49 +29,7 @@ export default function Home() {
         height: "100vh",
       }}
     >
-
-    <AppBar>
-      <Toolbar style={{ justifyContent: 'space-between' }}>
-        <div style={{ position: 'relative', display: 'inline-block' }}>
-          <Button
-            onClick={() => setOpen(!open)}
-            active={open}
-            style={{ fontWeight: 'bold' }}
-          >
-            Start
-          </Button>
-          {open && (
-            <MenuList
-              style={{
-                position: 'absolute',
-                left: '0',
-                top: '100%'
-              }}
-              onClick={() => setOpen(false)}
-            >
-              <MenuListItem
-               onClick={() => location.reload()}>
-              Ratt
-              <span role='img' aria-label='rat'>
-              🐀
-              </span>
-              </MenuListItem>
-              <MenuListItem>
-              Mouse
-              <span role='img' aria-label='mouse'>
-              🐁
-              </span>
-              </MenuListItem>
-              <Separator />
-              <MenuListItem disabled>
-                Exit
-              </MenuListItem>
-            </MenuList>
-          )}
-        </div>
-        <TextInput placeholder='Search...' width={150} />
-      </Toolbar>
-    </AppBar>
+    <StartMenu />
     <DesktopWindow />
 
     </main>
