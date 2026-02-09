@@ -1,6 +1,8 @@
 import "./globals.css";
 import StyledComponentsRegistry from "@/lib/styled-components-registry";
 import React95Providers from "@/lib/react95-providers";
+import { PowerProvider } from "@/components/power/PowerProvider";
+import PowerGate from "@/components/power/PowerGate";
 
 export default function RootLayout({
   children,
@@ -13,9 +15,12 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.ico" />
       </head>
       <body>
-        <StyledComponentsRegistry>
-          <React95Providers>{children}</React95Providers>
-        </StyledComponentsRegistry>
+        <PowerProvider>
+          <PowerGate />
+          <StyledComponentsRegistry>
+            <React95Providers>{children}</React95Providers>
+          </StyledComponentsRegistry>
+        </PowerProvider>
       </body>
     </html>
   );

@@ -50,7 +50,7 @@ export default function DesktopWindow({
   const GAP = 8;
 
   const NORMAL_W = 280;
-  const NORMAL_H = isDocument ? 200 : 400;
+  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 120 : 400;
 
   const DOCK_W = 200;
   const DOCK_H = 60;

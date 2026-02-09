@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput } from "react95";
 import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
+import { usePower } from "@/components/power/PowerProvider";
 
 type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad";
 
@@ -126,6 +127,7 @@ export default function StartMenu({
   const [query, setQuery] = useState("");
   const timerRef = useRef<number | null>(null);
   const lastSentRef = useRef<string>("");
+  const { shutdown } = usePower();
 
   const pick = (id: WindowId) => {
     openWindow(id);
@@ -155,7 +157,7 @@ export default function StartMenu({
         ],
     },
     { separator: true },
-    { label: "Shut Down...", icon: "../w95_shutdown.ico", size: "lg", onClick: () => location.reload() },
+    { label: "Shut Down...", icon: "../w95_shutdown.ico", size: "lg", onClick: () => shutdown() },
   ] satisfies MenuItem[];
 
   // Close on outside click
