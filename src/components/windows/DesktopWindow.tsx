@@ -113,7 +113,6 @@ export default function DesktopWindow({
           >
             <span className="minimize-icon" />
           </Button>
-
           <Button onClick={onToggleMaximize} square size="sm" aria-label="Maximize">
             <span className="maximize-icon" />
           </Button>

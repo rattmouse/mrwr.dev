@@ -28,7 +28,6 @@ app.post("/log-search", (req, res) => {
 
   console.log({
     query: req.body.query,
-    ip: req.ip,
     time: new Date().toISOString()
   });
   res.sendStatus(204); // No Content
