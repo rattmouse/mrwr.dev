@@ -50,7 +50,7 @@ export default function DesktopWindow({
   const GAP = 8;
 
   const NORMAL_W = 280;
-  const NORMAL_H = isDocument ? 200 : 100;
+  const NORMAL_H = isDocument ? 200 : 400;
 
   const DOCK_W = 200;
   const DOCK_H = 60;
@@ -135,17 +135,32 @@ export default function DesktopWindow({
           }}
         >
           {id === "welcome" && (
-            <div>
-              coming soon…{" "}
-              <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
-                ☕
-              </Anchor>
-            </div>
+            <>
+              <h1>coming soon...</h1>
+              <br />
+              <ul>
+                <li>
+                  - fuel me with{" "}
+                  <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
+                    ☕
+                  </Anchor>
+                </li>
+              </ul>
+            </>
           )}
 
           {id === "notepad" && (
-            <div>
-              <TextInput multiline />
+            <div style={{ flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0 }}>
+              <TextInput
+                multiline
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  boxSizing: "border-box",
+                  minWidth: 0,
+                  minHeight: 0,
+                }}
+              />
             </div>
           )}
 
