@@ -50,7 +50,7 @@ export default function DesktopWindow({
   const GAP = 8;
 
   const NORMAL_W = 280;
-  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 120 : 400;
+  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 100 : 400;
 
   const DOCK_W = 200;
   const DOCK_H = 60;
@@ -135,18 +135,12 @@ export default function DesktopWindow({
           }}
         >
           {id === "welcome" && (
-            <>
-              <h1>coming soon...</h1>
-              <br />
-              <ul>
-                <li>
-                  - fuel me with{" "}
-                  <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
-                    ☕
-                  </Anchor>
-                </li>
-              </ul>
-            </>
+            <div>
+              coming soon…buy me a{" "}
+              <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
+                ☕
+              </Anchor>
+            </div>
           )}
 
           {id === "notepad" && (
