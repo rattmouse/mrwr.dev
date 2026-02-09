@@ -60,6 +60,36 @@ function normalizeSelected(input: unknown, fallback: string): string[] {
     return [fallback];
 }
 
+function normalizeIssues(raw: unknown): Issue[] {
+    if (!Array.isArray(raw)) return [];
+
+    return raw
+        .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+        .map((x, idx) => {
+            const title =
+                typeof x.title === "string" && x.title.trim() ? x.title : `(untitled #${idx + 1})`;
+
+            const state = x.state === "CLOSED" ? "CLOSED" : "OPEN"; // default OPEN
+
+            const body = typeof x.body === "string" ? x.body : "";
+
+            const commentsRaw = Array.isArray(x.comments) ? x.comments : [];
+            const comments: IssueComment[] = commentsRaw
+                .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+                .map((c) => ({
+                    id: typeof c.id === "string" ? c.id : undefined,
+                    body: typeof c.body === "string" ? c.body : undefined,
+                    createdAt: typeof c.createdAt === "string" ? c.createdAt : undefined,
+                    author:
+                        c.author && typeof c.author === "object"
+                            ? { login: typeof (c.author as any).login === "string" ? (c.author as any).login : undefined }
+                            : undefined,
+                }));
+
+            return { title, state, body, comments };
+        });
+}
+
 function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
     const open = issues.filter((i) => i.state === "OPEN");
     const closed = issues.filter((i) => i.state === "CLOSED");
@@ -109,13 +139,13 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
     return [
         {
             id: "issues:open",
-            label: `OPEN (${open.length})`,
+            label: `[${open.length}]`,
             icon: <>⚠️</>,
             items: open.map(issueNode),
         },
         {
             id: "issues:closed",
-            label: `CLOSED (${closed.length})`,
+            label: `[${closed.length}]`,
             icon: <>✅</>,
             items: closed.map(issueNode),
         },
@@ -148,7 +178,7 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
         },
         ref
     ) {
-        const issues = issuesRaw as Issue[];
+        const issues = useMemo(() => normalizeIssues(issuesRaw as unknown), []);
         const tree = useMemo(() => buildIssuesTree(issues), [issues]);
 
         const allIds = useMemo(() => {
@@ -173,7 +203,6 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             return ids;
         }, [tree]);
 
-        // ✅ store selected as array to avoid "2 selected keys" issues
         const [selected, setSelected] = useState<string[]>([initialSelected]);
         const [expanded, setExpanded] = useState<string[]>(initialExpanded);
 
