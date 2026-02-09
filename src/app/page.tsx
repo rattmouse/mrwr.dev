@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import StartMenu from "@/components/StartMenu";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 
-type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad";
+type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad" | "issues";
 type Layout = "normal" | "docked" | "maximized";
 
 export default function Home() {

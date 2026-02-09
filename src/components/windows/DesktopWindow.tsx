@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef } from "react";
 import {
   Anchor,
   Button,
@@ -9,10 +9,12 @@ import {
   Window,
   WindowHeader,
   WindowContent,
+  Toolbar,
 } from "react95";
 import { Z } from "@/constants/zIndex";
+import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/IssuesTreeView";
 
-type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad";
+type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad" | "issues";
 type Layout = "normal" | "docked" | "maximized";
 
 export default function DesktopWindow({
@@ -39,21 +41,26 @@ export default function DesktopWindow({
           ? "projects.txt"
           : id == "notepad"
             ? "notepad.exe"
-            : "mrwr.dev";
+            : id == "issues"
+              ? "issues.exe"
+              : "mrwr.dev";
 
   const isMax = layout === "maximized";
   const isDocked = layout === "docked";
   const isDocument = id === "contact" || id === "about" || id == "projects";
+  const hasToolbar = id === "issues"
 
   // Tune these to match your real taskbar size + desired margins
   const TASKBAR_H = 50;
   const GAP = 8;
 
   const NORMAL_W = 280;
-  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 120 : 400;
+  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 120 : 300;
 
   const DOCK_W = 200;
   const DOCK_H = 60;
+
+  const treeRef = useRef<IssuesTreeViewHandle>(null);
 
   const style: React.CSSProperties = isMax
     ? {
@@ -116,13 +123,22 @@ export default function DesktopWindow({
           <Button onClick={onToggleMaximize} square size="sm" aria-label="Maximize">
             <span className="maximize-icon" />
           </Button>
-
           <Button onClick={onClose} square size="sm" aria-label="Close">
             <span className="close-icon" />
           </Button>
         </div>
       </WindowHeader>
-
+      {hasToolbar && <Toolbar style={{
+        padding: "1px 1px",
+        marginBottom: 0,
+        gap: 2,
+      }}
+      >
+        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandOpen()}>⚠️</Button>
+        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandClosed()}>✅</Button>
+        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandAll()}>➕</Button>
+        <Button variant="menu" size="sm" onClick={() => treeRef.current?.collapseAll()}>➖</Button>
+      </Toolbar>}
       {!isDocked && (
         <WindowContent
           // Key: let content be the remaining height, and allow it to shrink
@@ -131,6 +147,8 @@ export default function DesktopWindow({
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
+            padding: 6,
+            gap: 2
           }}
         >
           {id === "welcome" && (
@@ -159,6 +177,15 @@ export default function DesktopWindow({
                   minHeight: 0,
                 }}
               />
+            </div>
+          )}
+
+          {id === "issues" && (
+            <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
+
+              <ScrollView style={{ width: "100%", height: "100%" }}>
+                <IssuesTreeView ref={treeRef} showFrame={false} />
+              </ScrollView>
             </div>
           )}
 
