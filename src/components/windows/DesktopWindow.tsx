@@ -261,6 +261,16 @@ export default function DesktopWindow({
                         </Anchor>
                       </li>
                     </ul>
+                    <br />
+                    <h1>other links:</h1>
+                    <ul>
+                      <li>
+                        -{" "}
+                        <Anchor href="https://linktr.ee/ratt.mouse" target="_blank">
+                          linktr.ee
+                        </Anchor>
+                      </li>
+                    </ul>
                   </>
                 )}
               </ScrollView>
