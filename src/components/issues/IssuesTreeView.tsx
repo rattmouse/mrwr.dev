@@ -87,28 +87,37 @@ function parseSearchEntryLine(line: string): { entry: string; when: string } | n
     };
 }
 
-function renderSearchAwareLines(text: string, keyPrefix: string): React.ReactNode[] {
-    return text.split("\n").map((line, idx) => {
-        const parsed = parseSearchEntryLine(line);
-        const key = `${keyPrefix}:${idx}`;
+function renderSearchAwareLine(line: string, key: string, showBodyIcon = false): React.ReactNode {
+    const parsed = parseSearchEntryLine(line);
 
-        if (!parsed) {
-            return (
-                <span key={key} className="search-line">
-                    {line || "\u00a0"}
-                </span>
-            );
-        }
-
+    if (!parsed) {
         return (
             <span key={key} className="search-line">
-                <span style={{ color: "#2ecc71" }}>os</span>
-                {"@"}
-                <span style={{ color: "#ff69b4" }}>{SEARCH_PROMPT_HOST}</span>
-                {`: [${parsed.when}] ${parsed.entry}`}
+                {showBodyIcon && <span className="body-inline-icon">📝</span>}
+                {line || "\u00a0"}
             </span>
         );
-    });
+    }
+
+    return (
+        <span key={key} className="search-line">
+            {showBodyIcon && <span className="body-inline-icon">📝</span>}
+            <span style={{ color: "#2ecc71" }}>os</span>
+            {"@"}
+            <span style={{ color: "#ff69b4" }}>{SEARCH_PROMPT_HOST}</span>
+            {`: [${parsed.when}] ${parsed.entry}`}
+        </span>
+    );
+}
+
+function renderSearchAwareLines(text: string, keyPrefix: string): React.ReactNode[] {
+    return text.split("\n").map((line, idx) => renderSearchAwareLine(line, `${keyPrefix}:${idx}`));
+}
+
+function renderBodyLines(text: string, keyPrefix: string): React.ReactNode[] {
+    return text.split("\n").map((line, idx) =>
+        renderSearchAwareLine(line, `${keyPrefix}:${idx}`, idx === 0)
+    );
 }
 
 function collectIds(node: TreeLeaf<string>, out: string[]) {
@@ -172,11 +181,6 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
         const n = issue.number ?? idx + 1;
         const issueId = `issue:${issue.state}:${n}`;
 
-        const bodyText = issue.body ?? "";
-        const comments = (issue.comments ?? [])
-            .slice()
-            .sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
-
         return {
             id: issueId,
             label: `#${n} ${issue.title}`,
@@ -190,19 +194,17 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                         id: `${issueId}:body`,
                         label: (
                             <span className="tree-label">
-                                {renderSearchAwareLines(safeSnippet(bodyText), `${issueId}:body`)}
+                                {renderBodyLines(safeSnippet(bodyText), `${issueId}:body`)}
                             </span>
                         ) as unknown as string,
-                        icon: <>📝</>,
                     });
                 }
 
-                // State reason node only if present (unchanged behavior)
                 const reasonText = (issue.stateReason ?? "").trim();
                 if (reasonText) {
                     nodes.push({
                         id: `${issueId}:stateReason`,
-                        label: `state reason: ${reasonText}`,
+                        label: reasonText,
                         icon: <>ℹ️</>,
                     });
                 }
@@ -360,6 +362,12 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
                 white-space: pre-wrap;
                 display: block;
                 width: 100%;
+            }
+
+            .body-inline-icon {
+                display: inline-block;
+                width: 1.2em;
+                vertical-align: top;
             }
 
             li {
