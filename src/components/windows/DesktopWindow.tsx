@@ -55,7 +55,7 @@ export default function DesktopWindow({
   const GAP = 8;
 
   const NORMAL_W = 280;
-  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 120 : 300;
+  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 160 : 300;
 
   const DOCK_W = 200;
   const DOCK_H = 60;
@@ -153,13 +153,21 @@ export default function DesktopWindow({
         >
           {id === "welcome" && (
             <div>
-              coming soon…buy me a{" "}
-              <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
-                ☕
-              </Anchor>
+              coming soon…
+              <br />
+              you can help:
               <ul>
                 <li>
-                  - type bugs into search
+                  - found a bug? let me know!
+                </li>
+                <li>
+                  - type brief description in search bar
+                </li>
+                <li>
+                  - buy me a{" "}
+                  <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
+                    ☕
+                  </Anchor>
                 </li>
               </ul>
             </div>
