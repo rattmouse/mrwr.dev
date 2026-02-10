@@ -25,12 +25,13 @@ type Issue = {
     number?: number;
     title: string;
     state: IssueState;
+    stateReason?: string;
     body?: string;
     comments?: IssueComment[];
 };
 
-function safeSnippet(text: string, max = 80) {
-    const t = (text ?? "").replace(/\s+/g, " ").trim();
+function safeSnippet(text: string, max = 2800) {
+    const t = (text ?? "").trim();
     if (!t) return "(empty)";
     return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }
@@ -69,7 +70,11 @@ function normalizeIssues(raw: unknown): Issue[] {
             const title =
                 typeof x.title === "string" && x.title.trim() ? x.title : `(untitled #${idx + 1})`;
 
+            const number = typeof x.number === "number" && Number.isFinite(x.number) ? x.number : undefined;
+
             const state = x.state === "CLOSED" ? "CLOSED" : "OPEN"; // default OPEN
+
+            const stateReason = typeof x.stateReason === "string" ? x.stateReason : "";
 
             const body = typeof x.body === "string" ? x.body : "";
 
@@ -86,7 +91,7 @@ function normalizeIssues(raw: unknown): Issue[] {
                             : undefined,
                 }));
 
-            return { title, state, body, comments };
+            return { number, title, state, stateReason, body, comments };
         });
 }
 
@@ -106,14 +111,25 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
         return {
             id: issueId,
             label: `#${n} ${issue.title}`,
+            items: (() => {
+                const nodes: TreeLeaf<string>[] = [];
 
-            items: [
-                {
+                nodes.push({
                     id: `${issueId}:body`,
                     label: `${safeSnippet(bodyText)}`,
                     icon: <>📝</>,
-                },
-                {
+                });
+
+                const reasonText = (issue.stateReason ?? "").trim();
+                if (reasonText) {
+                    nodes.push({
+                        id: `${issueId}:stateReason`,
+                        label: `${reasonText}`,
+                        icon: <>ℹ️</>,
+                    });
+                }
+
+                nodes.push({
                     id: `${issueId}:comments`,
                     label: `comments (${comments.length})`,
                     icon: <>💬</>,
@@ -130,22 +146,23 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                             label: `${who}@${when}:\n${body}`,
                         } as TreeLeaf<string>;
                     }),
+                });
 
-                },
-            ],
+                return nodes;
+            })(),
         };
     };
 
     return [
         {
             id: "issues:open",
-            label: `[${open.length}]`,
+            label: `[${open.length}] OPEN`,
             icon: <>⚠️</>,
             items: open.map(issueNode),
         },
         {
             id: "issues:closed",
-            label: `[${closed.length}]`,
+            label: `[${closed.length}] CLOSED`,
             icon: <>✅</>,
             items: closed.map(issueNode),
         },
@@ -219,7 +236,6 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             [allIds, openIds, closedIds, selected, initialSelected]
         );
 
-
         const TreeContainer = styled.div`
             /* left justify */
             text-align: left;
@@ -235,7 +251,7 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             li {
                 text-align: left;
             }
-            `;
+        `;
 
         const content = (
             <div style={{ overflow: "auto", padding: 2 }}>
