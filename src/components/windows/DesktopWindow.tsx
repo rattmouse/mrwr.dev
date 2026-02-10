@@ -246,6 +246,12 @@ export default function DesktopWindow({
                           Chat GPT
                         </Anchor>
                       </li>
+                      <li>
+                        - and a lot of help from{" "}
+                        <Anchor href="https://chatgpt.com/codex/" target="_blank">
+                          Codex
+                        </Anchor>
+                      </li>
                     </ul>
                   </>
                 )}
