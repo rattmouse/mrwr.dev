@@ -112,44 +112,76 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
             id: issueId,
             label: `#${n} ${issue.title}`,
             items: (() => {
-                const nodes: TreeLeaf<string>[] = [];
+  const nodes: TreeLeaf<string>[] = [];
 
-                nodes.push({
-                    id: `${issueId}:body`,
-                    label: `${safeSnippet(bodyText)}`,
-                    icon: <>📝</>,
-                });
+  // 1) Body/description node only if there is content
+  const bodyText = (issue.body ?? "").trim();
+  if (bodyText) {
+    nodes.push({
+      id: `${issueId}:body`,
+      label: `${safeSnippet(bodyText)}`,
+      icon: <>📝</>,
+    });
+  }
 
-                const reasonText = (issue.stateReason ?? "").trim();
-                if (reasonText) {
-                    nodes.push({
-                        id: `${issueId}:stateReason`,
-                        label: `${reasonText}`,
-                        icon: <>ℹ️</>,
-                    });
-                }
+  // State reason node only if present (unchanged behavior)
+  const reasonText = (issue.stateReason ?? "").trim();
+  if (reasonText) {
+    nodes.push({
+      id: `${issueId}:stateReason`,
+      label: `state reason: ${reasonText}`,
+      icon: <>ℹ️</>,
+    });
+  }
 
-                nodes.push({
-                    id: `${issueId}:comments`,
-                    label: `comments (${comments.length})`,
-                    icon: <>💬</>,
-                    items: comments.map((c, cIdx) => {
-                        const who = c.author?.login ?? "unknown";
-                        const when = c.createdAt ? new Date(c.createdAt).toLocaleString() : "unknown time";
-                        const body = (c.body ?? "").trim() || "(empty)";
+  // Normalize/sort comments
+  const comments = (issue.comments ?? [])
+    .slice()
+    .filter((c) => (c.body ?? "").trim() || c.createdAt || c.author?.login) // optional: drop fully-empty shells
+    .sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
 
-                        const commentId = `${issueId}:comment:${cIdx}:${c.id ?? "noid"}`;
+  // Helper to format a comment label consistently
+  const formatCommentLabel = (c: IssueComment) => {
+    const who = c.author?.login ?? "unknown";
+    const when = c.createdAt ? new Date(c.createdAt).toLocaleString() : "unknown time";
+    const text = (c.body ?? "").trim() || "(empty)";
+    return `${who}@${when}:\n${text}`;
+  };
 
-                        return {
-                            id: commentId,
-                            icon: <>💬</>,
-                            label: `${who}@${when}:\n${body}`,
-                        } as TreeLeaf<string>;
-                    }),
-                });
+  // 2) No comments node if there are none
+if (comments.length === 1) {
+  const c = comments[0];
 
-                return nodes;
-            })(),
+  nodes.push({
+    id: `${issueId}:comment:0:${c.id ?? "noid"}`,
+    icon: <>💬</>,
+    label: "comment",
+    items: [
+      {
+        id: `${issueId}:comment:0:${c.id ?? "noid"}:detail`,
+        icon: <>💬</>,
+        label: formatCommentLabel(c),
+      },
+    ],
+  });
+}
+else if (comments.length > 1) {
+  nodes.push({
+    id: `${issueId}:comments`,
+    label: "comments",
+    icon: <>💬</>,
+    items: comments.map((c, cIdx) => ({
+      id: `${issueId}:comment:${cIdx}:${c.id ?? "noid"}`,
+      icon: <>💬</>,
+      label: formatCommentLabel(c),
+    })),
+  });
+}
+
+
+  return nodes;
+})(),
+
         };
     };
 
