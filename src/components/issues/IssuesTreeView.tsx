@@ -42,6 +42,75 @@ function parseTime(s?: string): number {
     return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
 }
 
+const shortDateTime = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+});
+
+function formatShortDateTime(s?: string, fallback = "unknown"): string {
+    if (!s) return fallback;
+    const t = Date.parse(s);
+    if (!Number.isFinite(t)) return fallback;
+    return shortDateTime.format(new Date(t));
+}
+
+function formatCliDateTime(s?: string, fallback = "??/?? ??:??"): string {
+    if (!s) return fallback;
+    const t = Date.parse(s);
+    if (!Number.isFinite(t)) return fallback;
+    const d = new Date(t);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}/${dd} ${hh}:${min}`;
+}
+
+const SEARCH_PROMPT_HOST = "mrwr.dev";
+
+function stripDuplicateSearchPrefix(entry: string): string {
+    const stripped = entry.replace(
+        /^\s*(?:from\s+search\s+bar(?:\s+logging)?|search(?:ed)?)\s*:?\s*/i,
+        ""
+    );
+    return stripped || entry;
+}
+
+function parseSearchEntryLine(line: string): { entry: string; when: string } | null {
+    const match = line.match(/^(.*?)(?:\s*@\s*)(\d{4}-\d{2}-\d{2}T[^ \n]+)\s*$/);
+    if (!match) return null;
+    return {
+        entry: stripDuplicateSearchPrefix(match[1].trimEnd()),
+        when: formatCliDateTime(match[2]),
+    };
+}
+
+function renderSearchAwareLines(text: string, keyPrefix: string): React.ReactNode[] {
+    return text.split("\n").map((line, idx) => {
+        const parsed = parseSearchEntryLine(line);
+        const key = `${keyPrefix}:${idx}`;
+
+        if (!parsed) {
+            return (
+                <span key={key} className="search-line">
+                    {line || "\u00a0"}
+                </span>
+            );
+        }
+
+        return (
+            <span key={key} className="search-line">
+                <span style={{ color: "#2ecc71" }}>os</span>
+                {"@"}
+                <span style={{ color: "#ff69b4" }}>{SEARCH_PROMPT_HOST}</span>
+                {`: [${parsed.when}] ${parsed.entry}`}
+            </span>
+        );
+    });
+}
+
 function collectIds(node: TreeLeaf<string>, out: string[]) {
     out.push(node.id);
     node.items?.forEach((child) => collectIds(child, out));
@@ -119,7 +188,11 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                 if (bodyText) {
                     nodes.push({
                         id: `${issueId}:body`,
-                        label: `${safeSnippet(bodyText)}`,
+                        label: (
+                            <span className="tree-label">
+                                {renderSearchAwareLines(safeSnippet(bodyText), `${issueId}:body`)}
+                            </span>
+                        ) as unknown as string,
                         icon: <>📝</>,
                     });
                 }
@@ -143,9 +216,14 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                 // Helper to format a comment label consistently
                 const formatCommentLabel = (c: IssueComment) => {
                     const who = c.author?.login ?? "unknown";
-                    const when = c.createdAt ? new Date(c.createdAt).toLocaleString() : "unknown time";
+                    const when = formatShortDateTime(c.createdAt, "unknown");
                     const text = (c.body ?? "").trim() || "(empty)";
-                    return `${who}@${when}:\n${text}`;
+                    return (
+                        <span className="tree-label">
+                            <span className="search-line">{`${who} [${when}]`}</span>
+                            {renderSearchAwareLines(text, `${who}:${when}`)}
+                        </span>
+                    ) as unknown as string;
                 };
 
                 // 2) No comments node if there are none
@@ -272,14 +350,18 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             /* left justify */
             text-align: left;
 
-            /* Most reliable: force label spans to respect \n */
-            span {
+            .tree-label {
                 text-align: left;
-                white-space: pre-line;
                 display: block;
             }
 
-            /* Some builds wrap labels differently; this helps too */
+            .search-line {
+                text-align: left;
+                white-space: pre-wrap;
+                display: block;
+                width: 100%;
+            }
+
             li {
                 text-align: left;
             }
