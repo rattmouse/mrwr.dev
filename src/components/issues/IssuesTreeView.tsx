@@ -88,25 +88,37 @@ function parseSearchEntryLine(line: string): { entry: string; when: string } | n
     };
 }
 
-function renderSearchAwareLine(line: string, key: string, showBodyIcon = false): React.ReactNode {
+function renderSearchAwareLine(
+    line: string,
+    key: string,
+    showBodyIcon = false,
+    reserveBodyIconSpace = false
+): React.ReactNode {
     const parsed = parseSearchEntryLine(line);
-
-    if (!parsed) {
-        return (
-            <span key={key} className="search-line">
-                {showBodyIcon && <span className="body-inline-icon">📝</span>}
-                {line || "\u00a0"}
-            </span>
-        );
-    }
-
-    return (
-        <span key={key} className="search-line">
-            {showBodyIcon && <span className="body-inline-icon">📝</span>}
+    const content = !parsed ? (
+        line || "\u00a0"
+    ) : (
+        <>
             <span style={{ color: "#0057d8" }}>os</span>
             {"@"}
             <span style={{ color: "#a00055" }}>{SEARCH_PROMPT_HOST}</span>
             {`: [${parsed.when}] ${parsed.entry}`}
+        </>
+    );
+
+    return (
+        <span
+            key={key}
+            className={`search-line${reserveBodyIconSpace ? " search-line-with-gutter" : ""}`}
+        >
+            {reserveBodyIconSpace ? (
+                <span className="body-inline-icon-slot" aria-hidden>
+                    {showBodyIcon ? <span className="body-inline-icon">📝</span> : null}
+                </span>
+            ) : null}
+            <span className="search-line-text">
+                {content}
+            </span>
         </span>
     );
 }
@@ -117,7 +129,7 @@ function renderSearchAwareLines(text: string, keyPrefix: string): React.ReactNod
 
 function renderBodyLines(text: string, keyPrefix: string): React.ReactNode[] {
     return text.split("\n").map((line, idx) =>
-        renderSearchAwareLine(line, `${keyPrefix}:${idx}`, idx === 0)
+        renderSearchAwareLine(line, `${keyPrefix}:${idx}`, idx === 0, true)
     );
 }
 
@@ -365,10 +377,33 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
                 width: 100%;
             }
 
-            .body-inline-icon {
-                display: inline-block;
+            .search-line-with-gutter {
+                display: flex;
+                align-items: flex-start;
+                gap: 0.2em;
+            }
+
+            .body-inline-icon-slot {
                 width: 1.2em;
-                vertical-align: top;
+                display: inline-flex;
+                justify-content: center;
+                align-items: flex-start;
+                flex: 0 0 1.2em;
+            }
+
+            .search-line-text {
+                display: block;
+                min-width: 0;
+                flex: 1 1 auto;
+            }
+
+            .body-inline-icon {
+                display: inline-flex;
+                align-items: flex-start;
+                justify-content: center;
+                width: 1.1em;
+                line-height: 1;
+                margin-left: -0.45em;
             }
 
             li {
