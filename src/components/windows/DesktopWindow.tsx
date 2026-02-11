@@ -37,6 +37,9 @@ export default function DesktopWindow({
   const NORMAL_W = 280;
   const DOCK_W = 200;
   const DOCK_H = 60;
+  const TITLE_CHAR_PX = 10;
+  const DOCK_BASE_CHROME_PX = 124; // tighter header padding + 3 control buttons
+  const dockWidth = Math.max(DOCK_W, DOCK_BASE_CHROME_PX + title.length * TITLE_CHAR_PX);
 
   const style: React.CSSProperties = isMax
     ? {
@@ -54,7 +57,7 @@ export default function DesktopWindow({
           position: "absolute",
           left: GAP,
           bottom: GAP,
-          width: DOCK_W,
+          width: dockWidth,
           height: DOCK_H,
           zIndex: Z.WINDOW,
           display: "flex",
@@ -105,7 +108,7 @@ export default function DesktopWindow({
         </div>
       </WindowHeader>
 
-      {toolbar && (
+      {toolbar && !isDocked && (
         <Toolbar
           style={{
             padding: "1px 1px",
