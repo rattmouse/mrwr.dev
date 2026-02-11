@@ -77,7 +77,13 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
             <MenuListItem 
               size={item.size}
               disabled={item.disabled}
-              onMouseEnter={() => itemHasSubmenu && setOpenSubmenu(idx)}
+              onMouseEnter={() => {
+                if (itemHasSubmenu) {
+                  setOpenSubmenu(idx);
+                  return;
+                }
+                setOpenSubmenu(null);
+              }}
               onClick={() => {
                 // Leaf click: run handler and close everything
                 if (!itemHasSubmenu && !item.disabled) {
