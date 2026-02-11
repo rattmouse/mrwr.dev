@@ -1,0 +1,346 @@
+{
+  "title": "Changelog",
+  "generatedOn": "2026-02-11T02:56:40.294Z",
+  "commitCount": 64,
+  "overview": "This update added changes.exe program window, codex credit link in about window, and support issue number and add reason fixes #9 and fixed prioritize documents in start menu (fixes #28), collapse then expand only selected issue section (closes #13, closes #11), and issue body icon/prefix alignment in issues tree (#18).",
+  "sections": {
+    "featuresAdded": [
+      {
+        "text": "Add changes.exe program window.",
+        "date": "2026-02-10 18:38",
+        "author": "rattmouse",
+        "shortHash": "2a7c456"
+      },
+      {
+        "text": "Add Codex credit link in About window.",
+        "date": "2026-02-09 23:46",
+        "author": "rattmouse",
+        "shortHash": "2507369"
+      },
+      {
+        "text": "Support issue number and add reason fixes #9.",
+        "date": "2026-02-09 19:04",
+        "author": "rattmouse",
+        "shortHash": "7ae3947"
+      },
+      {
+        "text": "Fix support issue number and add reason.",
+        "date": "2026-02-09 17:56",
+        "author": "rattmouse",
+        "shortHash": "a1d7b58"
+      },
+      {
+        "text": "Add issues program.",
+        "date": "2026-02-08 23:13",
+        "author": "rattmouse",
+        "shortHash": "d2172c5"
+      },
+      {
+        "text": "Add linktree.",
+        "date": "2026-02-08 17:46",
+        "author": "rattmouse",
+        "shortHash": "b8e58b6"
+      },
+      {
+        "text": "Add more tweaks to welcome.",
+        "date": "2026-02-08 17:14",
+        "author": "rattmouse",
+        "shortHash": "5bdd14d"
+      },
+      {
+        "text": "Add shutdown support.",
+        "date": "2026-02-08 16:56",
+        "author": "rattmouse",
+        "shortHash": "258c798"
+      },
+      {
+        "text": "Add buggy notepad.",
+        "date": "2026-02-08 15:33",
+        "author": "rattmouse",
+        "shortHash": "e1513ad"
+      },
+      {
+        "text": "Add project doc window.",
+        "date": "2026-02-08 14:50",
+        "author": "rattmouse",
+        "shortHash": "6d874ee"
+      },
+      {
+        "text": "Add icons.",
+        "date": "2026-02-08 12:24",
+        "author": "rattmouse",
+        "shortHash": "42a9983"
+      },
+      {
+        "text": "Add coffee link.",
+        "date": "2026-02-08 00:06",
+        "author": "rattmouse",
+        "shortHash": "3433115"
+      },
+      {
+        "text": "Add search logging.",
+        "date": "2026-02-07 18:15",
+        "author": "mrwr",
+        "shortHash": "2e06907"
+      },
+      {
+        "text": "Add more start menu functionality.",
+        "date": "2026-02-07 17:13",
+        "author": "mrwr",
+        "shortHash": "d42d590"
+      },
+      {
+        "text": "Adds server.",
+        "date": "2026-02-06 22:05",
+        "author": "mrwr",
+        "shortHash": "9f0ca53"
+      },
+      {
+        "text": "Actually add out dir.",
+        "date": "2026-02-06 21:42",
+        "author": "mrwr",
+        "shortHash": "771ccf7"
+      },
+      {
+        "text": "Add out dir.",
+        "date": "2026-02-06 21:38",
+        "author": "mrwr",
+        "shortHash": "3ce1edd"
+      },
+      {
+        "text": "Add index.",
+        "date": "2026-02-06 01:30",
+        "author": "mrwr",
+        "shortHash": "b1de646"
+      }
+    ],
+    "issuesFixed": [
+      {
+        "text": "Prioritize Documents in Start menu (fixes #28).",
+        "date": "2026-02-10 18:46",
+        "author": "rattmouse",
+        "shortHash": "962e410"
+      },
+      {
+        "text": "Collapse then expand only selected issue section (closes #13, closes #11).",
+        "date": "2026-02-10 18:00",
+        "author": "rattmouse",
+        "shortHash": "4669f72"
+      },
+      {
+        "text": "Fix issue body icon/prefix alignment in issues tree (#18).",
+        "date": "2026-02-10 17:52",
+        "author": "rattmouse",
+        "shortHash": "7c8793a"
+      },
+      {
+        "text": "Adjust issues prompt colors for readability (resolves #19).",
+        "date": "2026-02-10 17:33",
+        "author": "rattmouse",
+        "shortHash": "db1ff26"
+      },
+      {
+        "text": "Refactor desktop window hierarchy and fix issues tree keys.",
+        "date": "2026-02-10 16:50",
+        "author": "rattmouse",
+        "shortHash": "f55034b"
+      },
+      {
+        "text": "Align issue body icon and simplify state reason label (fixes #18, fixes #17).",
+        "date": "2026-02-09 23:40",
+        "author": "rattmouse",
+        "shortHash": "ed89de5"
+      },
+      {
+        "text": "Refine issues log timestamp rendering (fixes #14).",
+        "date": "2026-02-09 23:10",
+        "author": "rattmouse",
+        "shortHash": "d26bc9c"
+      },
+      {
+        "text": "Change when comments can expand fixes #10.",
+        "date": "2026-02-09 19:07",
+        "author": "rattmouse",
+        "shortHash": "84e60d1"
+      },
+      {
+        "text": "Small fixes.",
+        "date": "2026-02-09 00:10",
+        "author": "rattmouse",
+        "shortHash": "969640c"
+      },
+      {
+        "text": "Fix notepad and update welcome.",
+        "date": "2026-02-08 16:31",
+        "author": "rattmouse",
+        "shortHash": "201f1c0"
+      },
+      {
+        "text": "Fix content not sizing with window.",
+        "date": "2026-02-08 14:37",
+        "author": "rattmouse",
+        "shortHash": "f24de3f"
+      },
+      {
+        "text": "Remove content if docked fixes #4.",
+        "date": "2026-02-08 13:43",
+        "author": "rattmouse",
+        "shortHash": "2a99df7"
+      },
+      {
+        "text": "Fix z layering.",
+        "date": "2026-02-07 17:28",
+        "author": "mrwr",
+        "shortHash": "ad466eb"
+      },
+      {
+        "text": "Fix path for server.",
+        "date": "2026-02-06 22:43",
+        "author": "mrwr",
+        "shortHash": "e7eb101"
+      }
+    ],
+    "documentation": [
+      {
+        "text": "Update README to remove redundant link.",
+        "date": "2026-02-07 14:18",
+        "author": "rattmouse",
+        "shortHash": "6697efd"
+      },
+      {
+        "text": "Update website link in README.",
+        "date": "2026-02-07 14:15",
+        "author": "rattmouse",
+        "shortHash": "881e76e"
+      }
+    ],
+    "otherChanges": [
+      {
+        "text": "Improve docked window sizing and hide docked toolbar (closes #6).",
+        "date": "2026-02-10 18:12",
+        "author": "rattmouse",
+        "shortHash": "552a6c5"
+      },
+      {
+        "text": "Update .gitignore.",
+        "date": "2026-02-10 00:04",
+        "author": "rattmouse",
+        "shortHash": "7b2d73b"
+      },
+      {
+        "text": "Format.",
+        "date": "2026-02-09 18:23",
+        "author": "rattmouse",
+        "shortHash": "efa4b95"
+      },
+      {
+        "text": "Change when comments can expand.",
+        "date": "2026-02-09 18:23",
+        "author": "rattmouse",
+        "shortHash": "4220fd6"
+      },
+      {
+        "text": "Small tweak to welcome.",
+        "date": "2026-02-09 17:25",
+        "author": "mrwr",
+        "shortHash": "6596043"
+      },
+      {
+        "text": "Remove ip logging on search.",
+        "date": "2026-02-08 18:12",
+        "author": "rattmouse",
+        "shortHash": "56d1c6e"
+      },
+      {
+        "text": "Update to welcome.",
+        "date": "2026-02-08 17:09",
+        "author": "rattmouse",
+        "shortHash": "ffd01f4"
+      },
+      {
+        "text": "Update about and contact.",
+        "date": "2026-02-07 23:40",
+        "author": "rattmouse",
+        "shortHash": "9277371"
+      },
+      {
+        "text": "Ignore package-lock.",
+        "date": "2026-02-07 22:26",
+        "author": "rattmouse",
+        "shortHash": "2ef06d9"
+      },
+      {
+        "text": "Window functionality.",
+        "date": "2026-02-07 20:33",
+        "author": "mrwr",
+        "shortHash": "05291e1"
+      },
+      {
+        "text": "Not sure.",
+        "date": "2026-02-07 18:22",
+        "author": "mrwr",
+        "shortHash": "cb4384d"
+      },
+      {
+        "text": "Now ignore it.",
+        "date": "2026-02-07 14:08",
+        "author": "rattmouse",
+        "shortHash": "83efda7"
+      },
+      {
+        "text": "Remove out dir.",
+        "date": "2026-02-07 14:08",
+        "author": "rattmouse",
+        "shortHash": "7c62de0"
+      },
+      {
+        "text": "Rebuild.",
+        "date": "2026-02-06 22:44",
+        "author": "mrwr",
+        "shortHash": "bccaba2"
+      },
+      {
+        "text": "Running build.",
+        "date": "2026-02-06 21:12",
+        "author": "mrwr",
+        "shortHash": "805a7b6"
+      },
+      {
+        "text": "Remove digital ocean app platform stuff.",
+        "date": "2026-02-06 20:56",
+        "author": "mrwr",
+        "shortHash": "755b1f8"
+      },
+      {
+        "text": "Only one package manager lock file.",
+        "date": "2026-02-06 20:34",
+        "author": "mrwr",
+        "shortHash": "14a17c9"
+      },
+      {
+        "text": "Deploy digital ocean stuff.",
+        "date": "2026-02-06 20:27",
+        "author": "mrwr",
+        "shortHash": "c7f6124"
+      },
+      {
+        "text": "Built nextjs app with react95.",
+        "date": "2026-02-06 15:58",
+        "author": "mrwr",
+        "shortHash": "a485eeb"
+      },
+      {
+        "text": "First commit.",
+        "date": "2026-02-06 01:19",
+        "author": "mrwr",
+        "shortHash": "8bf9cae"
+      },
+      {
+        "text": "Initial commit.",
+        "date": "2026-02-06 00:19",
+        "author": "rattmouse",
+        "shortHash": "5010ed4"
+      }
+    ]
+  }
+}

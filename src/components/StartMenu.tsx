@@ -141,6 +141,17 @@ export default function StartMenu({
 
   const menuItems = [
     {
+      label: "Documents",
+      size: "lg",
+      icon: "../w95_documents.ico",
+      submenu:
+        [
+          { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
+          { label: "Projects", icon: "../w95_default.ico", size: "sm", onClick: () => pick("projects") },
+          { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
+        ],
+    },
+    {
       label: "Programs",
       icon: "../w95_programs.ico",
       size: "lg",
@@ -150,17 +161,6 @@ export default function StartMenu({
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
           { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") }
-        ],
-    },
-    {
-      label: "Documents",
-      size: "lg",
-      icon: "../w95_documents.ico",
-      submenu:
-        [
-          { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
-          { label: "Projects", icon: "../w95_default.ico", size: "sm", onClick: () => pick("projects") },
-          { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
         ],
     },
     { separator: true },

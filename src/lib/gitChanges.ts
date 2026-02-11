@@ -1,41 +1,56 @@
-import { execSync } from "node:child_process";
 import type { GitChangeEntry, GitChangeType } from "@/lib/gitChanges.types";
+import changelogs from "@/data/changelogs.json";
 
-function detectType(subject: string): GitChangeType {
-  const conventional = /^([a-z]+)(\(.+\))?!?:/i.exec(subject);
-  const normalized = conventional?.[1]?.toLowerCase();
+type ChangelogItem = {
+  text?: string;
+  date?: string;
+  author?: string;
+  shortHash?: string;
+};
 
-  if (normalized === "feat") return "feat";
-  if (normalized === "fix") return "fix";
-  if (normalized === "docs") return "docs";
-  if (normalized === "chore") return "chore";
-  return "other";
+type ChangelogPayload = {
+  sections?: {
+    featuresAdded?: ChangelogItem[];
+    issuesFixed?: ChangelogItem[];
+    documentation?: ChangelogItem[];
+    otherChanges?: ChangelogItem[];
+  };
+};
+
+function fromSection(items: ChangelogItem[] | undefined, type: GitChangeType): GitChangeEntry[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((entry) => {
+      const subject = entry.text?.trim() ?? "";
+      const shortHash = entry.shortHash?.trim() ?? "";
+      const date = entry.date?.trim() ?? "";
+      const author = entry.author?.trim() || "unknown";
+
+      if (!subject || !shortHash || !date) return null;
+
+      return {
+        hash: shortHash,
+        shortHash,
+        date,
+        author,
+        subject,
+        type,
+      } satisfies GitChangeEntry;
+    })
+    .filter((entry): entry is GitChangeEntry => entry !== null);
 }
 
-export function getGitChanges(limit = 100): GitChangeEntry[] {
-  try {
-    const raw = execSync(
-      `git log -n ${limit} --date=format:'%Y-%m-%d %H:%M' --pretty=format:'%H%x1f%h%x1f%ad%x1f%an%x1f%s%x1e'`,
-      { encoding: "utf8" },
-    );
+export function getGitChanges(limit = 0): GitChangeEntry[] {
+  const payload = changelogs as ChangelogPayload;
+  const sections = payload.sections ?? {};
+  const all = [
+    ...fromSection(sections.featuresAdded, "features"),
+    ...fromSection(sections.issuesFixed, "fixes"),
+    ...fromSection(sections.documentation, "docs"),
+    ...fromSection(sections.otherChanges, "other"),
+  ];
 
-    return raw
-      .split("\x1e")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [hash, shortHash, date, author, subject] = line.split("\x1f");
-        return {
-          hash,
-          shortHash,
-          date,
-          author,
-          subject,
-          type: detectType(subject),
-        };
-      })
-      .filter((entry) => entry.hash && entry.shortHash && entry.date && entry.subject);
-  } catch {
-    return [];
-  }
+  if (limit > 0) return all.slice(0, limit);
+  return all;
 }

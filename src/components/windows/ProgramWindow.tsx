@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   Anchor,
   Button,
@@ -38,6 +38,8 @@ export default function ProgramWindow({
   onToggleMaximize,
 }: ProgramWindowProps) {
   const treeRef = useRef<IssuesTreeViewHandle>(null);
+  const [sortColumn, setSortColumn] = useState<"date" | "author" | "type" | "subject" | "hash">("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const title =
     id === "notepad"
@@ -68,7 +70,31 @@ export default function ProgramWindow({
       </>
     ) : undefined;
 
-  const visibleChanges = gitChanges;
+  const visibleChanges = useMemo(() => {
+    const collator = new Intl.Collator(undefined, { sensitivity: "base" });
+    const sorted = [...gitChanges].sort((a, b) => {
+      if (sortColumn === "date") return a.date.localeCompare(b.date);
+      if (sortColumn === "author") return collator.compare(a.author, b.author);
+      if (sortColumn === "type") return collator.compare(a.type, b.type);
+      if (sortColumn === "subject") return collator.compare(a.subject, b.subject);
+      return collator.compare(a.shortHash, b.shortHash);
+    });
+
+    return sortDirection === "desc" ? sorted.reverse() : sorted;
+  }, [gitChanges, sortColumn, sortDirection]);
+
+  const handleSort = (column: "date" | "author" | "type" | "subject" | "hash") => {
+    if (column === sortColumn) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSortColumn(column);
+    setSortDirection(column === "date" ? "desc" : "asc");
+  };
+
+  const sortState = (column: "date" | "author" | "type" | "subject" | "hash") =>
+    sortColumn === column ? sortDirection : null;
 
   return (
     <DesktopWindow
@@ -131,14 +157,39 @@ export default function ProgramWindow({
                 <Table style={{ width: "100%", fontSize: 11 }}>
                   <TableHead>
                     <TableRow>
-                      <TableHeadCell style={{ width: 130, textAlign: "center", whiteSpace: "nowrap" }}>
+                      <TableHeadCell
+                        onClick={() => handleSort("date")}
+                        sort={sortState("date")}
+                        style={{ width: 130, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
+                      >
                         Date
                       </TableHeadCell>
-                      <TableHeadCell style={{ width: 120, textAlign: "center", whiteSpace: "nowrap" }}>
+                      <TableHeadCell
+                        onClick={() => handleSort("author")}
+                        sort={sortState("author")}
+                        style={{ width: 120, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
+                      >
                         Author
                       </TableHeadCell>
-                      <TableHeadCell style={{ whiteSpace: "nowrap" }}>Subject</TableHeadCell>
-                      <TableHeadCell style={{ width: 72, textAlign: "center", whiteSpace: "nowrap" }}>
+                      <TableHeadCell
+                        onClick={() => handleSort("type")}
+                        sort={sortState("type")}
+                        style={{ width: 82, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
+                      >
+                        Type
+                      </TableHeadCell>
+                      <TableHeadCell
+                        onClick={() => handleSort("subject")}
+                        sort={sortState("subject")}
+                        style={{ whiteSpace: "nowrap", cursor: "pointer" }}
+                      >
+                        Subject
+                      </TableHeadCell>
+                      <TableHeadCell
+                        onClick={() => handleSort("hash")}
+                        sort={sortState("hash")}
+                        style={{ width: 72, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
+                      >
                         Hash
                       </TableHeadCell>
                     </TableRow>
@@ -151,6 +202,9 @@ export default function ProgramWindow({
                         </TableDataCell>
                         <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                           {entry.author}
+                        </TableDataCell>
+                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                          {entry.type}
                         </TableDataCell>
                         <TableDataCell style={{ whiteSpace: "nowrap" }}>{entry.subject}</TableDataCell>
                         <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>

@@ -1,4 +1,4 @@
-export type GitChangeType = "feat" | "fix" | "docs" | "chore" | "other";
+export type GitChangeType = "features" | "fixes" | "docs" | "other";
 
 export type GitChangeEntry = {
   hash: string;
