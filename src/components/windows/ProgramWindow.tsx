@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Anchor,
   Button,
@@ -37,6 +37,7 @@ export default function ProgramWindow({
   const changesTreeRef = useRef<ChangesTreeViewHandle>(null);
   const strudelRef = useRef<StrudelReplHandle>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
+  const [strudelLevel, setStrudelLevel] = useState(0);
 
   const title =
     id === "notepad"
@@ -45,12 +46,13 @@ export default function ProgramWindow({
         ? "issues.exe"
         : id === "changes"
           ? "changes.exe"
-          : id === "osci"
+          : id === "music"
             ? "strudel.cc"
         : "mrwr.dev";
 
-  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "osci" ? 220 : 300;
+  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : 300;
   const normalWidth = id === "changes" ? 320 : undefined;
+  const musicFrameEffect = id === "music" ? Math.min(1, (strudelPlaying ? 0.12 : 0) + strudelLevel * 0.8) : 0;
 
   const toolbar =
     id === "issues" ? (
@@ -89,7 +91,7 @@ export default function ProgramWindow({
           ➖
         </Button>
       </>
-    ) : id === "osci" ? (
+    ) : id === "music" ? (
       <>
         <Button
           variant="menu"
@@ -138,6 +140,7 @@ export default function ProgramWindow({
       layout={layout}
       normalWidth={normalWidth}
       normalHeight={normalHeight}
+      effectOutline={musicFrameEffect}
       onClose={onClose}
       onMinimize={onMinimize}
       onRestore={onRestore}
@@ -145,20 +148,29 @@ export default function ProgramWindow({
       toolbar={toolbar}
     >
       {id === "welcome" && (
-        <div>
-          coming soon…
-          <br />
-          you can help:
-          <ul>
-            <li>- found a bug? let me know!</li>
-            <li>- type brief description in search bar</li>
-            <li>
-              - buy me a{" "}
-              <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
-                ☕
-              </Anchor>
-            </li>
-          </ul>
+        <div
+          style={{
+            flex: "1 1 auto",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "stretch",
+          }}
+        >
+          <div style={{ textAlign: "center" }}>coming soon…</div>
+          <div style={{ textAlign: "left", marginTop: 6 }}>
+            you can help:
+            <ul>
+              <li>- found a bug? let me know!</li>
+              <li>- type brief description in search bar</li>
+              <li>
+                - buy me a{" "}
+                <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
+                  ☕
+                </Anchor>
+              </li>
+            </ul>
+          </div>
         </div>
       )}
 
@@ -193,7 +205,13 @@ export default function ProgramWindow({
         </div>
       )}
 
-      {id === "osci" && <StrudelReplWindow ref={strudelRef} onPlayingChange={setStrudelPlaying} />}
+      {id === "music" && (
+        <StrudelReplWindow
+          ref={strudelRef}
+          onPlayingChange={setStrudelPlaying}
+          onLevelChange={setStrudelLevel}
+        />
+      )}
     </DesktopWindow>
   );
 }

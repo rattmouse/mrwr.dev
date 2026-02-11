@@ -10,6 +10,8 @@ type DesktopWindowProps = {
   layout: Layout;
   normalWidth?: number;
   normalHeight: number;
+  normalPosition?: "center" | "topRightQuadrantCenter";
+  effectOutline?: number;
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
@@ -23,6 +25,8 @@ export default function DesktopWindow({
   layout,
   normalWidth = 280,
   normalHeight,
+  normalPosition = "center",
+  effectOutline = 0,
   onClose,
   onMinimize,
   onRestore,
@@ -42,6 +46,13 @@ export default function DesktopWindow({
   const TITLE_CHAR_PX = 10;
   const DOCK_BASE_CHROME_PX = 124; // tighter header padding + 3 control buttons
   const dockWidth = Math.max(DOCK_W, DOCK_BASE_CHROME_PX + title.length * TITLE_CHAR_PX);
+  const normalLeft = normalPosition === "topRightQuadrantCenter" ? "75vw" : "50%";
+  const normalTop = normalPosition === "topRightQuadrantCenter" ? `calc(25vh + ${TASKBAR_H / 2}px)` : `calc(50% + ${TASKBAR_H / 2}px)`;
+  const outline = Math.max(0, Math.min(1, effectOutline));
+  const frameShadow =
+    outline > 0
+      ? `0 0 ${5 + 12 * outline}px rgba(0, 255, 186, ${0.2 + 0.28 * outline}), 0 0 0 1px rgba(0, 255, 186, ${0.25 + 0.5 * outline})`
+      : undefined;
 
   const style: React.CSSProperties = isMax
     ? {
@@ -53,6 +64,7 @@ export default function DesktopWindow({
         zIndex: Z.WINDOW,
         display: "flex",
         flexDirection: "column",
+        boxShadow: frameShadow,
       }
     : isDocked
       ? {
@@ -64,17 +76,19 @@ export default function DesktopWindow({
           zIndex: Z.WINDOW,
           display: "flex",
           flexDirection: "column",
+          boxShadow: frameShadow,
         }
       : {
           position: "absolute",
-          left: "50%",
-          top: `calc(50% + ${TASKBAR_H / 2}px)`,
+          left: normalLeft,
+          top: normalTop,
           transform: "translate(-50%, -50%)",
           width: NORMAL_W,
           height: normalHeight,
           zIndex: Z.WINDOW,
           display: "flex",
           flexDirection: "column",
+          boxShadow: frameShadow,
         };
 
   return (
