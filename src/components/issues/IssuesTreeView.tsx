@@ -103,9 +103,9 @@ function renderSearchAwareLine(line: string, key: string, showBodyIcon = false):
     return (
         <span key={key} className="search-line">
             {showBodyIcon && <span className="body-inline-icon">📝</span>}
-            <span style={{ color: "#2ecc71" }}>os</span>
+            <span style={{ color: "#0057d8" }}>os</span>
             {"@"}
-            <span style={{ color: "#ff69b4" }}>{SEARCH_PROMPT_HOST}</span>
+            <span style={{ color: "#a00055" }}>{SEARCH_PROMPT_HOST}</span>
             {`: [${parsed.when}] ${parsed.entry}`}
         </span>
     );
