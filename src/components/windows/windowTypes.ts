@@ -1,12 +1,12 @@
-export type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad" | "issues";
+export type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad" | "issues" | "changes";
 
-export type ProgramWindowId = "welcome" | "notepad" | "issues";
+export type ProgramWindowId = "welcome" | "notepad" | "issues" | "changes";
 export type DocumentWindowId = "about" | "projects" | "contact";
 
 export type Layout = "normal" | "docked" | "maximized";
 
 export function isProgramWindow(id: WindowId): id is ProgramWindowId {
-  return id === "welcome" || id === "notepad" || id === "issues";
+  return id === "welcome" || id === "notepad" || id === "issues" || id === "changes";
 }
 
 export function isDocumentWindow(id: WindowId): id is DocumentWindowId {
