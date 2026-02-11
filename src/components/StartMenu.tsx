@@ -49,6 +49,7 @@ type MenuLevelProps = {
  */
 function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
   const [openSubmenu, setOpenSubmenu] = useState<number | null>(null);
+  const menuWidth = depth === 0 ? 200 : 160;
 
   const isSeparator = (item: MenuItem): item is MenuSeparator =>
     "separator" in item;
@@ -58,7 +59,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 
   return (
     <MenuList
-      style={{ minWidth: 180, zIndex: Z.START_MENU }}
+      style={{ minWidth: menuWidth, zIndex: Z.START_MENU }}
       onMouseLeave={() => setOpenSubmenu(null)}
     >
       {items.map((item, idx) => {
@@ -92,9 +93,37 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
                 }
               }}
             >
-              <img src={item.icon} width={itemIsLarge ? "48" : "24"}/>
-              {item.label}
-              <span>{itemHasSubmenu ? " >" : ""}</span>
+              <span
+                style={{
+                  width: itemIsLarge ? 48 : 24,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flex: "0 0 auto",
+                }}
+              >
+                <img src={item.icon} width={itemIsLarge ? "48" : "24"} />
+              </span>
+              <span style={{ marginLeft: 6, flex: "1 1 auto", textAlign: "left" }}>
+                {item.label}
+              </span>
+              <span
+                aria-hidden
+                style={{
+                  width: 12,
+                  marginLeft: 6,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flex: "0 0 12px",
+                }}
+              >
+                {itemHasSubmenu ? (
+                  <svg width="8" height="8" viewBox="0 0 8 8" role="presentation">
+                    <path d="M2 1l4 3-4 3z" fill="currentColor" />
+                  </svg>
+                ) : null}
+              </span>
             </MenuListItem>
 
             {itemHasSubmenu && openSubmenu === idx && (
@@ -139,6 +168,10 @@ export default function StartMenu({
     setOpen(false);
   };
 
+  const handleShutdown = () => {
+    shutdown({ refreshOnBootClick: true });
+  };
+
   const menuItems = [
     {
       label: "Documents",
@@ -160,11 +193,12 @@ export default function StartMenu({
           { label: "Welcome", icon: "../w95_desktop.ico", size: "sm", onClick: () => pick("welcome") },
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
-          { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") }
+          { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
+          { label: "Music", icon: "../w95_music.ico", size: "sm", onClick: () => pick("osci") }
         ],
     },
     { separator: true },
-    { label: "Shut Down...", icon: "../w95_shutdown.ico", size: "lg", onClick: () => shutdown() },
+    { label: "Shut Down...", icon: "../w95_shutdown.ico", size: "lg", onClick: handleShutdown },
   ] satisfies MenuItem[];
 
   // Close on outside click

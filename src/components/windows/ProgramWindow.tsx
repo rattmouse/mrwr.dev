@@ -5,16 +5,12 @@ import {
   Anchor,
   Button,
   ScrollView,
-  Table,
-  TableBody,
-  TableDataCell,
-  TableHead,
-  TableHeadCell,
-  TableRow,
   TextInput,
 } from "react95";
 import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/IssuesTreeView";
+import ChangesTreeView, { ChangesTreeViewHandle } from "@/components/changes/ChangesTreeView";
 import DesktopWindow from "@/components/windows/DesktopWindow";
+import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { GitChangeEntry } from "@/lib/gitChanges.types";
 
@@ -37,9 +33,10 @@ export default function ProgramWindow({
   onRestore,
   onToggleMaximize,
 }: ProgramWindowProps) {
-  const treeRef = useRef<IssuesTreeViewHandle>(null);
-  const [sortColumn, setSortColumn] = useState<"date" | "author" | "type" | "subject" | "hash">("date");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const issuesTreeRef = useRef<IssuesTreeViewHandle>(null);
+  const changesTreeRef = useRef<ChangesTreeViewHandle>(null);
+  const strudelRef = useRef<StrudelReplHandle>(null);
+  const [strudelPlaying, setStrudelPlaying] = useState(false);
 
   const title =
     id === "notepad"
@@ -48,58 +45,98 @@ export default function ProgramWindow({
         ? "issues.exe"
         : id === "changes"
           ? "changes.exe"
+          : id === "osci"
+            ? "strudel.cc"
         : "mrwr.dev";
 
-  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : 300;
+  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "osci" ? 220 : 300;
+  const normalWidth = id === "changes" ? 320 : undefined;
 
   const toolbar =
     id === "issues" ? (
       <>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandOpen()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandOpen()}>
           ⚠️
         </Button>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandClosed()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandClosed()}>
           ✅
         </Button>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandAll()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandAll()}>
           ➕
         </Button>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.collapseAll()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.collapseAll()}>
           ➖
         </Button>
       </>
+    ) : id === "changes" ? (
+      <>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFeatures()}>
+          ✨
+        </Button>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFixes()}>
+          🛠️
+        </Button>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandDocs()}>
+          📝
+        </Button>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandOther()}>
+          📦
+        </Button>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandAll()}>
+          ➕
+        </Button>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.collapseAll()}>
+          ➖
+        </Button>
+      </>
+    ) : id === "osci" ? (
+      <>
+        <Button
+          variant="menu"
+          size="sm"
+          active={strudelPlaying}
+          aria-label="Play"
+          title="Play"
+          onClick={() => void strudelRef.current?.play()}
+        >
+          Play
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          active={!strudelPlaying}
+          aria-label="Stop"
+          title="Stop"
+          onClick={() => void strudelRef.current?.stop()}
+        >
+          Stop
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          aria-label="Update"
+          title="Update"
+          onClick={() => void strudelRef.current?.update()}
+        >
+          Update
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          aria-label="Help"
+          title="Help"
+          onClick={() => window.open("https://strudel.cc/workshop/getting-started/", "_blank", "noopener,noreferrer")}
+        >
+          Help
+        </Button>
+      </>
     ) : undefined;
-
-  const visibleChanges = useMemo(() => {
-    const collator = new Intl.Collator(undefined, { sensitivity: "base" });
-    const sorted = [...gitChanges].sort((a, b) => {
-      if (sortColumn === "date") return a.date.localeCompare(b.date);
-      if (sortColumn === "author") return collator.compare(a.author, b.author);
-      if (sortColumn === "type") return collator.compare(a.type, b.type);
-      if (sortColumn === "subject") return collator.compare(a.subject, b.subject);
-      return collator.compare(a.shortHash, b.shortHash);
-    });
-
-    return sortDirection === "desc" ? sorted.reverse() : sorted;
-  }, [gitChanges, sortColumn, sortDirection]);
-
-  const handleSort = (column: "date" | "author" | "type" | "subject" | "hash") => {
-    if (column === sortColumn) {
-      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setSortColumn(column);
-    setSortDirection(column === "date" ? "desc" : "asc");
-  };
-
-  const sortState = (column: "date" | "author" | "type" | "subject" | "hash") =>
-    sortColumn === column ? sortDirection : null;
 
   return (
     <DesktopWindow
       title={title}
       layout={layout}
+      normalWidth={normalWidth}
       normalHeight={normalHeight}
       onClose={onClose}
       onMinimize={onMinimize}
@@ -143,82 +180,20 @@ export default function ProgramWindow({
       {id === "issues" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
           <ScrollView style={{ width: "100%", height: "100%" }}>
-            <IssuesTreeView ref={treeRef} showFrame={false} />
+            <IssuesTreeView ref={issuesTreeRef} showFrame={false} />
           </ScrollView>
         </div>
       )}
 
       {id === "changes" && (
-        <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, gap: 6 }}>
-          <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-            <ScrollView style={{ width: "100%", height: "100%" }}>
-              {visibleChanges.length === 0 && <div style={{ fontSize: 11 }}>No matching commits.</div>}
-              {visibleChanges.length > 0 && (
-                <Table style={{ width: "100%", fontSize: 11 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableHeadCell
-                        onClick={() => handleSort("date")}
-                        sort={sortState("date")}
-                        style={{ width: 130, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
-                      >
-                        Date
-                      </TableHeadCell>
-                      <TableHeadCell
-                        onClick={() => handleSort("author")}
-                        sort={sortState("author")}
-                        style={{ width: 120, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
-                      >
-                        Author
-                      </TableHeadCell>
-                      <TableHeadCell
-                        onClick={() => handleSort("type")}
-                        sort={sortState("type")}
-                        style={{ width: 82, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
-                      >
-                        Type
-                      </TableHeadCell>
-                      <TableHeadCell
-                        onClick={() => handleSort("subject")}
-                        sort={sortState("subject")}
-                        style={{ whiteSpace: "nowrap", cursor: "pointer" }}
-                      >
-                        Subject
-                      </TableHeadCell>
-                      <TableHeadCell
-                        onClick={() => handleSort("hash")}
-                        sort={sortState("hash")}
-                        style={{ width: 72, textAlign: "center", whiteSpace: "nowrap", cursor: "pointer" }}
-                      >
-                        Hash
-                      </TableHeadCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {visibleChanges.map((entry) => (
-                      <TableRow key={entry.hash}>
-                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                          {entry.date}
-                        </TableDataCell>
-                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                          {entry.author}
-                        </TableDataCell>
-                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                          {entry.type}
-                        </TableDataCell>
-                        <TableDataCell style={{ whiteSpace: "nowrap" }}>{entry.subject}</TableDataCell>
-                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                          {entry.shortHash}
-                        </TableDataCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </ScrollView>
-          </div>
+        <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
+          <ScrollView style={{ width: "100%", height: "100%" }}>
+            <ChangesTreeView ref={changesTreeRef} entries={gitChanges} showFrame={false} />
+          </ScrollView>
         </div>
       )}
+
+      {id === "osci" && <StrudelReplWindow ref={strudelRef} onPlayingChange={setStrudelPlaying} />}
     </DesktopWindow>
   );
 }
