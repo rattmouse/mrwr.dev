@@ -5,8 +5,7 @@ import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput }
 import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
 import { usePower } from "@/components/power/PowerProvider";
-
-type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad" | "issues";
+import { WindowId } from "@/components/windows/windowTypes";
 
 type MenuAction = () => void;
 

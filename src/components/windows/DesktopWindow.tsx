@@ -1,100 +1,76 @@
 "use client";
 
-import React, { useRef } from "react";
-import {
-  Anchor,
-  Button,
-  ScrollView,
-  TextInput,
-  Window,
-  WindowHeader,
-  WindowContent,
-  Toolbar,
-} from "react95";
+import React from "react";
+import { Button, Toolbar, Window, WindowContent, WindowHeader } from "react95";
 import { Z } from "@/constants/zIndex";
-import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/IssuesTreeView";
+import { Layout } from "@/components/windows/windowTypes";
 
-type WindowId = "welcome" | "about" | "projects" | "contact" | "notepad" | "issues";
-type Layout = "normal" | "docked" | "maximized";
-
-export default function DesktopWindow({
-  id,
-  layout,
-  onClose,
-  onMinimize,
-  onRestore,
-  onToggleMaximize,
-}: {
-  id: WindowId;
+type DesktopWindowProps = {
+  title: string;
   layout: Layout;
+  normalHeight: number;
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
   onToggleMaximize: () => void;
-}) {
-  const title =
-    id === "contact"
-      ? "contact.txt"
-      : id === "about"
-        ? "about.txt"
-        : id === "projects"
-          ? "projects.txt"
-          : id == "notepad"
-            ? "notepad.exe"
-            : id == "issues"
-              ? "issues.exe"
-              : "mrwr.dev";
+  toolbar?: React.ReactNode;
+  children: React.ReactNode;
+};
 
+export default function DesktopWindow({
+  title,
+  layout,
+  normalHeight,
+  onClose,
+  onMinimize,
+  onRestore,
+  onToggleMaximize,
+  toolbar,
+  children,
+}: DesktopWindowProps) {
   const isMax = layout === "maximized";
   const isDocked = layout === "docked";
-  const isDocument = id === "contact" || id === "about" || id == "projects";
-  const hasToolbar = id === "issues"
 
-  // Tune these to match your real taskbar size + desired margins
   const TASKBAR_H = 50;
   const GAP = 8;
 
   const NORMAL_W = 280;
-  const NORMAL_H = isDocument ? 200 : id === "welcome" ? 160 : 300;
-
   const DOCK_W = 200;
   const DOCK_H = 60;
 
-  const treeRef = useRef<IssuesTreeViewHandle>(null);
-
   const style: React.CSSProperties = isMax
     ? {
-      position: "absolute",
-      top: TASKBAR_H + GAP,
-      left: GAP,
-      width: `calc(100vw - ${GAP * 2}px)`,
-      height: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
-      zIndex: Z.WINDOW,
-      display: "flex",
-      flexDirection: "column",
-    }
-    : isDocked
-      ? {
         position: "absolute",
+        top: TASKBAR_H + GAP,
         left: GAP,
-        bottom: GAP,
-        width: DOCK_W,
-        height: DOCK_H,
+        width: `calc(100vw - ${GAP * 2}px)`,
+        height: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
         zIndex: Z.WINDOW,
         display: "flex",
         flexDirection: "column",
       }
+    : isDocked
+      ? {
+          position: "absolute",
+          left: GAP,
+          bottom: GAP,
+          width: DOCK_W,
+          height: DOCK_H,
+          zIndex: Z.WINDOW,
+          display: "flex",
+          flexDirection: "column",
+        }
       : {
-        position: "absolute",
-        left: "50%",
-        top: `calc(50% + ${TASKBAR_H / 2}px)`,
-        transform: "translate(-50%, -50%)",
-        width: NORMAL_W,
-        height: NORMAL_H,
-        zIndex: Z.WINDOW,
-        display: "flex",
-        flexDirection: "column",
-      };
+          position: "absolute",
+          left: "50%",
+          top: `calc(50% + ${TASKBAR_H / 2}px)`,
+          transform: "translate(-50%, -50%)",
+          width: NORMAL_W,
+          height: normalHeight,
+          zIndex: Z.WINDOW,
+          display: "flex",
+          flexDirection: "column",
+        };
 
   return (
     <Window style={style}>
@@ -128,194 +104,31 @@ export default function DesktopWindow({
           </Button>
         </div>
       </WindowHeader>
-      {hasToolbar && <Toolbar style={{
-        padding: "1px 1px",
-        marginBottom: 0,
-        gap: 2,
-      }}
-      >
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandOpen()}>⚠️</Button>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandClosed()}>✅</Button>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.expandAll()}>➕</Button>
-        <Button variant="menu" size="sm" onClick={() => treeRef.current?.collapseAll()}>➖</Button>
-      </Toolbar>}
+
+      {toolbar && (
+        <Toolbar
+          style={{
+            padding: "1px 1px",
+            marginBottom: 0,
+            gap: 2,
+          }}
+        >
+          {toolbar}
+        </Toolbar>
+      )}
+
       {!isDocked && (
         <WindowContent
-          // Key: let content be the remaining height, and allow it to shrink
           style={{
             flex: "1 1 auto",
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
             padding: 6,
-            gap: 2
+            gap: 2,
           }}
         >
-          {id === "welcome" && (
-            <div>
-              coming soon…
-              <br />
-              you can help:
-              <ul>
-                <li>
-                  - found a bug? let me know!
-                </li>
-                <li>
-                  - type brief description in search bar
-                </li>
-                <li>
-                  - buy me a{" "}
-                  <Anchor href="https://buymeacoffee.com/rattmouse" target="_blank">
-                    ☕
-                  </Anchor>
-                </li>
-              </ul>
-            </div>
-          )}
-
-          {id === "notepad" && (
-            <div style={{ flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0 }}>
-              <TextInput
-                multiline
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  boxSizing: "border-box",
-                  minWidth: 0,
-                  minHeight: 0,
-                }}
-              />
-            </div>
-          )}
-
-          {id === "issues" && (
-            <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
-
-              <ScrollView style={{ width: "100%", height: "100%" }}>
-                <IssuesTreeView ref={treeRef} showFrame={false} />
-              </ScrollView>
-            </div>
-          )}
-
-          {id === "projects" &&
-            <>
-              <h1>can't share most of them</h1>
-              <ul>
-                <li>
-                  - but this one is on{" "}
-                  <Anchor href="https://github.com/rattmouse/mrwr.dev" target="_blank">
-                    GitHub
-                  </Anchor>
-                </li>
-              </ul>
-            </>}
-
-          {(id === "about" || id === "contact") && (
-            // This wrapper is what actually controls the scroll area size
-            <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-              <ScrollView style={{ width: "100%", height: "100%" }}>
-                {id === "about" && (
-                  <>
-                    <h1>web app created by Matt Rouse</h1>
-                    <ul>
-                      <li>
-                        - ui created with{" "}
-                        <Anchor href="https://react95.io/" target="_blank">
-                          react95
-                        </Anchor>
-                      </li>
-                      <li>
-                        - built with{" "}
-                        <Anchor href="https://nextjs.org/" target="_blank">
-                          Next.js
-                        </Anchor>{" "}
-                        &{" "}
-                        <Anchor href="https://react.dev/" target="_blank">
-                          React
-                        </Anchor>
-                      </li>
-                      <li>
-                        - deployed on{" "}
-                        <Anchor href="https://www.digitalocean.com/" target="_blank">
-                          DigitalOcean
-                        </Anchor>
-                      </li>
-                      <li>
-                        - some help from{" "}
-                        <Anchor href="https://chatgpt.com/" target="_blank">
-                          Chat GPT
-                        </Anchor>
-                      </li>
-                      <li>
-                        - and a lot of help from{" "}
-                        <Anchor href="https://chatgpt.com/codex/" target="_blank">
-                          Codex
-                        </Anchor>
-                      </li>
-                    </ul>
-                  </>
-                )}
-
-                {id === "contact" && (
-                  <>
-                    <h1>contact links:</h1>
-                    <ul>
-                      <li>
-                        -{" "}
-                        <Anchor href="https://t.me/rattmouse" target="_blank">
-                          Telegram
-                        </Anchor>
-                      </li>
-                      <li>
-                        -{" "}
-                        <Anchor href="https://signal.me/#eu/rattmouse.113" target="_blank">
-                          Signal
-                        </Anchor>
-                      </li>
-                      <li>
-                        -{" "}
-                        <Anchor href="mailto:rattmouse@pm.me" target="_blank">
-                          rattmouse@pm.me
-                        </Anchor>
-                      </li>
-                    </ul>
-                    <br />
-                    <h1>social links:</h1>
-                    <ul>
-                      <li>
-                        -{" "}
-                        <Anchor href="https://instagram.com/ratt.mouse" target="_blank">
-                          Instagram
-                        </Anchor>
-                      </li>
-                      <li>
-                        -{" "}
-                        <Anchor href="https://www.linkedin.com/in/rattmouse/" target="_blank">
-                          LinkedIn
-                        </Anchor>
-                      </li>
-                      <li>
-                        -{" "}
-                        <Anchor href="https://discord.com/channels/@rattmouse" target="_blank">
-                          Discord
-                        </Anchor>
-                      </li>
-                    </ul>
-                    <br />
-                    <h1>other links:</h1>
-                    <ul>
-                      <li>
-                        -{" "}
-                        <Anchor href="https://linktr.ee/ratt.mouse" target="_blank">
-                          linktr.ee
-                        </Anchor>
-                      </li>
-                    </ul>
-                  </>
-                )}
-              </ScrollView>
-            </div>
-          )}
+          {children}
         </WindowContent>
       )}
     </Window>
