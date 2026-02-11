@@ -169,7 +169,7 @@ export default function StartMenu({
   };
 
   const handleShutdown = () => {
-    shutdown({ refreshOnBootClick: true });
+    shutdown();
   };
 
   const menuItems = [
@@ -194,7 +194,7 @@ export default function StartMenu({
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
           { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
-          { label: "Music", icon: "../w95_music.ico", size: "sm", onClick: () => pick("osci") }
+          { label: "Music", icon: "../w95_music.ico", size: "sm", onClick: () => pick("music") }
         ],
     },
     { separator: true },

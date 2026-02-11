@@ -13,6 +13,7 @@ type StrudelWebModule = {
   initAudio?: () => Promise<unknown>;
   initAudioOnFirstClick?: () => void;
   getAudioContext?: () => AudioContext | null;
+  getAnalyzerData?: (kind: "time" | "frequency", id: number) => ArrayLike<number> | undefined;
   evaluate?: (code: string, autostart?: boolean) => Promise<unknown>;
   hush?: () => void;
 };
@@ -40,20 +41,40 @@ const DEFAULT_CODE = `note("c2 e2 g2 b2")
   .s("sawtooth")
   .slow(2)
   .gain(0.5)`;
+const ANALYZER_ID = 1;
 
 type StrudelReplWindowProps = {
   onPlayingChange?: (playing: boolean) => void;
+  onLevelChange?: (level: number) => void;
 };
 
+function withAnalyzer(code: string): string {
+  const trimmed = code.trim().replace(/;+\s*$/, "");
+  if (!trimmed) return code;
+  if (/\banalyze\s*\(/.test(trimmed)) return trimmed;
+  return `(${trimmed}).analyze(${ANALYZER_ID})`;
+}
+
+function withAnalyzerSuffix(code: string): string {
+  const trimmed = code.trim().replace(/;+\s*$/, "");
+  if (!trimmed) return code;
+  if (/\banalyze\s*\(/.test(trimmed)) return trimmed;
+  return `${trimmed}\n.analyze(${ANALYZER_ID})`;
+}
+
 const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(function StrudelReplWindow(
-  { onPlayingChange },
+  { onPlayingChange, onLevelChange },
   ref
 ) {
   const [ready, setReady] = useState(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
+  const waveGlowPathRef = useRef<SVGPathElement | null>(null);
+  const wavePathRef = useRef<SVGPathElement | null>(null);
   const editorRef = useRef<EditorInstance | null>(null);
   const webRef = useRef<StrudelWebModule | null>(null);
   const codeRef = useRef(DEFAULT_CODE);
+  const levelLastEmitAtRef = useRef(0);
+  const levelLastValueRef = useRef(0);
 
   const ensureAudio = async () => {
     const web = webRef.current;
@@ -71,7 +92,16 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     if (!ready || !web?.evaluate) return;
     try {
       await ensureAudio();
-      await web.evaluate(codeRef.current, true);
+      try {
+        await web.evaluate(withAnalyzer(codeRef.current), true);
+      } catch (wrappedErr) {
+        try {
+          await web.evaluate(withAnalyzerSuffix(codeRef.current), true);
+        } catch {
+          console.warn("Analyzer injection failed, running raw code.", wrappedErr);
+          await web.evaluate(codeRef.current, true);
+        }
+      }
       onPlayingChange?.(true);
     } catch (err) {
       console.error("Strudel update error:", err);
@@ -173,6 +203,81 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     };
   }, []);
 
+  useEffect(() => {
+    let raf = 0;
+    const animate = (now: number) => {
+      const wave = wavePathRef.current;
+      const waveGlow = waveGlowPathRef.current;
+      if (wave && waveGlow) {
+        const samples = webRef.current?.getAnalyzerData?.("time", ANALYZER_ID);
+        const pointCount = 64;
+        const dParts: string[] = ["M 0 50"];
+
+        if (samples && samples.length > 0) {
+          const sampleCount = samples.length;
+          let triggerIndex = 0;
+          for (let i = 1; i < sampleCount; i += 1) {
+            const prevRaw = Number(samples[i - 1] ?? 0);
+            const currRaw = Number(samples[i] ?? 0);
+            const prev = prevRaw >= -1 && prevRaw <= 1 ? prevRaw : (prevRaw / 128) - 1;
+            const curr = currRaw >= -1 && currRaw <= 1 ? currRaw : (currRaw / 128) - 1;
+            if (prev > 0 && curr <= 0) {
+              triggerIndex = i;
+              break;
+            }
+          }
+          for (let i = 0; i <= pointCount; i += 1) {
+            const x = (i / pointCount) * 100;
+            const idx = (triggerIndex + Math.floor((i / pointCount) * (sampleCount - 1))) % sampleCount;
+            const raw = Number(samples[idx] ?? 0);
+            const normalized = raw >= -1 && raw <= 1 ? raw : (raw / 128) - 1;
+            const y = 50 - normalized * 40;
+            dParts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
+          }
+        } else {
+          dParts.push("L 100 50");
+        }
+        const d = dParts.join(" ");
+        wave.setAttribute("d", d);
+        waveGlow.setAttribute("d", d);
+      }
+      raf = window.requestAnimationFrame(animate);
+    };
+    raf = window.requestAnimationFrame(animate);
+    return () => {
+      window.cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = (now: number) => {
+      const data = webRef.current?.getAnalyzerData?.("time", ANALYZER_ID);
+      let level = 0;
+      if (data && data.length) {
+        let sum = 0;
+        const count = data.length;
+        for (let i = 0; i < count; i += 1) {
+          const v = Number(data[i] ?? 0);
+          const normalized = v >= -1 && v <= 1 ? v : (v / 128) - 1;
+          sum += Math.abs(normalized);
+        }
+        level = Math.min(1, (sum / count) * 2.2);
+      }
+      if (onLevelChange && (now - levelLastEmitAtRef.current > 66 || Math.abs(level - levelLastValueRef.current) > 0.08)) {
+        levelLastEmitAtRef.current = now;
+        levelLastValueRef.current = level;
+        onLevelChange(level);
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      onLevelChange?.(0);
+    };
+  }, [onLevelChange]);
+
   return (
     <div
       style={{
@@ -184,8 +289,55 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         background: "var(--background, #222)",
         overflow: "hidden",
       }}
-      ref={editorRootRef}
-    />
+    >
+      <div
+        style={{
+          flex: "0 0 20px",
+          minHeight: 20,
+          borderTop: "1px solid #808080",
+          background: "#121414",
+          overflow: "hidden",
+        }}
+      >
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          style={{ width: "100%", height: "100%", display: "block" }}
+        >
+          <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(0,245,179,0.30)" strokeWidth="10" />
+          <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#00f5b3" strokeWidth="2" />
+        </svg>
+      </div>
+      <div
+        ref={editorRootRef}
+        style={{
+          flex: "1 1 auto",
+          minWidth: 0,
+          minHeight: 0,
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        {!ready && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#cfcfcf",
+              fontFamily: "monospace",
+              fontSize: 12,
+              background: "#121414",
+              zIndex: 1,
+            }}
+          >
+            loading strudel...
+          </div>
+        )}
+      </div>
+    </div>
   );
 });
 
