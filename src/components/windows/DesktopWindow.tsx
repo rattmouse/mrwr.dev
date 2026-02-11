@@ -8,6 +8,7 @@ import { Layout } from "@/components/windows/windowTypes";
 type DesktopWindowProps = {
   title: string;
   layout: Layout;
+  normalWidth?: number;
   normalHeight: number;
   onClose: () => void;
   onMinimize: () => void;
@@ -20,6 +21,7 @@ type DesktopWindowProps = {
 export default function DesktopWindow({
   title,
   layout,
+  normalWidth = 280,
   normalHeight,
   onClose,
   onMinimize,
@@ -34,7 +36,7 @@ export default function DesktopWindow({
   const TASKBAR_H = 50;
   const GAP = 8;
 
-  const NORMAL_W = 280;
+  const NORMAL_W = normalWidth;
   const DOCK_W = 200;
   const DOCK_H = 60;
   const TITLE_CHAR_PX = 10;

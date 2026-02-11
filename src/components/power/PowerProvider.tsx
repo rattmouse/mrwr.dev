@@ -4,9 +4,13 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 
 type PowerState = "on" | "shuttingDown" | "off" | "booting";
 
+type ShutdownOptions = {
+  refreshOnBootClick?: boolean;
+};
+
 type PowerContextValue = {
   state: PowerState;
-  shutdown: () => void;
+  shutdown: (options?: ShutdownOptions) => void;
   powerOn: () => void; // “reboot” (from off)
 };
 
@@ -17,6 +21,7 @@ const STORAGE_KEY = "mrwr:poweredOff";
 export function PowerProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PowerState>("on");
   const timerRef = useRef<number | null>(null);
+  const refreshOnNextBootClickRef = useRef(false);
 
   const clearTimer = () => {
     if (timerRef.current != null) {
@@ -47,9 +52,10 @@ export function PowerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state]);
 
-  const shutdown = () => {
+  const shutdown = (options?: ShutdownOptions) => {
     // Only allow shutdown from ON
     if (state !== "on") return;
+    refreshOnNextBootClickRef.current = !!options?.refreshOnBootClick;
 
     setState("shuttingDown");
     clearTimer();
@@ -63,11 +69,17 @@ export function PowerProvider({ children }: { children: React.ReactNode }) {
   const powerOn = () => {
     // Only allow “reboot” from OFF
     if (state !== "off") return;
+    const shouldRefreshAfterBoot = refreshOnNextBootClickRef.current;
+    refreshOnNextBootClickRef.current = false;
 
     setState("booting");
     clearTimer();
     // duration should match your boot animation length
     timerRef.current = window.setTimeout(() => {
+      if (shouldRefreshAfterBoot) {
+        window.location.reload();
+        return;
+      }
       setState("on");
       timerRef.current = null;
     }, 1800);

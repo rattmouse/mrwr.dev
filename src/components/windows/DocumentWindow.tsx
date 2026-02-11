@@ -62,6 +62,12 @@ export default function DocumentWindow({
                     </Anchor>
                   </li>
                   <li>
+                    - music from{" "}
+                    <Anchor href="https://strudel.cc" target="_blank">
+                      strudel.cc
+                    </Anchor>
+                  </li>
+                  <li>
                     - built with{" "}
                     <Anchor href="https://nextjs.org/" target="_blank">
                       Next.js
