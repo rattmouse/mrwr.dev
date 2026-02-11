@@ -6,7 +6,8 @@ import React, {
     useMemo,
     useState,
 } from "react";
-import { GroupBox, TreeLeaf, TreeView } from "react95";
+import { GroupBox, TreeLeaf } from "react95";
+import { TreeView } from "@/components/issues/React95TreeViewPatched";
 
 import issuesRaw from "@/data/issues.json";
 
@@ -375,19 +376,21 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             }
         `;
 
+        const PatchedTreeView = TreeView as any;
+
         const content = (
             <div style={{ overflow: "auto", padding: 2 }}>
                 <TreeContainer>
-                    <TreeView
+                    <PatchedTreeView
                         tree={tree}
                         selected={selected as any}
                         expanded={expanded}
-                        onNodeSelect={(_, idOrIds) => {
+                        onNodeSelect={(_event: unknown, idOrIds: unknown) => {
                             const next = normalizeSelected(idOrIds, selected[0] ?? initialSelected);
                             setSelected(next);
                             onSelectId?.(next[0]);
                         }}
-                        onNodeToggle={(_, ids) => setExpanded(uniq(ids))}
+                        onNodeToggle={(_event: unknown, ids: string[]) => setExpanded(uniq(ids))}
                     />
                 </TreeContainer>
             </div>
