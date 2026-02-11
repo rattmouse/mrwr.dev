@@ -77,7 +77,13 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
             <MenuListItem 
               size={item.size}
               disabled={item.disabled}
-              onMouseEnter={() => itemHasSubmenu && setOpenSubmenu(idx)}
+              onMouseEnter={() => {
+                if (itemHasSubmenu) {
+                  setOpenSubmenu(idx);
+                  return;
+                }
+                setOpenSubmenu(null);
+              }}
               onClick={() => {
                 // Leaf click: run handler and close everything
                 if (!itemHasSubmenu && !item.disabled) {
@@ -142,7 +148,8 @@ export default function StartMenu({
         [
           { label: "Welcome", icon: "../w95_desktop.ico", size: "sm", onClick: () => pick("welcome") },
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
-          { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") }
+          { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
+          { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") }
         ],
     },
     {

@@ -1,14 +1,27 @@
 "use client";
 
 import React, { useRef } from "react";
-import { Anchor, Button, ScrollView, TextInput } from "react95";
+import {
+  Anchor,
+  Button,
+  ScrollView,
+  Table,
+  TableBody,
+  TableDataCell,
+  TableHead,
+  TableHeadCell,
+  TableRow,
+  TextInput,
+} from "react95";
 import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/IssuesTreeView";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
+import { GitChangeEntry } from "@/lib/gitChanges.types";
 
 type ProgramWindowProps = {
   id: ProgramWindowId;
   layout: Layout;
+  gitChanges: GitChangeEntry[];
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
@@ -18,6 +31,7 @@ type ProgramWindowProps = {
 export default function ProgramWindow({
   id,
   layout,
+  gitChanges,
   onClose,
   onMinimize,
   onRestore,
@@ -30,9 +44,11 @@ export default function ProgramWindow({
       ? "notepad.exe"
       : id === "issues"
         ? "issues.exe"
+        : id === "changes"
+          ? "changes.exe"
         : "mrwr.dev";
 
-  const normalHeight = id === "welcome" ? 160 : 300;
+  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : 300;
 
   const toolbar =
     id === "issues" ? (
@@ -51,6 +67,8 @@ export default function ProgramWindow({
         </Button>
       </>
     ) : undefined;
+
+  const visibleChanges = gitChanges;
 
   return (
     <DesktopWindow
@@ -101,6 +119,50 @@ export default function ProgramWindow({
           <ScrollView style={{ width: "100%", height: "100%" }}>
             <IssuesTreeView ref={treeRef} showFrame={false} />
           </ScrollView>
+        </div>
+      )}
+
+      {id === "changes" && (
+        <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, gap: 6 }}>
+          <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+            <ScrollView style={{ width: "100%", height: "100%" }}>
+              {visibleChanges.length === 0 && <div style={{ fontSize: 11 }}>No matching commits.</div>}
+              {visibleChanges.length > 0 && (
+                <Table style={{ width: "100%", fontSize: 11 }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeadCell style={{ width: 130, textAlign: "center", whiteSpace: "nowrap" }}>
+                        Date
+                      </TableHeadCell>
+                      <TableHeadCell style={{ width: 120, textAlign: "center", whiteSpace: "nowrap" }}>
+                        Author
+                      </TableHeadCell>
+                      <TableHeadCell style={{ whiteSpace: "nowrap" }}>Subject</TableHeadCell>
+                      <TableHeadCell style={{ width: 72, textAlign: "center", whiteSpace: "nowrap" }}>
+                        Hash
+                      </TableHeadCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {visibleChanges.map((entry) => (
+                      <TableRow key={entry.hash}>
+                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                          {entry.date}
+                        </TableDataCell>
+                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                          {entry.author}
+                        </TableDataCell>
+                        <TableDataCell style={{ whiteSpace: "nowrap" }}>{entry.subject}</TableDataCell>
+                        <TableDataCell style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                          {entry.shortHash}
+                        </TableDataCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </ScrollView>
+          </div>
         </div>
       )}
     </DesktopWindow>

@@ -123,8 +123,14 @@ function renderSearchAwareLine(
     );
 }
 
-function renderSearchAwareLines(text: string, keyPrefix: string): React.ReactNode[] {
-    return text.split("\n").map((line, idx) => renderSearchAwareLine(line, `${keyPrefix}:${idx}`));
+function renderSearchAwareLines(
+    text: string,
+    keyPrefix: string,
+    reserveBodyIconSpace = false
+): React.ReactNode[] {
+    return text
+        .split("\n")
+        .map((line, idx) => renderSearchAwareLine(line, `${keyPrefix}:${idx}`, false, reserveBodyIconSpace));
 }
 
 function renderBodyLines(text: string, keyPrefix: string): React.ReactNode[] {
@@ -235,8 +241,13 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                     const text = (c.body ?? "").trim() || "(empty)";
                     return (
                         <span className="tree-label">
-                            <span className="search-line">{`${who} [${when}]`}</span>
-                            {renderSearchAwareLines(text, `${who}:${when}`)}
+                            <span className="search-line search-line-with-gutter">
+                                <span className="body-inline-icon-slot" aria-hidden>
+                                    <span className="body-inline-icon">💬</span>
+                                </span>
+                                <span className="search-line-text">{`${who} [${when}]`}</span>
+                            </span>
+                            {renderSearchAwareLines(text, `${who}:${when}`, true)}
                         </span>
                     ) as unknown as string;
                 };
@@ -252,7 +263,6 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                         items: [
                             {
                                 id: `${issueId}:comment:0:${c.id ?? "noid"}:detail`,
-                                icon: <>💬</>,
                                 label: formatCommentLabel(c),
                             },
                         ],
@@ -265,7 +275,6 @@ function buildIssuesTree(issues: Issue[]): TreeLeaf<string>[] {
                         icon: <>💬</>,
                         items: comments.map((c, cIdx) => ({
                             id: `${issueId}:comment:${cIdx}:${c.id ?? "noid"}`,
-                            icon: <>💬</>,
                             label: formatCommentLabel(c),
                         })),
                     });
@@ -329,21 +338,8 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             return ids;
         }, [tree]);
 
-        const openIds = useMemo(() => {
-            const openNode = tree.find((n) => n.id === "issues:open");
-            if (!openNode) return ["issues:open"];
-            const ids: string[] = [];
-            collectIds(openNode, ids);
-            return ids;
-        }, [tree]);
-
-        const closedIds = useMemo(() => {
-            const closedNode = tree.find((n) => n.id === "issues:closed");
-            if (!closedNode) return ["issues:closed"];
-            const ids: string[] = [];
-            collectIds(closedNode, ids);
-            return ids;
-        }, [tree]);
+        const openIds = useMemo(() => ["issues:open"], []);
+        const closedIds = useMemo(() => ["issues:closed"], []);
 
         const [selected, setSelected] = useState<string[]>([initialSelected]);
         const [expanded, setExpanded] = useState<string[]>(initialExpanded);
