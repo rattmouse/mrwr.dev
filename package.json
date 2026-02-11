@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --turbo",
     "build": "next build",
-    "start": "node .next/standalone/server.js"
+    "start": "node .next/standalone/server.js",
+    "changelog": "node tools/generate-changelog.mjs",
+    "changelog:json": "node tools/generate-changelog.mjs --json --output src/data/changelogs.json"
   },
   "dependencies": {
     "express": "^5.2.1",
