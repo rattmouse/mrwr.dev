@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Anchor,
   Button,
+  MenuList,
+  MenuListItem,
   ScrollView,
   TextInput,
 } from "react95";
@@ -13,6 +15,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { GitChangeEntry } from "@/lib/gitChanges.types";
+import strudelSongs from "@/data/strudelSongs.json";
 
 type ProgramWindowProps = {
   id: ProgramWindowId;
@@ -36,8 +39,13 @@ export default function ProgramWindow({
   const issuesTreeRef = useRef<IssuesTreeViewHandle>(null);
   const changesTreeRef = useRef<ChangesTreeViewHandle>(null);
   const strudelRef = useRef<StrudelReplHandle>(null);
+  const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
-  const [strudelLevel, setStrudelLevel] = useState(0);
+  const [strudelInSync, setStrudelInSync] = useState(false);
+  const [musicJitter, setMusicJitter] = useState({ x: 0, y: 0 });
+  const [musicTextJitter, setMusicTextJitter] = useState({ x: 0, y: 0 });
+  const [musicFileOpen, setMusicFileOpen] = useState(false);
+  const [musicFileOpenSubmenu, setMusicFileOpenSubmenu] = useState(false);
 
   const title =
     id === "notepad"
@@ -52,7 +60,64 @@ export default function ProgramWindow({
 
   const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : 300;
   const normalWidth = id === "changes" ? 320 : undefined;
-  const musicFrameEffect = id === "music" ? Math.min(1, (strudelPlaying ? 0.12 : 0) + strudelLevel * 0.8) : 0;
+  const musicFrameEffect = 0;
+  const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
+
+  useEffect(() => {
+    if (!shouldShakeMusicUi) {
+      setMusicJitter({ x: 0, y: 0 });
+      setMusicTextJitter({ x: 0, y: 0 });
+      if (id !== "music") {
+        setStrudelInSync(false);
+      }
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const range = 2.5;
+      const textRange = 1.1;
+      setMusicJitter({
+        x: (Math.random() * 2 - 1) * range,
+        y: (Math.random() * 2 - 1) * range,
+      });
+      setMusicTextJitter({
+        x: (Math.random() * 2 - 1) * textRange,
+        y: (Math.random() * 2 - 1) * textRange,
+      });
+    }, 120);
+    return () => {
+      window.clearInterval(timer);
+      setMusicJitter({ x: 0, y: 0 });
+      setMusicTextJitter({ x: 0, y: 0 });
+    };
+  }, [id, shouldShakeMusicUi]);
+
+  useEffect(() => {
+    if (id !== "music") {
+      setMusicFileOpen(false);
+      setMusicFileOpenSubmenu(false);
+      return;
+    }
+
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const inFileMenu = fileMenuRef.current?.contains(target) ?? false;
+      if (!inFileMenu) {
+        setMusicFileOpen(false);
+        setMusicFileOpenSubmenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (musicFileOpen) return;
+    setMusicFileOpenSubmenu(false);
+  }, [musicFileOpen]);
 
   const toolbar =
     id === "issues" ? (
@@ -93,9 +158,100 @@ export default function ProgramWindow({
       </>
     ) : id === "music" ? (
       <>
+        <div ref={fileMenuRef} style={{ position: "relative", display: "inline-block" }}>
+          <Button
+            variant="menu"
+            size="sm"
+            style={{ transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)` }}
+            active={musicFileOpen}
+            aria-label="File"
+            title="File"
+            onClick={() => {
+              setMusicFileOpen((prev) => {
+                const next = !prev;
+                if (!next) {
+                  setMusicFileOpenSubmenu(false);
+                }
+                return next;
+              });
+            }}
+          >
+            File
+          </Button>
+          {musicFileOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% - 2px)",
+                left: 0,
+                zIndex: 1000,
+                width: "max-content",
+              }}
+              onMouseLeave={() => {
+                setMusicFileOpenSubmenu(false);
+                setMusicFileOpen(false);
+              }}
+            >
+              <MenuList style={{ marginTop: 0 }}>
+                <MenuListItem
+                  size="sm"
+                  onMouseEnter={() => setMusicFileOpenSubmenu(true)}
+                  onClick={() => setMusicFileOpenSubmenu((prev) => !prev)}
+                >
+                  <span style={{ flex: "1 1 auto" }}>Open</span>
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 12,
+                      marginLeft: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flex: "0 0 12px",
+                    }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" role="presentation">
+                      <path d="M2 1l4 3-4 3z" fill="currentColor" />
+                    </svg>
+                  </span>
+                </MenuListItem>
+              </MenuList>
+              {musicFileOpenSubmenu && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "calc(100% - 2px)",
+                    top: 0,
+                    zIndex: 1001,
+                    minWidth: 180,
+                  }}
+                >
+                  <MenuList style={{ marginTop: 0 }}>
+                    {strudelSongs.map((song) => (
+                      <MenuListItem
+                        size="sm"
+                        key={song.id}
+                        onClick={() => {
+                          strudelRef.current?.setCode(song.code);
+                          setMusicFileOpenSubmenu(false);
+                          setMusicFileOpen(false);
+                        }}
+                      >
+                        {song.name}
+                      </MenuListItem>
+                    ))}
+                  </MenuList>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <Button
-          variant="menu"
           size="sm"
+          style={{
+            transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)`,
+            fontWeight: "bold",
+          }}
           active={strudelPlaying}
           aria-label="Play"
           title="Play"
@@ -104,8 +260,11 @@ export default function ProgramWindow({
           Play
         </Button>
         <Button
-          variant="menu"
           size="sm"
+          style={{
+            transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)`,
+            fontWeight: "bold",
+          }}
           active={!strudelPlaying}
           aria-label="Stop"
           title="Stop"
@@ -114,22 +273,28 @@ export default function ProgramWindow({
           Stop
         </Button>
         <Button
-          variant="menu"
           size="sm"
-          aria-label="Update"
-          title="Update"
+          style={{
+            transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)`,
+            fontWeight: "bold",
+          }}
+          active={strudelInSync}
+          disabled={!strudelPlaying || strudelInSync}
+          aria-label="Set"
+          title="Set"
           onClick={() => void strudelRef.current?.update()}
         >
-          Update
+          Set
         </Button>
         <Button
           variant="menu"
           size="sm"
+          style={{ transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)` }}
           aria-label="Help"
           title="Help"
           onClick={() => window.open("https://strudel.cc/workshop/getting-started/", "_blank", "noopener,noreferrer")}
         >
-          Help
+          ?
         </Button>
       </>
     ) : undefined;
@@ -141,6 +306,12 @@ export default function ProgramWindow({
       normalWidth={normalWidth}
       normalHeight={normalHeight}
       effectOutline={musicFrameEffect}
+      jitterX={id === "music" ? musicJitter.x : 0}
+      jitterY={id === "music" ? musicJitter.y : 0}
+      titleJitterX={id === "music" ? musicTextJitter.x : 0}
+      titleJitterY={id === "music" ? musicTextJitter.y : 0}
+      toolbarJitterX={id === "music" ? musicTextJitter.x * 0.5 : 0}
+      toolbarJitterY={id === "music" ? musicTextJitter.y * 0.5 : 0}
       onClose={onClose}
       onMinimize={onMinimize}
       onRestore={onRestore}
@@ -209,7 +380,7 @@ export default function ProgramWindow({
         <StrudelReplWindow
           ref={strudelRef}
           onPlayingChange={setStrudelPlaying}
-          onLevelChange={setStrudelLevel}
+          onSyncChange={setStrudelInSync}
         />
       )}
     </DesktopWindow>

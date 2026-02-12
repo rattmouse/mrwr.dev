@@ -6,6 +6,9 @@ export type StrudelReplHandle = {
   play: () => Promise<void>;
   stop: () => Promise<void>;
   update: () => Promise<void>;
+  setCode: (code: string) => void;
+  setTone: (tone: string) => void;
+  appendCode: (code: string) => void;
 };
 
 type StrudelWebModule = {
@@ -13,6 +16,7 @@ type StrudelWebModule = {
   initAudio?: () => Promise<unknown>;
   initAudioOnFirstClick?: () => void;
   getAudioContext?: () => AudioContext | null;
+  getSuperdoughAudioController?: () => unknown;
   getAnalyzerData?: (kind: "time" | "frequency", id: number) => ArrayLike<number> | undefined;
   evaluate?: (code: string, autostart?: boolean) => Promise<unknown>;
   hush?: () => void;
@@ -25,6 +29,9 @@ type EditorChangeEvent = {
 
 type EditorInstance = {
   destroy?: () => void;
+  setCode?: (code: string) => void;
+  state?: { doc?: { length: number } };
+  dispatch?: (update: { changes: { from: number; to: number; insert: string } }) => void;
 };
 
 type StrudelCodeMirrorModule = {
@@ -37,15 +44,13 @@ type StrudelCodeMirrorModule = {
   }) => EditorInstance;
 };
 
-const DEFAULT_CODE = `note("c2 e2 g2 b2")
-  .s("sawtooth")
-  .slow(2)
-  .gain(0.5)`;
+const DEFAULT_CODE = `$: note("c a f e").lpf(800)`;
 const ANALYZER_ID = 1;
 
 type StrudelReplWindowProps = {
   onPlayingChange?: (playing: boolean) => void;
   onLevelChange?: (level: number) => void;
+  onSyncChange?: (inSync: boolean) => void;
 };
 
 function withAnalyzer(code: string): string {
@@ -62,8 +67,42 @@ function withAnalyzerSuffix(code: string): string {
   return `${trimmed}\n.analyze(${ANALYZER_ID})`;
 }
 
+function hasLabelPatterns(code: string): boolean {
+  return /(^|\n)\s*[$A-Za-z_][\w$]*\s*:/m.test(code);
+}
+
+function withTone(code: string, tone: string): string {
+  const toneCall = `.s("${tone}")`;
+  if (/\.s\(\s*["'][^"']+["']\s*\)/.test(code)) {
+    return code.replace(/\.s\(\s*["'][^"']+["']\s*\)/, toneCall);
+  }
+  const trimmed = code.trimEnd();
+  return `${trimmed}\n  ${toneCall}`;
+}
+
+function extractNoteTokens(code: string): string[] {
+  const tokens: string[] = [];
+  const noteRegex = /note\(\s*["']([^"']*)["']\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = noteRegex.exec(code)) !== null) {
+    const body = (match[1] ?? "").trim();
+    if (!body) continue;
+    const parts = body.split(/\s+/).filter(Boolean);
+    tokens.push(...parts);
+  }
+  return tokens;
+}
+
+function hashToken(token: string): number {
+  let hash = 0;
+  for (let i = 0; i < token.length; i += 1) {
+    hash = (hash * 31 + token.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
 const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(function StrudelReplWindow(
-  { onPlayingChange, onLevelChange },
+  { onPlayingChange, onLevelChange, onSyncChange },
   ref
 ) {
   const [ready, setReady] = useState(false);
@@ -73,8 +112,23 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   const editorRef = useRef<EditorInstance | null>(null);
   const webRef = useRef<StrudelWebModule | null>(null);
   const codeRef = useRef(DEFAULT_CODE);
+  const outputAnalyserRef = useRef<AnalyserNode | null>(null);
+  const outputAnalyserDataRef = useRef<Float32Array | null>(null);
+  const outputAnalyserSourceRef = useRef<AudioNode | null>(null);
+  const lastEvaluatedCodeRef = useRef<string | null>(null);
+  const playingRef = useRef(false);
   const levelLastEmitAtRef = useRef(0);
   const levelLastValueRef = useRef(0);
+
+  const normalizeCode = (code: string): string => code.trim().replace(/;+\s*$/, "");
+
+  const emitSync = () => {
+    const inSync =
+      playingRef.current &&
+      lastEvaluatedCodeRef.current !== null &&
+      normalizeCode(lastEvaluatedCodeRef.current) === normalizeCode(codeRef.current);
+    onSyncChange?.(inSync);
+  };
 
   const ensureAudio = async () => {
     const web = webRef.current;
@@ -87,14 +141,54 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     }
   };
 
+  const ensureOutputAnalyser = () => {
+    const web = webRef.current;
+    if (!web) return;
+    if (outputAnalyserRef.current) return;
+    const ctx = web.getAudioContext?.();
+    const controller = web.getSuperdoughAudioController?.() as { output?: { destinationGain?: AudioNode } } | undefined;
+    const source = controller?.output?.destinationGain;
+    if (!ctx || !source) return;
+    try {
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.55;
+      source.connect(analyser);
+      outputAnalyserRef.current = analyser;
+      outputAnalyserDataRef.current = new Float32Array(analyser.fftSize);
+      outputAnalyserSourceRef.current = source;
+    } catch (err) {
+      console.warn("Failed to attach output analyser:", err);
+    }
+  };
+
+  const getScopeSamples = (): ArrayLike<number> | undefined => {
+    const analyser = outputAnalyserRef.current;
+    const data = outputAnalyserDataRef.current;
+    if (analyser && data) {
+      (analyser as unknown as { getFloatTimeDomainData: (array: ArrayLike<number>) => void }).getFloatTimeDomainData(data);
+      return data;
+    }
+    return webRef.current?.getAnalyzerData?.("time", ANALYZER_ID);
+  };
+
   const run = async () => {
     const web = webRef.current;
     if (!ready || !web?.evaluate) return;
-    try {
-      await ensureAudio();
       try {
-        await web.evaluate(withAnalyzer(codeRef.current), true);
-      } catch (wrappedErr) {
+        await ensureAudio();
+        ensureOutputAnalyser();
+        if (hasLabelPatterns(codeRef.current)) {
+          await web.evaluate(codeRef.current, true);
+          lastEvaluatedCodeRef.current = codeRef.current;
+          playingRef.current = true;
+          onPlayingChange?.(true);
+          emitSync();
+          return;
+        }
+        try {
+          await web.evaluate(withAnalyzer(codeRef.current), true);
+        } catch (wrappedErr) {
         try {
           await web.evaluate(withAnalyzerSuffix(codeRef.current), true);
         } catch {
@@ -102,7 +196,10 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
           await web.evaluate(codeRef.current, true);
         }
       }
+      lastEvaluatedCodeRef.current = codeRef.current;
+      playingRef.current = true;
       onPlayingChange?.(true);
+      emitSync();
     } catch (err) {
       console.error("Strudel update error:", err);
     }
@@ -120,7 +217,9 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       if (web.evaluate) {
         await web.evaluate("hush()", false);
       }
+      playingRef.current = false;
       onPlayingChange?.(false);
+      emitSync();
     } catch (err) {
       console.error("Strudel stop error:", err);
     }
@@ -132,8 +231,83 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       play,
       stop,
       update: run,
+      setCode: (code: string) => {
+        codeRef.current = code;
+        const editor = editorRef.current;
+        if (!editor) {
+          emitSync();
+          return;
+        }
+        if (typeof editor.setCode === "function") {
+          editor.setCode(code);
+          emitSync();
+          return;
+        }
+        const docLength = editor.state?.doc?.length;
+        if (typeof editor.dispatch === "function" && typeof docLength === "number") {
+          editor.dispatch({
+            changes: {
+              from: 0,
+              to: docLength,
+              insert: code,
+            },
+          });
+        }
+        emitSync();
+      },
+      setTone: (tone: string) => {
+        const nextCode = withTone(codeRef.current, tone);
+        codeRef.current = nextCode;
+        const editor = editorRef.current;
+        if (!editor) {
+          emitSync();
+          return;
+        }
+        if (typeof editor.setCode === "function") {
+          editor.setCode(nextCode);
+          emitSync();
+          return;
+        }
+        const docLength = editor.state?.doc?.length;
+        if (typeof editor.dispatch === "function" && typeof docLength === "number") {
+          editor.dispatch({
+            changes: {
+              from: 0,
+              to: docLength,
+              insert: nextCode,
+            },
+          });
+        }
+        emitSync();
+      },
+      appendCode: (code: string) => {
+        const prefix = codeRef.current.trimEnd().length ? "\n" : "";
+        const nextCode = `${codeRef.current}${prefix}${code}`;
+        codeRef.current = nextCode;
+        const editor = editorRef.current;
+        if (!editor) {
+          emitSync();
+          return;
+        }
+        if (typeof editor.setCode === "function") {
+          editor.setCode(nextCode);
+          emitSync();
+          return;
+        }
+        const docLength = editor.state?.doc?.length;
+        if (typeof editor.dispatch === "function" && typeof docLength === "number") {
+          editor.dispatch({
+            changes: {
+              from: 0,
+              to: docLength,
+              insert: nextCode,
+            },
+          });
+        }
+        emitSync();
+      },
     }),
-    [ready, onPlayingChange]
+    [ready, onPlayingChange, onSyncChange]
   );
 
   useEffect(() => {
@@ -149,16 +323,18 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         webRef.current = web;
 
         await web.initStrudel();
+        ensureOutputAnalyser();
         if (!mounted || !editorRootRef.current) return;
 
         editorRef.current = cm.initEditor({
           root: editorRootRef.current,
-          initialCode: DEFAULT_CODE,
+          initialCode: codeRef.current,
           onChange: (event) => {
             if (!event.docChanged) return;
             const nextCode = event.state?.doc?.toString();
             if (typeof nextCode === "string") {
               codeRef.current = nextCode;
+              emitSync();
             }
           },
           onEvaluate: () => {
@@ -199,7 +375,18 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       void stop();
       editorRef.current?.destroy?.();
       editorRef.current = null;
+      if (outputAnalyserSourceRef.current && outputAnalyserRef.current) {
+        try {
+          outputAnalyserSourceRef.current.disconnect(outputAnalyserRef.current);
+        } catch {
+          // noop
+        }
+      }
+      outputAnalyserSourceRef.current = null;
+      outputAnalyserDataRef.current = null;
+      outputAnalyserRef.current = null;
       webRef.current = null;
+      onSyncChange?.(false);
     };
   }, []);
 
@@ -209,7 +396,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       const wave = wavePathRef.current;
       const waveGlow = waveGlowPathRef.current;
       if (wave && waveGlow) {
-        const samples = webRef.current?.getAnalyzerData?.("time", ANALYZER_ID);
+        const samples = getScopeSamples();
         const pointCount = 64;
         const dParts: string[] = ["M 0 50"];
 
@@ -234,6 +421,26 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
             const y = 50 - normalized * 40;
             dParts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
           }
+        } else if (playingRef.current) {
+          const tokens = extractNoteTokens(codeRef.current);
+          if (tokens.length > 0) {
+            const total = Math.max(1, tokens.length);
+            for (let i = 0; i <= pointCount; i += 1) {
+              const xRatio = i / pointCount;
+              const x = xRatio * 100;
+              const noteIndex = Math.min(total - 1, Math.floor(xRatio * total));
+              const token = tokens[noteIndex] ?? "c4";
+              const h = hashToken(token);
+              const amp = 0.2 + (h % 100) / 200; // 0.2..0.7
+              const freq = 1 + ((h >> 7) % 3); // 1..3 cycles within segment
+              const localX = (xRatio * total) - noteIndex;
+              const phase = (now / 1000) * (1.4 + ((h >> 11) % 5) * 0.2);
+              const y = 50 - Math.sin((localX * freq * Math.PI * 2) + phase) * (amp * 35);
+              dParts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
+            }
+          } else {
+            dParts.push("L 100 50");
+          }
         } else {
           dParts.push("L 100 50");
         }
@@ -252,7 +459,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   useEffect(() => {
     let raf = 0;
     const tick = (now: number) => {
-      const data = webRef.current?.getAnalyzerData?.("time", ANALYZER_ID);
+      const data = getScopeSamples();
       let level = 0;
       if (data && data.length) {
         let sum = 0;
@@ -292,8 +499,8 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     >
       <div
         style={{
-          flex: "0 0 20px",
-          minHeight: 20,
+          flex: "0 0 36px",
+          minHeight: 36,
           borderTop: "1px solid #808080",
           background: "#121414",
           overflow: "hidden",

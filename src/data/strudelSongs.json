@@ -1,0 +1,22 @@
+[
+  {
+    "id": "tone-sine-arp",
+    "name": "sin.wav",
+    "code": "$: note(\"c4 e4 g4 b4\")\n  .s(\"sine\")\n  .slow(2)\n  .gain(2)"
+  },
+  {
+    "id": "tone-saw-lead",
+    "name": "sawtooth.mp3",
+    "code": "$: note(\"<c4 d4 e4 g4>*2\")\n  .s(\"sawtooth\")\n  .fast(2)\n  .lpf(1400)\n  .gain(0.4)"
+  },
+  {
+    "id": "tone-square-bass",
+    "name": "squarebass.au",
+    "code": "$: note(\"c2 c2 g1 bb1\")\n  .s(\"square\")\n  .slow(1.5)\n  .distort(0.15)\n  .gain(0.7)"
+  },
+  {
+    "id": "multi-layered-tones",
+    "name": "layers.cd",
+    "code": "$: note(\"<[c2 c3]*4 [bb1 bb2]*4 [f2 f3]*4 [eb2 eb3]*4>\")\n  .s(\"square\")\n  .lpf(900)\n  .gain(0.35)\n$: note(\"<c5 e5 g5 b5>*8\")\n  .s(\"triangle\")\n  .fast(2)\n  .gain(0.2)"
+  }
+]

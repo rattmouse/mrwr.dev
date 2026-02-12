@@ -12,6 +12,12 @@ type DesktopWindowProps = {
   normalHeight: number;
   normalPosition?: "center" | "topRightQuadrantCenter";
   effectOutline?: number;
+  jitterX?: number;
+  jitterY?: number;
+  titleJitterX?: number;
+  titleJitterY?: number;
+  toolbarJitterX?: number;
+  toolbarJitterY?: number;
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
@@ -27,6 +33,12 @@ export default function DesktopWindow({
   normalHeight,
   normalPosition = "center",
   effectOutline = 0,
+  jitterX = 0,
+  jitterY = 0,
+  titleJitterX = 0,
+  titleJitterY = 0,
+  toolbarJitterX = 0,
+  toolbarJitterY = 0,
   onClose,
   onMinimize,
   onRestore,
@@ -82,7 +94,7 @@ export default function DesktopWindow({
           position: "absolute",
           left: normalLeft,
           top: normalTop,
-          transform: "translate(-50%, -50%)",
+          transform: `translate(calc(-50% + ${jitterX}px), calc(-50% + ${jitterY}px))`,
           width: NORMAL_W,
           height: normalHeight,
           zIndex: Z.WINDOW,
@@ -101,7 +113,9 @@ export default function DesktopWindow({
           flex: "0 0 auto",
         }}
       >
-        <span>{title}</span>
+        <span style={{ display: "inline-block", transform: `translate(${titleJitterX}px, ${titleJitterY}px)` }}>
+          {title}
+        </span>
 
         <div style={{ display: "flex", gap: 2 }}>
           <Button
@@ -130,6 +144,9 @@ export default function DesktopWindow({
             padding: "1px 1px",
             marginBottom: 0,
             gap: 2,
+            position: "relative",
+            zIndex: 2,
+            transform: `translate(${toolbarJitterX}px, ${toolbarJitterY}px)`,
           }}
         >
           {toolbar}
@@ -145,6 +162,8 @@ export default function DesktopWindow({
             flexDirection: "column",
             padding: 6,
             gap: 2,
+            position: "relative",
+            zIndex: 1,
           }}
         >
           {children}
