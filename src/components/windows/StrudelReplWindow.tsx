@@ -1,6 +1,7 @@
 "use client";
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { GroupBox } from "react95";
 
 export type StrudelReplHandle = {
   play: () => Promise<void>;
@@ -44,8 +45,154 @@ type StrudelCodeMirrorModule = {
   }) => EditorInstance;
 };
 
-const DEFAULT_CODE = `$: note("c a f e").lpf(800)`;
+const DEFAULT_CODE = `$: note("c a f e").s("sine").lpf(800)`;
 const ANALYZER_ID = 1;
+const GROUP_TOP_ROW_HEIGHT_PX = 14;
+const GROUP_LABEL_OFFSET_PX = 84;
+
+type StrudelCompositePanelProps = {
+  isPlaying: boolean;
+  ready: boolean;
+  editorRootRef: React.RefObject<HTMLDivElement | null>;
+  waveGlowPathRef: React.RefObject<SVGPathElement | null>;
+  wavePathRef: React.RefObject<SVGPathElement | null>;
+};
+
+function StrudelCompositePanel({
+  isPlaying,
+  ready,
+  editorRootRef,
+  waveGlowPathRef,
+  wavePathRef,
+}: StrudelCompositePanelProps) {
+  return (
+    <div
+      style={{
+        flex: "1 1 auto",
+        minWidth: 0,
+        minHeight: 0,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <GroupBox
+        className="strudel-groupbox"
+        label="strudel.cc"
+        style={{
+          position: "absolute",
+          inset: 0,
+          overflow: "hidden",
+          padding: 0,
+          margin: 0,
+        }}
+      >
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            flexDirection: "column",
+            width: "100%",
+            height: "100%",
+            minWidth: 0,
+            minHeight: 0,
+            overflow: "hidden",
+            padding: 0,
+            background: "transparent",
+          }}
+        >
+          <div
+            style={{
+              marginLeft: GROUP_LABEL_OFFSET_PX,
+              marginRight: 0,
+              marginTop: 0,
+              height: GROUP_TOP_ROW_HEIGHT_PX,
+              background: "#c0c0c0",
+              overflow: "hidden",
+              borderTop: "1px solid #dfdfdf",
+              borderBottom: "1px solid #7f7f7f",
+              pointerEvents: "none",
+              position: "relative",
+              zIndex: 1,
+            }}
+          >
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: 5,
+                  height: 1,
+                  background: "#ffffff",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: 6,
+                  height: 1,
+                  background: "#5d5d5d",
+                }}
+              />
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "block",
+                  opacity: isPlaying ? 1 : 0,
+                  transition: "opacity 120ms ease",
+                  position: "relative",
+                }}
+              >
+                <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(120,120,120,0.25)" strokeWidth="4" />
+                <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#3a3a3a" strokeWidth="1.6" />
+              </svg>
+          </div>
+          <div
+            ref={editorRootRef}
+            style={{
+              flex: "1 1 auto",
+              marginTop: 0,
+              minWidth: 0,
+              minHeight: 0,
+              overflow: "hidden",
+              background: "transparent",
+              position: "relative",
+            }}
+          >
+            {!ready && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#cfcfcf",
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                  background: "#121414",
+                  zIndex: 1,
+                }}
+              >
+                loading strudel...
+              </div>
+            )}
+          </div>
+        </div>
+      </GroupBox>
+      <style jsx global>{`
+        .strudel-groupbox > legend {
+          margin-left: 4px;
+          transform: translateY(2px);
+        }
+      `}</style>
+    </div>
+  );
+}
 
 type StrudelReplWindowProps = {
   onPlayingChange?: (playing: boolean) => void;
@@ -503,83 +650,13 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         overflow: "hidden",
       }}
     >
-      <div
-        style={{
-          flex: "0 0 28px",
-          minHeight: 28,
-          background: "#c0c0c0",
-          overflow: "hidden",
-          position: "relative",
-          borderTop: "1px solid #dfdfdf",
-          borderBottom: "1px solid #7f7f7f",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 12,
-            height: 1,
-            background: "#ffffff",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 13,
-            height: 1,
-            background: "#5d5d5d",
-          }}
-        />
-        <svg
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "block",
-            opacity: isPlaying ? 1 : 0,
-            transition: "opacity 120ms ease",
-            position: "relative",
-            zIndex: 1,
-          }}
-        >
-          <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(120,120,120,0.25)" strokeWidth="4" />
-          <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#3a3a3a" strokeWidth="1.6" />
-        </svg>
-      </div>
-      <div
-        ref={editorRootRef}
-        style={{
-          flex: "1 1 auto",
-          minWidth: 0,
-          minHeight: 0,
-          overflow: "hidden",
-          position: "relative",
-        }}
-      >
-        {!ready && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#cfcfcf",
-              fontFamily: "monospace",
-              fontSize: 12,
-              background: "#121414",
-              zIndex: 1,
-            }}
-          >
-            loading strudel...
-          </div>
-        )}
-      </div>
+      <StrudelCompositePanel
+        isPlaying={isPlaying}
+        ready={ready}
+        editorRootRef={editorRootRef}
+        waveGlowPathRef={waveGlowPathRef}
+        wavePathRef={wavePathRef}
+      />
     </div>
   );
 });
