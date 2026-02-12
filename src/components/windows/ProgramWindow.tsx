@@ -279,7 +279,7 @@ export default function ProgramWindow({
             fontWeight: "bold",
           }}
           active={strudelInSync}
-          disabled={!strudelPlaying || strudelInSync}
+          disabled={strudelPlaying && strudelInSync}
           aria-label="Set"
           title="Set"
           onClick={() => void strudelRef.current?.update()}

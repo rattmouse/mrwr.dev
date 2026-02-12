@@ -402,31 +402,32 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       const waveGlow = waveGlowPathRef.current;
       if (wave && waveGlow) {
         const samples = getScopeSamples();
-        const pointCount = 64;
+        const pointCount = 180;
         const dParts: string[] = ["M 0 50"];
-
+        let usedAudioSamples = false;
         if (samples && samples.length > 0) {
           const sampleCount = samples.length;
-          let triggerIndex = 0;
-          for (let i = 1; i < sampleCount; i += 1) {
-            const prevRaw = Number(samples[i - 1] ?? 0);
-            const currRaw = Number(samples[i] ?? 0);
-            const prev = prevRaw >= -1 && prevRaw <= 1 ? prevRaw : (prevRaw / 128) - 1;
-            const curr = currRaw >= -1 && currRaw <= 1 ? currRaw : (currRaw / 128) - 1;
-            if (prev > 0 && curr <= 0) {
-              triggerIndex = i;
-              break;
+          let energy = 0;
+          for (let i = 0; i < sampleCount; i += 1) {
+            const raw = Number(samples[i] ?? 0);
+            const normalized = raw >= -1 && raw <= 1 ? raw : (raw / 128) - 1;
+            energy += Math.abs(normalized);
+          }
+          const avgEnergy = energy / sampleCount;
+          usedAudioSamples = avgEnergy > 0.004;
+          if (usedAudioSamples) {
+            const scroll = Math.floor((now * 0.06) % sampleCount);
+            for (let i = 0; i <= pointCount; i += 1) {
+              const x = (i / pointCount) * 100;
+              const idx = (scroll + Math.floor((i / pointCount) * (sampleCount - 1))) % sampleCount;
+              const raw = Number(samples[idx] ?? 0);
+              const normalized = raw >= -1 && raw <= 1 ? raw : (raw / 128) - 1;
+              const y = 50 - normalized * 42;
+              dParts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
             }
           }
-          for (let i = 0; i <= pointCount; i += 1) {
-            const x = (i / pointCount) * 100;
-            const idx = (triggerIndex + Math.floor((i / pointCount) * (sampleCount - 1))) % sampleCount;
-            const raw = Number(samples[idx] ?? 0);
-            const normalized = raw >= -1 && raw <= 1 ? raw : (raw / 128) - 1;
-            const y = 50 - normalized * 40;
-            dParts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
-          }
-        } else if (playingRef.current) {
+        }
+        if (!usedAudioSamples && playingRef.current) {
           const tokens = extractNoteTokens(codeRef.current);
           if (tokens.length > 0) {
             const total = Math.max(1, tokens.length);
@@ -440,13 +441,13 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
               const freq = 1 + ((h >> 7) % 3); // 1..3 cycles within segment
               const localX = (xRatio * total) - noteIndex;
               const phase = (now / 1000) * (1.4 + ((h >> 11) % 5) * 0.2);
-              const y = 50 - Math.sin((localX * freq * Math.PI * 2) + phase) * (amp * 35);
+              const y = 50 - Math.sin((localX * freq * Math.PI * 2) + phase) * (amp * 30);
               dParts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
             }
           } else {
             dParts.push("L 100 50");
           }
-        } else {
+        } else if (!usedAudioSamples) {
           dParts.push("L 100 50");
         }
         const d = dParts.join(" ");
@@ -504,23 +505,50 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     >
       <div
         style={{
-          flex: `0 0 ${isPlaying ? 36 : 0}px`,
-          minHeight: isPlaying ? 36 : 0,
-          borderTop: isPlaying ? "1px solid #808080" : "none",
-          background: "var(--material)",
-          boxShadow: isPlaying ? "inset 1px 1px #fff, inset -1px -1px #808080" : "none",
+          flex: "0 0 28px",
+          minHeight: 28,
+          background: "#c0c0c0",
           overflow: "hidden",
-          transition: "min-height 120ms ease, flex-basis 120ms ease, opacity 120ms ease",
-          opacity: isPlaying ? 1 : 0,
+          position: "relative",
+          borderTop: "1px solid #dfdfdf",
+          borderBottom: "1px solid #7f7f7f",
         }}
       >
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 12,
+            height: 1,
+            background: "#ffffff",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 13,
+            height: 1,
+            background: "#5d5d5d",
+          }}
+        />
         <svg
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
-          style={{ width: "100%", height: "100%", display: "block", opacity: isPlaying ? 1 : 0 }}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block",
+            opacity: isPlaying ? 1 : 0,
+            transition: "opacity 120ms ease",
+            position: "relative",
+            zIndex: 1,
+          }}
         >
-          <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(0,245,179,0.30)" strokeWidth="10" />
-          <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#00f5b3" strokeWidth="2" />
+          <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(120,120,120,0.25)" strokeWidth="4" />
+          <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#3a3a3a" strokeWidth="1.6" />
         </svg>
       </div>
       <div
