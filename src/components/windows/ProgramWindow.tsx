@@ -73,8 +73,8 @@ export default function ProgramWindow({
       return;
     }
     const timer = window.setInterval(() => {
-      const range = 2.5;
-      const textRange = 1.1;
+      const range = 1.6;
+      const textRange = 0.2;
       setMusicJitter({
         x: (Math.random() * 2 - 1) * range,
         y: (Math.random() * 2 - 1) * range,

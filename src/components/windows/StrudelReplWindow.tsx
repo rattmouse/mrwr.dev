@@ -48,23 +48,22 @@ const DEFAULT_CODE = `$: note("c a f e").s("sine").lpf(800)`;
 const ANALYZER_ID = 1;
 const SCOPE_STRIP_HEIGHT_PX = 14;
 const WINDOW_CONTENT_PAD_PX = 6;
+const SCOPE_EDITOR_GAP_PX = 2;
 
 type StrudelCompositePanelProps = {
   isPlaying: boolean;
-  isWaveMoving: boolean;
   ready: boolean;
   editorRootRef: React.RefObject<HTMLDivElement | null>;
-  waveGlowPathRef: React.RefObject<SVGPathElement | null>;
-  wavePathRef: React.RefObject<SVGPathElement | null>;
+  topWaveGlowPathRef: React.RefObject<SVGPathElement | null>;
+  topWavePathRef: React.RefObject<SVGPathElement | null>;
 };
 
 function StrudelCompositePanel({
   isPlaying,
-  isWaveMoving,
   ready,
   editorRootRef,
-  waveGlowPathRef,
-  wavePathRef,
+  topWaveGlowPathRef,
+  topWavePathRef,
 }: StrudelCompositePanelProps) {
   return (
     <div
@@ -83,45 +82,58 @@ function StrudelCompositePanel({
           right: -WINDOW_CONTENT_PAD_PX,
           top: -WINDOW_CONTENT_PAD_PX,
           height: SCOPE_STRIP_HEIGHT_PX,
-          background: "transparent",
+          background: "#c0c0c0",
           overflow: "hidden",
           pointerEvents: "none",
           zIndex: 2,
         }}
       >
-        {isWaveMoving && (
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: 0,
-              height: "50%",
-              background: "#c0c0c0",
-            }}
-          />
+        {!isPlaying && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: Math.floor(SCOPE_STRIP_HEIGHT_PX / 2) - 1,
+                height: 1,
+                background: "#7f7f7f",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: Math.floor(SCOPE_STRIP_HEIGHT_PX / 2),
+                height: 1,
+                background: "#ffffff",
+              }}
+            />
+          </>
         )}
-        <svg
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "block",
-            opacity: isPlaying ? 1 : 0.9,
-            transition: "opacity 120ms ease",
-            position: "relative",
-          }}
-        >
-          <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(120,120,120,0.25)" strokeWidth="4" />
-          <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#3a3a3a" strokeWidth="1.6" />
-        </svg>
+        {isPlaying && (
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+              opacity: 1,
+              position: "relative",
+            }}
+          >
+            <path ref={topWaveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(120,120,120,0.25)" strokeWidth="4" />
+            <path ref={topWavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#3a3a3a" strokeWidth="1.6" />
+          </svg>
+        )}
       </div>
       <div
         ref={editorRootRef}
         style={{
           position: "absolute",
-          inset: `${SCOPE_STRIP_HEIGHT_PX + 2}px 0 0 0`,
+          inset: `${SCOPE_STRIP_HEIGHT_PX + SCOPE_EDITOR_GAP_PX}px 0 0 0`,
           minWidth: 0,
           minHeight: 0,
           overflow: "hidden",
@@ -211,10 +223,9 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
 ) {
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isWaveMoving, setIsWaveMoving] = useState(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
-  const waveGlowPathRef = useRef<SVGPathElement | null>(null);
-  const wavePathRef = useRef<SVGPathElement | null>(null);
+  const topWaveGlowPathRef = useRef<SVGPathElement | null>(null);
+  const topWavePathRef = useRef<SVGPathElement | null>(null);
   const editorRef = useRef<EditorInstance | null>(null);
   const webRef = useRef<StrudelWebModule | null>(null);
   const codeRef = useRef(DEFAULT_CODE);
@@ -223,7 +234,6 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   const outputAnalyserSourceRef = useRef<AudioNode | null>(null);
   const lastEvaluatedCodeRef = useRef<string | null>(null);
   const playingRef = useRef(false);
-  const waveMovingRef = useRef(false);
   const levelLastEmitAtRef = useRef(0);
   const levelLastValueRef = useRef(0);
 
@@ -504,14 +514,13 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   useEffect(() => {
     let raf = 0;
     const animate = (now: number) => {
-      const wave = wavePathRef.current;
-      const waveGlow = waveGlowPathRef.current;
-      if (wave && waveGlow) {
+      const wave = topWavePathRef.current;
+      const glow = topWaveGlowPathRef.current;
+      if (wave && glow) {
         const samples = getScopeSamples();
         const pointCount = 180;
         const dParts: string[] = ["M 0 50"];
         let usedAudioSamples = false;
-        let motionDetected = false;
         if (samples && samples.length > 0) {
           const sampleCount = samples.length;
           let energy = 0;
@@ -523,7 +532,6 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
           const avgEnergy = energy / sampleCount;
           usedAudioSamples = avgEnergy > 0.004;
           if (usedAudioSamples) {
-            motionDetected = true;
             const scroll = Math.floor((now * 0.06) % sampleCount);
             for (let i = 0; i <= pointCount; i += 1) {
               const x = (i / pointCount) * 100;
@@ -538,7 +546,6 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         if (!usedAudioSamples && playingRef.current) {
           const tokens = extractNoteTokens(codeRef.current);
           if (tokens.length > 0) {
-            motionDetected = true;
             const total = Math.max(1, tokens.length);
             for (let i = 0; i <= pointCount; i += 1) {
               const xRatio = i / pointCount;
@@ -561,19 +568,13 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         }
         const d = dParts.join(" ");
         wave.setAttribute("d", d);
-        waveGlow.setAttribute("d", d);
-        if (motionDetected !== waveMovingRef.current) {
-          waveMovingRef.current = motionDetected;
-          setIsWaveMoving(motionDetected);
-        }
+        glow.setAttribute("d", d);
       }
       raf = window.requestAnimationFrame(animate);
     };
     raf = window.requestAnimationFrame(animate);
     return () => {
       window.cancelAnimationFrame(raf);
-      waveMovingRef.current = false;
-      setIsWaveMoving(false);
     };
   }, []);
 
@@ -620,11 +621,10 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     >
       <StrudelCompositePanel
         isPlaying={isPlaying}
-        isWaveMoving={isWaveMoving}
         ready={ready}
         editorRootRef={editorRootRef}
-        waveGlowPathRef={waveGlowPathRef}
-        wavePathRef={wavePathRef}
+        topWaveGlowPathRef={topWaveGlowPathRef}
+        topWavePathRef={topWavePathRef}
       />
     </div>
   );
