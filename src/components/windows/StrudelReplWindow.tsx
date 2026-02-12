@@ -106,6 +106,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   ref
 ) {
   const [ready, setReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const waveGlowPathRef = useRef<SVGPathElement | null>(null);
   const wavePathRef = useRef<SVGPathElement | null>(null);
@@ -182,6 +183,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
           await web.evaluate(codeRef.current, true);
           lastEvaluatedCodeRef.current = codeRef.current;
           playingRef.current = true;
+          setIsPlaying(true);
           onPlayingChange?.(true);
           emitSync();
           return;
@@ -198,6 +200,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       }
       lastEvaluatedCodeRef.current = codeRef.current;
       playingRef.current = true;
+      setIsPlaying(true);
       onPlayingChange?.(true);
       emitSync();
     } catch (err) {
@@ -218,6 +221,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         await web.evaluate("hush()", false);
       }
       playingRef.current = false;
+      setIsPlaying(false);
       onPlayingChange?.(false);
       emitSync();
     } catch (err) {
@@ -385,6 +389,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       outputAnalyserSourceRef.current = null;
       outputAnalyserDataRef.current = null;
       outputAnalyserRef.current = null;
+      setIsPlaying(false);
       webRef.current = null;
       onSyncChange?.(false);
     };
@@ -499,17 +504,20 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     >
       <div
         style={{
-          flex: "0 0 36px",
-          minHeight: 36,
-          borderTop: "1px solid #808080",
-          background: "#121414",
+          flex: `0 0 ${isPlaying ? 36 : 0}px`,
+          minHeight: isPlaying ? 36 : 0,
+          borderTop: isPlaying ? "1px solid #808080" : "none",
+          background: "var(--material)",
+          boxShadow: isPlaying ? "inset 1px 1px #fff, inset -1px -1px #808080" : "none",
           overflow: "hidden",
+          transition: "min-height 120ms ease, flex-basis 120ms ease, opacity 120ms ease",
+          opacity: isPlaying ? 1 : 0,
         }}
       >
         <svg
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
-          style={{ width: "100%", height: "100%", display: "block" }}
+          style={{ width: "100%", height: "100%", display: "block", opacity: isPlaying ? 1 : 0 }}
         >
           <path ref={waveGlowPathRef} d="M 0 50 L 100 50" fill="none" stroke="rgba(0,245,179,0.30)" strokeWidth="10" />
           <path ref={wavePathRef} d="M 0 50 L 100 50" fill="none" stroke="#00f5b3" strokeWidth="2" />
