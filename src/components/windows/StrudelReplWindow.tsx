@@ -78,34 +78,11 @@ function StrudelCompositePanel({
         style={{
           height: SCOPE_STRIP_HEIGHT_PX,
           marginBottom: 2,
-          background: "#c0c0c0",
           overflow: "hidden",
-          borderTop: "1px solid #dfdfdf",
-          borderBottom: "1px solid #7f7f7f",
           pointerEvents: "none",
           position: "relative",
         }}
       >
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 5,
-            height: 1,
-            background: "#ffffff",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 6,
-            height: 1,
-            background: "#5d5d5d",
-          }}
-        />
         <svg
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
