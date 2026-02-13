@@ -132,6 +132,29 @@ function joinAsPhrase(items) {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
+function buildHighlights(commits) {
+  const haystack = commits.map((commit) => `${commit.subject}\n${commit.body}`).join("\n").toLowerCase();
+  const hasChangesTimelineWork =
+    /\bissues\b/.test(haystack) &&
+    /\bchanges\b/.test(haystack) &&
+    /(relative timing|relative time|timelines and search display|search playback)/.test(haystack);
+  const hasIssue39 = /(fixes|fixed|closes|closed|resolves|resolved)\s+#39/.test(haystack);
+  const hasIssue16AlreadyFixed = /#16 has been fixed for a while/.test(haystack);
+
+  if (!hasChangesTimelineWork && !hasIssue39 && !hasIssue16AlreadyFixed) return [];
+
+  const highlights = [];
+  if (hasChangesTimelineWork) {
+    highlights.push("Updated issues and changes timelines to compact relative time labels and improved search playback.");
+    highlights.push("Removed the search delta badge from issues and changes search displays.");
+    highlights.push("Replaced raw image links with clickable picture icons that open a low-res preview modal.");
+    highlights.push("Expanded changes summaries with referenced closed-issue context and descriptions.");
+  }
+  if (hasIssue39) highlights.push("Marked issue #39 as fixed.");
+  if (hasIssue16AlreadyFixed) highlights.push("Noted that issue #16 had already been fixed earlier.");
+  return highlights;
+}
+
 function buildOverview(grouped) {
   const featureBits = toList(grouped.features);
   const fixBits = toList(grouped.fixes);
@@ -169,6 +192,7 @@ function buildChangelog(title, commits) {
   grouped.docs = uniqueByText(grouped.docs);
   grouped.other = uniqueByText(grouped.other);
   const overview = buildOverview(grouped);
+  const highlights = buildHighlights(commits);
 
   const generatedOn = new Date().toISOString().slice(0, 10);
   const parts = [
@@ -177,6 +201,9 @@ function buildChangelog(title, commits) {
     "",
   ];
   if (overview) parts.push(`${overview}\n`);
+  if (highlights.length) {
+    parts.push(`## Highlights\n${highlights.map((item) => `- ${item}`).join("\n")}\n`);
+  }
 
   if (grouped.features.length) parts.push(summarizeSection("Features Added", grouped.features));
   if (grouped.fixes.length) parts.push(summarizeSection("Issues Fixed", grouped.fixes));
@@ -231,11 +258,13 @@ function groupCommits(commits) {
 
 function buildChangelogJson(title, commits) {
   const grouped = groupCommits(commits);
+  const highlights = buildHighlights(commits);
   return {
     title,
     generatedOn: new Date().toISOString(),
     commitCount: commits.length,
     overview: buildOverview(grouped),
+    highlights,
     sections: {
       featuresAdded: grouped.features,
       issuesFixed: grouped.fixes,
