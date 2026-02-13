@@ -88,11 +88,9 @@ function getSearchSpanSeconds(entries: SearchEntryLine[]): number {
 }
 
 function renderSearchPrompt(entry: string, when: string, spanSeconds: number): React.ReactNode {
-    const spanLabel = `Δ${spanSeconds.toFixed(1)}s`;
     return (
         <>
             <span style={{ color: "#ffe066", textShadow: "0 0 1px #000, 0 0 2px #000" }}>{`@[${when}] `}</span>
-            <span style={{ color: "#61f7ff", textShadow: "0 0 1px #000, 0 0 2px #000" }}>{`[${spanLabel}] `}</span>
             <span style={{ color: "#0057d8" }}>os</span>
             {"@"}
             <span style={{ color: "#a00055" }}>{SEARCH_PROMPT_HOST}</span>
