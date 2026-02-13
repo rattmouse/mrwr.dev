@@ -161,7 +161,20 @@ export default function StartMenu({
   const [query, setQuery] = useState("");
   const timerRef = useRef<number | null>(null);
   const lastSentRef = useRef<string>("");
+  const searchSessionIdRef = useRef<string>("");
   const { shutdown } = usePower();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const existing = window.sessionStorage.getItem("searchLogSessionId");
+    if (existing) {
+      searchSessionIdRef.current = existing;
+      return;
+    }
+    const created = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    window.sessionStorage.setItem("searchLogSessionId", created);
+    searchSessionIdRef.current = created;
+  }, []);
 
   const pick = (id: WindowId) => {
     openWindow(id);
@@ -235,7 +248,10 @@ export default function StartMenu({
         await fetch("/log-search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: q }),
+          body: JSON.stringify({
+            query: q,
+            sessionId: searchSessionIdRef.current || undefined,
+          }),
         });
       } catch (err) {
         console.error("log-search failed", err);

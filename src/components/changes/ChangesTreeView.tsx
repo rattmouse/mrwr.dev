@@ -1,6 +1,6 @@
 "use client";
 
-import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { GroupBox, Table, TableBody, TableDataCell, TableHead, TableHeadCell, TableRow } from "react95";
 import type { GitChangeEntry, GitChangeIssueRef, GitChangeType } from "@/lib/gitChanges.types";
 import { stripImagesAndCollect } from "@/lib/imageRefs";
@@ -19,6 +19,12 @@ export type ChangesTreeViewHandle = {
 type Props = {
   entries: GitChangeEntry[];
   showFrame?: boolean;
+  onModalOpenChange?: (open: boolean) => void;
+  modalScale?: number;
+  modalForceButtonOnly?: boolean;
+  modalButtonOnlyWidth?: number;
+  modalFakePreviewOnly?: boolean;
+  openImagesInNewTab?: boolean;
 };
 
 type FocusFilter = GitChangeType | "all";
@@ -61,6 +67,7 @@ type SearchEntryLine = {
   entry: string;
   when: string;
   atMs: number;
+  deltaMs: number | null;
 };
 
 type ParsedSearchLine = {
@@ -74,14 +81,44 @@ function stripDuplicateSearchPrefix(entry: string): string {
 }
 
 function parseSearchEntryLine(line: string): SearchEntryLine | null {
-  const match = line.match(/^(.*?)(?:\s*@\s*)(\d{4}-\d{2}-\d{2}T[^ \n]+)\s*$/);
-  if (!match) return null;
-  const atMs = Date.parse(match[2]);
+  const isoMatch = line.match(/^(.*?)(?:\s*@\s*)(\d{4}-\d{2}-\d{2}T[^ \n]+)\s*$/);
+  if (isoMatch) {
+    const atMs = Date.parse(isoMatch[2]);
+    return {
+      entry: stripDuplicateSearchPrefix(isoMatch[1].trimEnd()),
+      when: formatRelativeCompact(isoMatch[2]),
+      atMs: Number.isFinite(atMs) ? atMs : 0,
+      deltaMs: null,
+    };
+  }
+
+  const deltaMatch = line.match(/^(.*?)(?:\s*@\s*)?(?:\+|Δ|delta_ms=)(\d+)\s*ms\s*$/i);
+  if (!deltaMatch) return null;
+  const deltaMs = Math.max(0, Number.parseInt(deltaMatch[2], 10) || 0);
   return {
-    entry: stripDuplicateSearchPrefix(match[1].trimEnd()),
-    when: formatRelativeCompact(match[2]),
-    atMs: Number.isFinite(atMs) ? atMs : 0,
+    entry: stripDuplicateSearchPrefix(deltaMatch[1].trimEnd()),
+    when: deltaMs === 0 ? "just now" : `${Math.round(deltaMs / 100) / 10}s later`,
+    atMs: Number.NaN,
+    deltaMs,
   };
+}
+
+function withResolvedSearchTimes(entries: SearchEntryLine[]): SearchEntryLine[] {
+  let cursor = 0;
+  return entries.map((entry, index) => {
+    const hasAbsolute = Number.isFinite(entry.atMs);
+    if (hasAbsolute) {
+      cursor = entry.atMs;
+      return entry;
+    }
+
+    const deltaMs = Math.max(0, entry.deltaMs ?? (index === 0 ? 0 : 60));
+    cursor += deltaMs;
+    return {
+      ...entry,
+      atMs: cursor,
+    };
+  });
 }
 
 function getSearchSpanSeconds(entries: SearchEntryLine[]): number {
@@ -123,14 +160,15 @@ type SearchPlaybackInlineProps = {
 };
 
 function SearchPlaybackInline({ entries }: SearchPlaybackInlineProps): React.ReactNode {
-  const spanSeconds = useMemo(() => getSearchSpanSeconds(entries), [entries]);
+  const timedEntries = useMemo(() => withResolvedSearchTimes(entries), [entries]);
+  const spanSeconds = useMemo(() => getSearchSpanSeconds(timedEntries), [timedEntries]);
   const timeline = useMemo(() => {
-    if (!entries.length) return null;
-    if (entries.length === 1) {
+    if (!timedEntries.length) return null;
+    if (timedEntries.length === 1) {
       return {
         segments: [],
         totalMs: 1200,
-        finalEntry: entries[0],
+        finalEntry: timedEntries[0],
       };
     }
 
@@ -141,15 +179,15 @@ function SearchPlaybackInline({ entries }: SearchPlaybackInlineProps): React.Rea
         start: cursor,
         duration: initialDurationMs,
         from: "",
-        to: entries[0].entry,
-        when: entries[0].when,
+        to: timedEntries[0].entry,
+        when: timedEntries[0].when,
       },
     ];
     cursor += initialDurationMs;
 
-    for (let i = 1; i < entries.length; i += 1) {
-      const prev = entries[i - 1];
-      const next = entries[i];
+    for (let i = 1; i < timedEntries.length; i += 1) {
+      const prev = timedEntries[i - 1];
+      const next = timedEntries[i];
       const deltaMs = Math.max(60, next.atMs - prev.atMs);
       segments.push({
         start: cursor,
@@ -164,9 +202,9 @@ function SearchPlaybackInline({ entries }: SearchPlaybackInlineProps): React.Rea
     return {
       segments,
       totalMs: cursor + 1200,
-      finalEntry: entries[entries.length - 1],
+      finalEntry: timedEntries[timedEntries.length - 1],
     };
-  }, [entries]);
+  }, [timedEntries]);
 
   const [elapsedMs, setElapsedMs] = useState(0);
   useEffect(() => {
@@ -179,7 +217,7 @@ function SearchPlaybackInline({ entries }: SearchPlaybackInlineProps): React.Rea
   }, [timeline]);
 
   if (!timeline || !timeline.segments.length) {
-    const single = entries[0];
+    const single = timedEntries[0];
     return <>{renderSearchPrompt(single?.entry ?? "", single?.when ?? "unknown", spanSeconds)}</>;
   }
 
@@ -334,11 +372,36 @@ function groupDaily(entries: GitChangeEntry[]): DailySummary[] {
 }
 
 const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function ChangesTreeView(
-  { entries, showFrame = true },
+  {
+    entries,
+    showFrame = true,
+    onModalOpenChange,
+    modalScale = 1,
+    modalForceButtonOnly = false,
+    modalButtonOnlyWidth,
+    modalFakePreviewOnly = false,
+    openImagesInNewTab = false,
+  },
   ref
 ) {
   const [focus, setFocus] = useState<FocusFilter>("all");
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [tinyEmojiModalOpen, setTinyEmojiModalOpen] = useState(false);
+  const openImage = useCallback(
+    (url: string) => {
+      if (openImagesInNewTab) {
+        setTinyEmojiModalOpen(true);
+        return;
+      }
+      setPreviewImageUrl(url);
+    },
+    [openImagesInNewTab]
+  );
+  useEffect(() => {
+    if (!tinyEmojiModalOpen) return;
+    const timer = window.setTimeout(() => setTinyEmojiModalOpen(false), 900);
+    return () => window.clearTimeout(timer);
+  }, [tinyEmojiModalOpen]);
 
   useImperativeHandle(ref, () => ({
     expandAll: () => setFocus("all"),
@@ -353,6 +416,10 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
     () => (focus === "all" ? entries : entries.filter((entry) => entry.type === focus)),
     [entries, focus]
   );
+  useEffect(() => {
+    onModalOpenChange?.(previewImageUrl !== null);
+    return () => onModalOpenChange?.(false);
+  }, [onModalOpenChange, previewImageUrl]);
 
   const rows = useMemo(() => groupDaily(filteredEntries), [filteredEntries]);
 
@@ -379,7 +446,7 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
                       <div key={issue.number} style={{ marginTop: 2 }}>
                         <div>{`#${issue.number} ${issue.title}:`}</div>
                         <div style={{ paddingLeft: 12 }}>
-                          {renderIssueBody(issue.body, `issue:${issue.number}`, setPreviewImageUrl)}
+                          {renderIssueBody(issue.body, `issue:${issue.number}`, openImage)}
                         </div>
                       </div>
                     );
@@ -397,7 +464,50 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
     return (
       <>
         {content}
-        <LowResImageModal imageUrl={previewImageUrl} onClose={() => setPreviewImageUrl(null)} />
+        <LowResImageModal
+          imageUrl={previewImageUrl}
+          onClose={() => setPreviewImageUrl(null)}
+          sizeScale={modalScale}
+          forceButtonOnly={modalForceButtonOnly}
+          buttonOnlyWidth={modalButtonOnlyWidth}
+          fakePreviewOnly={modalFakePreviewOnly}
+        />
+        {tinyEmojiModalOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setTinyEmojiModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.35)",
+              zIndex: 10001,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                width: 74,
+                height: 54,
+                background: "#c0c0c0",
+                borderTop: "2px solid #fff",
+                borderLeft: "2px solid #fff",
+                borderRight: "2px solid #000",
+                borderBottom: "2px solid #000",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 20,
+                lineHeight: 1,
+              }}
+            >
+              🖼️
+            </div>
+          </div>
+        )}
       </>
     );
   }
@@ -407,7 +517,50 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
       <GroupBox label="Updates" style={{ width: "100%" }}>
         {content}
       </GroupBox>
-      <LowResImageModal imageUrl={previewImageUrl} onClose={() => setPreviewImageUrl(null)} />
+      <LowResImageModal
+        imageUrl={previewImageUrl}
+        onClose={() => setPreviewImageUrl(null)}
+        sizeScale={modalScale}
+        forceButtonOnly={modalForceButtonOnly}
+        buttonOnlyWidth={modalButtonOnlyWidth}
+        fakePreviewOnly={modalFakePreviewOnly}
+      />
+      {tinyEmojiModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setTinyEmojiModalOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.35)",
+            zIndex: 10001,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: 74,
+              height: 54,
+              background: "#c0c0c0",
+              borderTop: "2px solid #fff",
+              borderLeft: "2px solid #fff",
+              borderRight: "2px solid #000",
+              borderBottom: "2px solid #000",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 20,
+              lineHeight: 1,
+            }}
+          >
+            🖼️
+          </div>
+        </div>
+      )}
     </>
   );
 });
