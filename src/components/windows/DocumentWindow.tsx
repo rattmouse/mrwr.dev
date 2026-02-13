@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Anchor, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
@@ -24,6 +24,17 @@ type AlbumCover = {
 const ALBUM_COVERS: AlbumCover[] = [
   ...albumsData,
 ];
+
+function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
+  const next = [...input];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = next[i];
+    next[i] = next[j];
+    next[j] = tmp;
+  }
+  return next;
+}
 
 function getSizedCover(image: string | null, size: "low" | "normal" | "high"): string | null {
   if (!image) return null;
@@ -49,12 +60,16 @@ export default function DocumentWindow({
   const album = albums[activeAlbum] ?? ALBUM_COVERS[0];
   const albumSize = layout === "maximized" ? 280 : 144;
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
-  const railThumbSize = layout === "maximized" ? 44 : 28;
+  const railThumbSize = layout === "maximized" ? 58 : 42;
+  const railViewportHeight = layout === "maximized" ? railThumbSize * 4 : railThumbSize * 4;
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const syncingScrollRef = useRef(false);
 
   useEffect(() => {
     if (id !== "albums") return;
     let cancelled = false;
     setAlbumsLoading(true);
+    setActiveAlbum(0);
 
     async function resolveCover(entry: AlbumCover): Promise<AlbumCover> {
       try {
@@ -76,7 +91,8 @@ export default function DocumentWindow({
 
     async function loadAlbums() {
       try {
-        const resolvedAlbums = await Promise.all(ALBUM_COVERS.map(resolveCover));
+        const shuffled = shuffleAlbums(ALBUM_COVERS);
+        const resolvedAlbums = await Promise.all(shuffled.map(resolveCover));
         if (!cancelled) setAlbums(resolvedAlbums);
       } catch (error) {
         console.error("Failed to load album covers:", error);
@@ -90,6 +106,20 @@ export default function DocumentWindow({
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (id !== "albums" || albumsLoading) return;
+    const rail = railRef.current;
+    if (!rail) return;
+    const target = rail.querySelector<HTMLElement>(`[data-album-index="${activeAlbum}"]`);
+    if (!target) return;
+    const desired = target.offsetTop - (rail.clientHeight / 2) + (target.clientHeight / 2);
+    syncingScrollRef.current = true;
+    rail.scrollTo({ top: Math.max(0, desired), behavior: "smooth" });
+    window.setTimeout(() => {
+      syncingScrollRef.current = false;
+    }, 180);
+  }, [activeAlbum, id, albumsLoading]);
 
   return (
     <DesktopWindow
@@ -134,12 +164,36 @@ export default function DocumentWindow({
               <div
                 style={{
                   width: "100%",
-                  height: albumSize,
+                  height: railViewportHeight,
                   position: "relative",
                 }}
               >
                 <div
                   className="albums-rail-scroll"
+                  ref={railRef}
+                  onScroll={(event) => {
+                    if (syncingScrollRef.current) return;
+                    const rail = event.currentTarget;
+                    const centerY = rail.scrollTop + rail.clientHeight / 2;
+                    const nodes = Array.from(rail.querySelectorAll<HTMLElement>("[data-album-index]"));
+                    let nearestIndex = activeAlbum;
+                    let nearestDist = Number.POSITIVE_INFINITY;
+                    for (const node of nodes) {
+                      const indexAttr = node.dataset.albumIndex;
+                      if (typeof indexAttr !== "string") continue;
+                      const index = Number.parseInt(indexAttr, 10);
+                      if (Number.isNaN(index)) continue;
+                      const nodeCenter = node.offsetTop + node.clientHeight / 2;
+                      const dist = Math.abs(nodeCenter - centerY);
+                      if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestIndex = index;
+                      }
+                    }
+                    if (nearestIndex !== activeAlbum) {
+                      setActiveAlbum(nearestIndex);
+                    }
+                  }}
                   style={{
                     position: "absolute",
                     left: 0,
@@ -169,6 +223,7 @@ export default function DocumentWindow({
                       return (
                         <button
                           key={`${entry.artist}-${entry.title}`}
+                          data-album-index={index}
                           onClick={() => setActiveAlbum(index)}
                           style={{
                             width: railThumbSize,
@@ -178,7 +233,7 @@ export default function DocumentWindow({
                             background: "transparent",
                             cursor: "pointer",
                             flex: `0 0 ${railThumbSize}px`,
-                            marginTop: index === 0 ? 0 : -Math.floor(railThumbSize * 0.45),
+                            marginTop: index === 0 ? 0 : -Math.floor(railThumbSize * 0.35),
                             transform: `translate(${scatterX}px, ${scatterY}px) rotate(${scatterR}deg)`,
                           }}
                           aria-label={`Show ${entry.title}`}
@@ -216,35 +271,6 @@ export default function DocumentWindow({
                         </button>
                       );
                     })
-                  )}
-                </div>
-                <div
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    top: 2,
-                    bottom: 2,
-                    right: 1,
-                    width: 6,
-                    borderTop: "1px solid #808080",
-                    borderLeft: "1px solid #808080",
-                    borderRight: "1px solid #fff",
-                    borderBottom: "1px solid #fff",
-                    background: "#c0c0c0",
-                  }}
-                >
-                  {!albumsLoading && albums.length > 0 && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: 0,
-                        right: 0,
-                        top: `${(activeAlbum / Math.max(1, albums.length - 1)) * 100}%`,
-                        height: 10,
-                        marginTop: -5,
-                        background: "#7f7f7f",
-                      }}
-                    />
                   )}
                 </div>
               </div>
