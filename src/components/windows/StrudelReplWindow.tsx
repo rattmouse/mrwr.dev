@@ -1,6 +1,7 @@
 "use client";
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import OscilloscopeWindow from "@/components/windows/OscilloscopeWindow";
 
 export type StrudelReplHandle = {
   play: () => Promise<void>;
@@ -49,6 +50,29 @@ const ANALYZER_ID = 1;
 const SCOPE_STRIP_HEIGHT_PX = 14;
 const WINDOW_CONTENT_PAD_PX = 6;
 const SCOPE_EDITOR_GAP_PX = 2;
+const DEFAULT_SCOPE_POPUP_SIZE = { width: 112, height: 78 };
+const POPUP_SIDE_GAP_PX = 8;
+const POPUP_BOTTOM_GAP_PX = 8;
+const POPUP_TOP_GAP_PX = 18;
+
+type PopupCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+function getScopePopupSize(containerWidth: number, containerHeight: number, compact: boolean) {
+  const w = Math.max(1, containerWidth);
+  const h = Math.max(1, containerHeight);
+
+  if (compact) {
+    return {
+      width: Math.max(96, Math.min(156, Math.round(w * 0.4))),
+      height: Math.max(68, Math.min(112, Math.round(h * 0.34))),
+    };
+  }
+
+  return {
+    width: Math.max(160, Math.min(320, Math.round(w * 0.36))),
+    height: Math.max(108, Math.min(220, Math.round(h * 0.32))),
+  };
+}
 
 type StrudelCompositePanelProps = {
   isPlaying: boolean;
@@ -167,6 +191,8 @@ type StrudelReplWindowProps = {
   onPlayingChange?: (playing: boolean) => void;
   onLevelChange?: (level: number) => void;
   onSyncChange?: (inSync: boolean) => void;
+  scopePopupOpen?: boolean;
+  scopePopupCompact?: boolean;
 };
 
 function withAnalyzer(code: string): string {
@@ -218,11 +244,19 @@ function hashToken(token: string): number {
 }
 
 const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(function StrudelReplWindow(
-  { onPlayingChange, onLevelChange, onSyncChange },
+  { onPlayingChange, onLevelChange, onSyncChange, scopePopupOpen = false, scopePopupCompact = true },
   ref
 ) {
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [scopePopupSize, setScopePopupSize] = useState(DEFAULT_SCOPE_POPUP_SIZE);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [scopePopupCorner, setScopePopupCorner] = useState<PopupCorner>("bottom-left");
+  const [scopePopupDragPos, setScopePopupDragPos] = useState<{ x: number; y: number } | null>(null);
+  const scopePopupDragPosRef = useRef<{ x: number; y: number } | null>(null);
+  const scopePopupDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const scopePopupDraggingRef = useRef(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const topWaveGlowPathRef = useRef<SVGPathElement | null>(null);
   const topWavePathRef = useRef<SVGPathElement | null>(null);
@@ -518,6 +552,13 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       const glow = topWaveGlowPathRef.current;
       if (wave && glow) {
         const samples = getScopeSamples();
+        if (samples && samples.length > 0) {
+          window.dispatchEvent(
+            new CustomEvent("strudel-scope-data", {
+              detail: { id: ANALYZER_ID, samples },
+            })
+          );
+        }
         const pointCount = 180;
         const dParts: string[] = ["M 0 50"];
         let usedAudioSamples = false;
@@ -607,8 +648,136 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
     };
   }, [onLevelChange]);
 
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return;
+
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      setContainerSize({ width: rect.width, height: rect.height });
+      setScopePopupSize(getScopePopupSize(rect.width, rect.height, scopePopupCompact));
+    };
+
+    update();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => update());
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [scopePopupCompact]);
+
+  useEffect(() => {
+    if (!scopePopupOpen) {
+      setScopePopupDragPos(null);
+      scopePopupDragPosRef.current = null;
+      scopePopupDragOffsetRef.current = null;
+      scopePopupDraggingRef.current = false;
+    }
+  }, [scopePopupOpen]);
+
+  const popupPadding = scopePopupCompact ? 2 : 3;
+  const popupOuterWidth = scopePopupSize.width + popupPadding * 2 + 4;
+  const popupOuterHeight = scopePopupSize.height + popupPadding * 2 + 4;
+  const effectiveContainerWidth = containerSize.width || rootRef.current?.getBoundingClientRect().width || 0;
+  const effectiveContainerHeight = containerSize.height || rootRef.current?.getBoundingClientRect().height || 0;
+
+  const getSnappedPopupPosition = (corner: PopupCorner, containerW: number, containerH: number) => {
+    if (corner === "top-left") return { x: POPUP_SIDE_GAP_PX, y: POPUP_TOP_GAP_PX };
+    if (corner === "top-right") {
+      return {
+        x: Math.max(POPUP_SIDE_GAP_PX, containerW - popupOuterWidth - POPUP_SIDE_GAP_PX),
+        y: POPUP_TOP_GAP_PX,
+      };
+    }
+    if (corner === "bottom-left") {
+      return {
+        x: POPUP_SIDE_GAP_PX,
+        y: Math.max(POPUP_TOP_GAP_PX, containerH - popupOuterHeight - POPUP_BOTTOM_GAP_PX),
+      };
+    }
+    return {
+      x: Math.max(POPUP_SIDE_GAP_PX, containerW - popupOuterWidth - POPUP_SIDE_GAP_PX),
+      y: Math.max(POPUP_TOP_GAP_PX, containerH - popupOuterHeight - POPUP_BOTTOM_GAP_PX),
+    };
+  };
+
+  const clampPopupPosition = (x: number, y: number, containerW: number, containerH: number) => {
+    const minX = POPUP_SIDE_GAP_PX;
+    const minY = POPUP_TOP_GAP_PX;
+    const maxX = Math.max(minX, containerW - popupOuterWidth - POPUP_SIDE_GAP_PX);
+    const maxY = Math.max(minY, containerH - popupOuterHeight - POPUP_BOTTOM_GAP_PX);
+    return {
+      x: Math.max(minX, Math.min(maxX, x)),
+      y: Math.max(minY, Math.min(maxY, y)),
+    };
+  };
+
+  const onPopupPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const popupRect = event.currentTarget.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    scopePopupDraggingRef.current = true;
+    scopePopupDragOffsetRef.current = {
+      x: event.clientX - popupRect.left,
+      y: event.clientY - popupRect.top,
+    };
+    const initial = {
+      x: popupRect.left - rootRect.left,
+      y: popupRect.top - rootRect.top,
+    };
+    scopePopupDragPosRef.current = initial;
+    setScopePopupDragPos(initial);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPopupPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scopePopupDraggingRef.current) return;
+    const root = rootRef.current;
+    const offset = scopePopupDragOffsetRef.current;
+    if (!root || !offset) return;
+    const rootRect = root.getBoundingClientRect();
+    const nextX = event.clientX - rootRect.left - offset.x;
+    const nextY = event.clientY - rootRect.top - offset.y;
+    const clamped = clampPopupPosition(nextX, nextY, rootRect.width, rootRect.height);
+    scopePopupDragPosRef.current = clamped;
+    setScopePopupDragPos(clamped);
+  };
+
+  const onPopupPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!scopePopupDraggingRef.current) return;
+    scopePopupDraggingRef.current = false;
+    scopePopupDragOffsetRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // noop
+    }
+
+    const root = rootRef.current;
+    if (!root) {
+      scopePopupDragPosRef.current = null;
+      setScopePopupDragPos(null);
+      return;
+    }
+    const rootRect = root.getBoundingClientRect();
+    const currentPos = scopePopupDragPosRef.current ?? getSnappedPopupPosition(scopePopupCorner, rootRect.width, rootRect.height);
+    const centerX = currentPos.x + popupOuterWidth / 2;
+    const centerY = currentPos.y + popupOuterHeight / 2;
+    const horizontal = centerX < rootRect.width / 2 ? "left" : "right";
+    const vertical = centerY < rootRect.height / 2 ? "top" : "bottom";
+    setScopePopupCorner(`${vertical}-${horizontal}` as PopupCorner);
+    scopePopupDragPosRef.current = null;
+    setScopePopupDragPos(null);
+  };
+
   return (
     <div
+      ref={rootRef}
       style={{
         flex: "1 1 auto",
         minHeight: 0,
@@ -617,8 +786,60 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
         flexDirection: "column",
         background: "var(--background, #222)",
         overflow: "hidden",
+        position: "relative",
       }}
     >
+      {scopePopupOpen && (
+        <div
+          onPointerDown={onPopupPointerDown}
+          onPointerMove={onPopupPointerMove}
+          onPointerUp={onPopupPointerUp}
+          style={{
+            position: "absolute",
+            left:
+              scopePopupDragPos?.x ??
+              getSnappedPopupPosition(
+                scopePopupCorner,
+                effectiveContainerWidth,
+                effectiveContainerHeight
+              ).x,
+            top:
+              scopePopupDragPos?.y ??
+              getSnappedPopupPosition(
+                scopePopupCorner,
+                effectiveContainerWidth,
+                effectiveContainerHeight
+              ).y,
+            zIndex: 5,
+            pointerEvents: "auto",
+            background: "#c0c0c0",
+            borderTop: "2px solid #fff",
+            borderLeft: "2px solid #fff",
+            borderRight: "2px solid #000",
+            borderBottom: "2px solid #000",
+            boxSizing: "border-box",
+            padding: popupPadding,
+            cursor: scopePopupDragPos ? "grabbing" : "grab",
+            touchAction: "none",
+            width: "fit-content",
+            height: "fit-content",
+          }}
+        >
+          <div
+            style={{
+              width: scopePopupSize.width,
+              height: scopePopupSize.height,
+              border: "1px solid #808080",
+              background: "#0d1010",
+              overflow: "hidden",
+              boxSizing: "border-box",
+            }}
+            aria-label={scopePopupCompact ? "Mini scope popup" : "Scope popup"}
+          >
+            <OscilloscopeWindow />
+          </div>
+        </div>
+      )}
       <StrudelCompositePanel
         isPlaying={isPlaying}
         ready={ready}

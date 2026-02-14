@@ -43,6 +43,15 @@ export default function ProgramWindow({
   onRestore,
   onToggleMaximize,
 }: ProgramWindowProps) {
+  const getSubmenuTopForRow = (target: EventTarget & Element) => {
+    const row = target as HTMLElement;
+    const parent = row.parentElement as HTMLElement | null;
+    if (!parent) return 0;
+    const rowRect = row.getBoundingClientRect();
+    const parentRect = parent.getBoundingClientRect();
+    return Math.max(0, Math.round(rowRect.top - parentRect.top) - 1);
+  };
+
   const issuesTreeRef = useRef<IssuesTreeViewHandle>(null);
   const changesTreeRef = useRef<ChangesTreeViewHandle>(null);
   const strudelRef = useRef<StrudelReplHandle>(null);
@@ -53,6 +62,9 @@ export default function ProgramWindow({
   const [musicTextJitter, setMusicTextJitter] = useState({ x: 0, y: 0 });
   const [musicFileOpen, setMusicFileOpen] = useState(false);
   const [musicFileOpenSubmenu, setMusicFileOpenSubmenu] = useState(false);
+  const [musicFileShowSubmenu, setMusicFileShowSubmenu] = useState(false);
+  const [musicFileShowSubmenuTop, setMusicFileShowSubmenuTop] = useState(22);
+  const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
 
   const title =
@@ -110,6 +122,8 @@ export default function ProgramWindow({
     if (id !== "music") {
       setMusicFileOpen(false);
       setMusicFileOpenSubmenu(false);
+      setMusicFileShowSubmenu(false);
+      setMusicScopePopupOpen(false);
       return;
     }
 
@@ -120,6 +134,7 @@ export default function ProgramWindow({
       if (!inFileMenu) {
         setMusicFileOpen(false);
         setMusicFileOpenSubmenu(false);
+        setMusicFileShowSubmenu(false);
       }
     };
 
@@ -132,6 +147,7 @@ export default function ProgramWindow({
   useEffect(() => {
     if (musicFileOpen) return;
     setMusicFileOpenSubmenu(false);
+    setMusicFileShowSubmenu(false);
   }, [musicFileOpen]);
 
   useEffect(() => {
@@ -192,6 +208,7 @@ export default function ProgramWindow({
                 const next = !prev;
                 if (!next) {
                   setMusicFileOpenSubmenu(false);
+                  setMusicFileShowSubmenu(false);
                 }
                 return next;
               });
@@ -210,16 +227,59 @@ export default function ProgramWindow({
               }}
               onMouseLeave={() => {
                 setMusicFileOpenSubmenu(false);
+                setMusicFileShowSubmenu(false);
                 setMusicFileOpen(false);
               }}
             >
               <MenuList style={{ marginTop: 0 }}>
                 <MenuListItem
                   size="sm"
-                  onMouseEnter={() => setMusicFileOpenSubmenu(true)}
-                  onClick={() => setMusicFileOpenSubmenu((prev) => !prev)}
+                  onMouseEnter={() => {
+                    setMusicFileShowSubmenu(false);
+                    setMusicFileOpenSubmenu(true);
+                  }}
+                  onClick={() =>
+                    setMusicFileOpenSubmenu((prev) => {
+                      const next = !prev;
+                      if (next) setMusicFileShowSubmenu(false);
+                      return next;
+                    })
+                  }
                 >
                   <span style={{ flex: "1 1 auto" }}>Open</span>
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 12,
+                      marginLeft: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flex: "0 0 12px",
+                    }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" role="presentation">
+                      <path d="M2 1l4 3-4 3z" fill="currentColor" />
+                    </svg>
+                  </span>
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onMouseEnter={(event) => {
+                    setMusicFileShowSubmenuTop(getSubmenuTopForRow(event.currentTarget));
+                    setMusicFileOpenSubmenu(false);
+                    setMusicFileShowSubmenu(true);
+                  }}
+                  onClick={(event) => {
+                    setMusicFileShowSubmenuTop(getSubmenuTopForRow(event.currentTarget));
+                    setMusicFileShowSubmenu((prev) => {
+                      const next = !prev;
+                      if (next) setMusicFileOpenSubmenu(false);
+                      return next;
+                    });
+                  }}
+                >
+                  <span style={{ flex: "1 1 auto" }}>Show</span>
                   <span
                     aria-hidden
                     style={{
@@ -274,6 +334,40 @@ export default function ProgramWindow({
                   </MenuList>
                 </div>
               )}
+              {musicFileShowSubmenu && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "calc(100% - 2px)",
+                    top: musicFileShowSubmenuTop,
+                    zIndex: 1001,
+                    minWidth: 160,
+                  }}
+                >
+                  <MenuList style={{ marginTop: 0 }}>
+                    <MenuListItem
+                      size="sm"
+                      onClick={() => {
+                        setMusicScopePopupOpen((prev) => !prev);
+                        setMusicFileShowSubmenu(false);
+                        setMusicFileOpen(false);
+                      }}
+                    >
+                      Scope
+                    </MenuListItem>
+                    <MenuListItem
+                      size="sm"
+                      onClick={() => {
+                        window.open("https://strudel.cc/workshop/getting-started/", "_blank", "noopener,noreferrer");
+                        setMusicFileShowSubmenu(false);
+                        setMusicFileOpen(false);
+                      }}
+                    >
+                      Docs
+                    </MenuListItem>
+                  </MenuList>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -316,16 +410,6 @@ export default function ProgramWindow({
           onClick={() => void strudelRef.current?.update()}
         >
           Set
-        </Button>
-        <Button
-          variant="menu"
-          size="sm"
-          style={{ transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)` }}
-          aria-label="Help"
-          title="Help"
-          onClick={() => window.open("https://strudel.cc/workshop/getting-started/", "_blank", "noopener,noreferrer")}
-        >
-          ?
         </Button>
       </>
     ) : undefined;
@@ -434,6 +518,8 @@ export default function ProgramWindow({
           ref={strudelRef}
           onPlayingChange={setStrudelPlaying}
           onSyncChange={setStrudelInSync}
+          scopePopupOpen={musicScopePopupOpen}
+          scopePopupCompact={layout !== "maximized"}
         />
       )}
     </DesktopWindow>

@@ -13,6 +13,7 @@ function normalizeSample(v: number): number {
 export default function OscilloscopeWindow() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latestSamplesRef = useRef<Float32Array | null>(null);
+  const sizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -23,14 +24,19 @@ export default function OscilloscopeWindow() {
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
+      const cssWidth = Math.max(1, Math.floor(rect.width));
+      const cssHeight = Math.max(1, Math.floor(rect.height));
+      sizeRef.current = { width: cssWidth, height: cssHeight };
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+      canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
     resize();
     window.addEventListener("resize", resize);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => resize()) : null;
+    observer?.observe(canvas);
 
     const onScopeData = (event: Event) => {
       const custom = event as CustomEvent<{ id?: number; samples?: ArrayLike<number> }>;
@@ -42,9 +48,8 @@ export default function OscilloscopeWindow() {
     window.addEventListener("strudel-scope-data", onScopeData as EventListener);
 
     let raf = 0;
-    const draw = () => {
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
+    const draw = (now: number) => {
+      const { width: w, height: h } = sizeRef.current;
 
       ctx.fillStyle = "#0d1010";
       ctx.fillRect(0, 0, w, h);
@@ -86,8 +91,17 @@ export default function OscilloscopeWindow() {
           else ctx.lineTo(x, y);
         }
       } else {
-        ctx.moveTo(0, mid);
-        ctx.lineTo(w, mid);
+        const phase = now * 0.0024;
+        const points = 120;
+        for (let i = 0; i <= points; i += 1) {
+          const x = (i / points) * w;
+          const y =
+            mid +
+            Math.sin((i / points) * Math.PI * 4 + phase) * (h * 0.035) +
+            Math.sin((i / points) * Math.PI * 9 + phase * 1.7) * (h * 0.015);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
       }
       ctx.stroke();
 
@@ -107,8 +121,17 @@ export default function OscilloscopeWindow() {
           else ctx.lineTo(x, y);
         }
       } else {
-        ctx.moveTo(0, mid);
-        ctx.lineTo(w, mid);
+        const phase = now * 0.0024;
+        const points = 120;
+        for (let i = 0; i <= points; i += 1) {
+          const x = (i / points) * w;
+          const y =
+            mid +
+            Math.sin((i / points) * Math.PI * 4 + phase) * (h * 0.035) +
+            Math.sin((i / points) * Math.PI * 9 + phase * 1.7) * (h * 0.015);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
       }
       ctx.stroke();
 
@@ -124,6 +147,7 @@ export default function OscilloscopeWindow() {
     return () => {
       window.cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      observer?.disconnect();
       window.removeEventListener("strudel-scope-data", onScopeData as EventListener);
     };
   }, []);
@@ -131,6 +155,8 @@ export default function OscilloscopeWindow() {
   return (
     <div
       style={{
+        width: "100%",
+        height: "100%",
         flex: "1 1 auto",
         minHeight: 0,
         minWidth: 0,
