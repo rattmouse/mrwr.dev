@@ -1,7 +1,6 @@
 "use client";
 
 import React, {
-    useCallback,
     forwardRef,
     useEffect,
     useImperativeHandle,
@@ -10,7 +9,7 @@ import React, {
 } from "react";
 import { GroupBox, TreeLeaf } from "react95";
 import { TreeView } from "@/components/issues/React95TreeViewPatched";
-import LowResImageModal from "@/components/common/LowResImageModal";
+import useImagePreview from "@/components/common/useImagePreview";
 
 import issuesRaw from "@/data/issues.json";
 import { stripImagesAndCollect } from "@/lib/imageRefs";
@@ -71,14 +70,17 @@ type ParsedSearchLine = {
 };
 
 function parseSearchEntryLine(line: string): SearchEntryLine | null {
-    const isoMatch = line.match(/^(.*?)(?:\s*@\s*)(\d{4}-\d{2}-\d{2}T[^ \n]+)\s*$/);
+    const isoMatch = line.match(
+        /^(.*?)(?:\s*@\s*)(\d{4}-\d{2}-\d{2}T[^ \n]+)(?:\s+(?:\+|Δ|delta_ms=|input_delta_ms=)(\d+)\s*ms)?\s*$/i
+    );
     if (isoMatch) {
+        const explicitDeltaMs = isoMatch[3] ? Math.max(0, Number.parseInt(isoMatch[3], 10) || 0) : null;
         const atMs = Date.parse(isoMatch[2]);
         return {
             entry: stripDuplicateSearchPrefix(isoMatch[1].trimEnd()),
             when: formatRelativeCompact(isoMatch[2]),
-            atMs: Number.isFinite(atMs) ? atMs : 0,
-            deltaMs: null,
+            atMs: explicitDeltaMs === null && Number.isFinite(atMs) ? atMs : Number.NaN,
+            deltaMs: explicitDeltaMs,
         };
     }
 
@@ -576,6 +578,7 @@ type Props = {
     modalButtonOnlyWidth?: number;
     modalFakePreviewOnly?: boolean;
     openImagesInNewTab?: boolean;
+    modalHideTitleBar?: boolean;
     initialSelected?: string;
     initialExpanded?: string[];
 };
@@ -591,36 +594,23 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             modalButtonOnlyWidth,
             modalFakePreviewOnly = false,
             openImagesInNewTab = false,
+            modalHideTitleBar = false,
             initialSelected = "issues:open",
             initialExpanded = ["issues:open"],
         },
         ref
     ) {
         const issues = useMemo(() => normalizeIssues(issuesRaw as unknown), []);
-        const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-        const [tinyEmojiModalOpen, setTinyEmojiModalOpen] = useState(false);
-        const openImage = useCallback(
-            (url: string) => {
-                if (openImagesInNewTab) {
-                    setTinyEmojiModalOpen(true);
-                    return;
-                }
-                setPreviewImageUrl(url);
-            },
-            [openImagesInNewTab]
-        );
+        const { openImage, previewLayer } = useImagePreview({
+            openImagesInNewTab,
+            modalScale,
+            modalForceButtonOnly,
+            modalButtonOnlyWidth,
+            modalFakePreviewOnly,
+            modalHideTitleBar,
+            onOpenChange: onModalOpenChange,
+        });
         const tree = useMemo(() => buildIssuesTree(issues, openImage), [issues, openImage]);
-
-        useEffect(() => {
-            if (!tinyEmojiModalOpen) return;
-            const timer = window.setTimeout(() => setTinyEmojiModalOpen(false), 900);
-            return () => window.clearTimeout(timer);
-        }, [tinyEmojiModalOpen]);
-
-        useEffect(() => {
-            onModalOpenChange?.(previewImageUrl !== null);
-            return () => onModalOpenChange?.(false);
-        }, [onModalOpenChange, previewImageUrl]);
 
         const allIds = useMemo(() => {
             const ids: string[] = [];
@@ -721,50 +711,7 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             return (
                 <>
                     {content}
-                    <LowResImageModal
-                        imageUrl={previewImageUrl}
-                        onClose={() => setPreviewImageUrl(null)}
-                        sizeScale={modalScale}
-                        forceButtonOnly={modalForceButtonOnly}
-                        buttonOnlyWidth={modalButtonOnlyWidth}
-                        fakePreviewOnly={modalFakePreviewOnly}
-                    />
-                    {tinyEmojiModalOpen && (
-                        <div
-                            role="dialog"
-                            aria-modal="true"
-                            onClick={() => setTinyEmojiModalOpen(false)}
-                            style={{
-                                position: "fixed",
-                                inset: 0,
-                                background: "rgba(0, 0, 0, 0.35)",
-                                zIndex: 10001,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                            }}
-                        >
-                            <div
-                                onClick={(event) => event.stopPropagation()}
-                                style={{
-                                    width: 74,
-                                    height: 54,
-                                    background: "#c0c0c0",
-                                    borderTop: "2px solid #fff",
-                                    borderLeft: "2px solid #fff",
-                                    borderRight: "2px solid #000",
-                                    borderBottom: "2px solid #000",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    fontSize: 20,
-                                    lineHeight: 1,
-                                }}
-                            >
-                                🖼️
-                            </div>
-                        </div>
-                    )}
+                    {previewLayer}
                 </>
             );
         }
@@ -774,50 +721,7 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
                 <GroupBox label="Issues Browser" style={{ width: "100%" }}>
                     {content}
                 </GroupBox>
-                <LowResImageModal
-                    imageUrl={previewImageUrl}
-                    onClose={() => setPreviewImageUrl(null)}
-                    sizeScale={modalScale}
-                    forceButtonOnly={modalForceButtonOnly}
-                    buttonOnlyWidth={modalButtonOnlyWidth}
-                    fakePreviewOnly={modalFakePreviewOnly}
-                />
-                {tinyEmojiModalOpen && (
-                    <div
-                        role="dialog"
-                        aria-modal="true"
-                        onClick={() => setTinyEmojiModalOpen(false)}
-                        style={{
-                            position: "fixed",
-                            inset: 0,
-                            background: "rgba(0, 0, 0, 0.35)",
-                            zIndex: 10001,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                        }}
-                    >
-                        <div
-                            onClick={(event) => event.stopPropagation()}
-                            style={{
-                                width: 74,
-                                height: 54,
-                                background: "#c0c0c0",
-                                borderTop: "2px solid #fff",
-                                borderLeft: "2px solid #fff",
-                                borderRight: "2px solid #000",
-                                borderBottom: "2px solid #000",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontSize: 20,
-                                lineHeight: 1,
-                            }}
-                        >
-                            🖼️
-                        </div>
-                    </div>
-                )}
+                {previewLayer}
             </>
         );
     }

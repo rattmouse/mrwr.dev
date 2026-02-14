@@ -158,9 +158,8 @@ export default function StartMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [query, setQuery] = useState("");
-  const timerRef = useRef<number | null>(null);
   const lastSentRef = useRef<string>("");
+  const lastInputAtRef = useRef<number | null>(null);
   const searchSessionIdRef = useRef<string>("");
   const { shutdown } = usePower();
 
@@ -207,7 +206,7 @@ export default function StartMenu({
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
           { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
-          { label: "Music", icon: "../w95_music.ico", size: "sm", onClick: () => pick("music") }
+          { label: "Music", icon: "../w98_music.ico", size: "sm", onClick: () => pick("music") }
         ],
     },
     { separator: true },
@@ -229,41 +228,6 @@ export default function StartMenu({
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
 
-  useEffect(() => {
-    // clear any pending timer
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-
-    const q = query.trim();
-
-    // don't log empty
-    if (!q) return;
-
-    // debounce: wait 600ms after the last keystroke
-    timerRef.current = window.setTimeout(async () => {
-      // avoid re-sending same value if nothing changed
-      if (q === lastSentRef.current) return;
-      lastSentRef.current = q;
-
-      try {
-        await fetch("/log-search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query: q,
-            sessionId: searchSessionIdRef.current || undefined,
-          }),
-        });
-      } catch (err) {
-        console.error("log-search failed", err);
-      }
-    }, 600);
-
-    // cleanup if query changes again or component unmounts
-    return () => {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
-    };
-  }, [query]);
-
   return (
     <AppBar style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: Z.TASKBAR }}>
       <Toolbar style={{ justifyContent: "space-between" }}>
@@ -284,7 +248,31 @@ export default function StartMenu({
         </div>
 
         <TextInput
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            const nextQuery = e.target.value;
+
+            const q = nextQuery.trim();
+            if (!q) return;
+            if (q === lastSentRef.current) return;
+
+            const now = Date.now();
+            const inputDeltaMs = lastInputAtRef.current === null ? 0 : Math.max(0, now - lastInputAtRef.current);
+            lastInputAtRef.current = now;
+            lastSentRef.current = q;
+
+            fetch("/log-search", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                query: q,
+                sessionId: searchSessionIdRef.current || undefined,
+                at: new Date(now).toISOString(),
+                inputDeltaMs,
+              }),
+            }).catch((err) => {
+              console.error("log-search failed", err);
+            });
+          }}
           placeholder="Search..."
           width={150} />
       </Toolbar>

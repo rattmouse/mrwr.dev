@@ -17,6 +17,13 @@ import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { GitChangeEntry } from "@/lib/gitChanges.types";
 import strudelSongs from "@/data/strudelSongs.json";
 
+const SONG_ICON_FILES = [
+  "../w98_midi_bl.ico",
+  "../w98_midi_gr.ico",
+  "../w98_midi_mg.ico",
+  "../w98_midi_tl.ico",
+] as const;
+
 type ProgramWindowProps = {
   id: ProgramWindowId;
   layout: Layout;
@@ -46,6 +53,7 @@ export default function ProgramWindow({
   const [musicTextJitter, setMusicTextJitter] = useState({ x: 0, y: 0 });
   const [musicFileOpen, setMusicFileOpen] = useState(false);
   const [musicFileOpenSubmenu, setMusicFileOpenSubmenu] = useState(false);
+  const [contentModalOpen, setContentModalOpen] = useState(false);
 
   const title =
     id === "notepad"
@@ -62,6 +70,13 @@ export default function ProgramWindow({
   const normalWidth = id === "changes" ? 320 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
+  const contentModalScale = 1;
+  const useFakeModalButtonOnly = false;
+  const useFakePreviewOnly = false;
+  const openImagesInNewTab = layout === "normal";
+  const modalHideTitleBar = layout === "maximized";
+  const baseNormalWidth = normalWidth ?? 280;
+  const modalButtonOnlyWidth = Math.max(88, Math.round(baseNormalWidth * 0.25));
 
   useEffect(() => {
     if (!shouldShakeMusicUi) {
@@ -119,40 +134,46 @@ export default function ProgramWindow({
     setMusicFileOpenSubmenu(false);
   }, [musicFileOpen]);
 
+  useEffect(() => {
+    if (id !== "issues" && id !== "changes") {
+      setContentModalOpen(false);
+    }
+  }, [id]);
+
   const toolbar =
     id === "issues" ? (
       <>
-        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandOpen()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandOpen()} disabled={contentModalOpen}>
           ⚠️
         </Button>
-        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandClosed()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandClosed()} disabled={contentModalOpen}>
           ✅
         </Button>
-        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandAll()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandAll()} disabled={contentModalOpen}>
           ➕
         </Button>
-        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.collapseAll()}>
+        <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.collapseAll()} disabled={contentModalOpen}>
           ➖
         </Button>
       </>
     ) : id === "changes" ? (
       <>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFeatures()}>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFeatures()} disabled={contentModalOpen}>
           ✨
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFixes()}>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFixes()} disabled={contentModalOpen}>
           🛠️
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandDocs()}>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandDocs()} disabled={contentModalOpen}>
           📝
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandOther()}>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandOther()} disabled={contentModalOpen}>
           📦
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandAll()}>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandAll()} disabled={contentModalOpen}>
           ➕
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.collapseAll()}>
+        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.collapseAll()} disabled={contentModalOpen}>
           ➖
         </Button>
       </>
@@ -227,7 +248,7 @@ export default function ProgramWindow({
                   }}
                 >
                   <MenuList style={{ marginTop: 0 }}>
-                    {strudelSongs.map((song) => (
+                    {strudelSongs.map((song, index) => (
                       <MenuListItem
                         size="sm"
                         key={song.id}
@@ -237,7 +258,17 @@ export default function ProgramWindow({
                           setMusicFileOpen(false);
                         }}
                       >
-                        {song.name}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <img
+                            src={SONG_ICON_FILES[index % SONG_ICON_FILES.length]}
+                            alt=""
+                            aria-hidden
+                            width={16}
+                            height={16}
+                            style={{ display: "inline-block", imageRendering: "pixelated" }}
+                          />
+                          <span>{song.name}</span>
+                        </span>
                       </MenuListItem>
                     ))}
                   </MenuList>
@@ -316,6 +347,7 @@ export default function ProgramWindow({
       onMinimize={onMinimize}
       onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
+      controlsDisabled={contentModalOpen}
       toolbar={toolbar}
     >
       {id === "welcome" && (
@@ -363,7 +395,17 @@ export default function ProgramWindow({
       {id === "issues" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
           <ScrollView style={{ width: "100%", height: "100%" }}>
-            <IssuesTreeView ref={issuesTreeRef} showFrame={false} />
+            <IssuesTreeView
+              ref={issuesTreeRef}
+              showFrame={false}
+              onModalOpenChange={setContentModalOpen}
+              modalScale={contentModalScale}
+              modalForceButtonOnly={useFakeModalButtonOnly}
+              modalButtonOnlyWidth={modalButtonOnlyWidth}
+              modalFakePreviewOnly={useFakePreviewOnly}
+              openImagesInNewTab={openImagesInNewTab}
+              modalHideTitleBar={modalHideTitleBar}
+            />
           </ScrollView>
         </div>
       )}
@@ -371,7 +413,18 @@ export default function ProgramWindow({
       {id === "changes" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
           <ScrollView style={{ width: "100%", height: "100%" }}>
-            <ChangesTreeView ref={changesTreeRef} entries={gitChanges} showFrame={false} />
+            <ChangesTreeView
+              ref={changesTreeRef}
+              entries={gitChanges}
+              showFrame={false}
+              onModalOpenChange={setContentModalOpen}
+              modalScale={contentModalScale}
+              modalForceButtonOnly={useFakeModalButtonOnly}
+              modalButtonOnlyWidth={modalButtonOnlyWidth}
+              modalFakePreviewOnly={useFakePreviewOnly}
+              openImagesInNewTab={openImagesInNewTab}
+              modalHideTitleBar={modalHideTitleBar}
+            />
           </ScrollView>
         </div>
       )}

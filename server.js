@@ -5,12 +5,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MAX_QUERY_LOG_LENGTH = 200;
 const MAX_SESSION_ID_LENGTH = 64;
-const QUERY_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+const QUERY_DEDUP_WINDOW_MS = 1500;
 const MAX_TRACKED_QUERIES = 5000;
 const recentlyLoggedQueries = new Map();
 const MAX_TRACKED_SESSIONS = 5000;
 const sessionLastLogAt = new Map();
 const MAX_DELTA_MS = 30 * 1000;
+const MAX_INPUT_DELTA_MS = 5 * 60 * 1000;
 
 const OUT_DIR = path.join(__dirname, ".");
 
@@ -46,6 +47,20 @@ function sanitizeSessionId(value) {
     .slice(0, MAX_SESSION_ID_LENGTH);
 }
 
+function sanitizeClientTimestamp(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return "";
+  return new Date(parsed).toISOString();
+}
+
+function sanitizeInputDeltaMs(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.min(MAX_INPUT_DELTA_MS, parsed));
+}
+
 function getPlaybackDeltaMs(sessionId, nowMs) {
   if (!sessionId) return null;
   const previous = sessionLastLogAt.get(sessionId);
@@ -60,14 +75,15 @@ function getPlaybackDeltaMs(sessionId, nowMs) {
   return Math.max(0, Math.min(MAX_DELTA_MS, nowMs - previous));
 }
 
-function shouldLogQuery(query, nowMs) {
-  const lastLoggedAt = recentlyLoggedQueries.get(query);
+function shouldLogQuery(sessionId, query, nowMs) {
+  const key = `${sessionId || "anon"}:${query}`;
+  const lastLoggedAt = recentlyLoggedQueries.get(key);
 
   if (typeof lastLoggedAt === "number" && nowMs - lastLoggedAt < QUERY_DEDUP_WINDOW_MS) {
     return false;
   }
 
-  recentlyLoggedQueries.set(query, nowMs);
+  recentlyLoggedQueries.set(key, nowMs);
 
   // Opportunistic cleanup to avoid unbounded growth.
   if (recentlyLoggedQueries.size > MAX_TRACKED_QUERIES) {
@@ -84,18 +100,22 @@ function shouldLogQuery(query, nowMs) {
 app.post("/log-search", (req, res) => {
   const query = sanitizeForLog(req.body?.query);
   const sessionId = sanitizeSessionId(req.body?.sessionId);
+  const clientAt = sanitizeClientTimestamp(req.body?.at);
+  const inputDeltaMs = sanitizeInputDeltaMs(req.body?.inputDeltaMs);
 
   if (!query) {
     return res.status(400).json({ error: "Missing query" });
   }
 
   const now = Date.now();
-  if (shouldLogQuery(query, now)) {
+  if (shouldLogQuery(sessionId, query, now)) {
     const deltaMs = getPlaybackDeltaMs(sessionId, now);
     console.log({
       query,
+      at: clientAt || new Date(now).toISOString(),
       session: sessionId || undefined,
       delta_ms: deltaMs,
+      input_delta_ms: inputDeltaMs,
     });
   }
 

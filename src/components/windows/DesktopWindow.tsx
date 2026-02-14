@@ -22,6 +22,7 @@ type DesktopWindowProps = {
   onMinimize: () => void;
   onRestore: () => void;
   onToggleMaximize: () => void;
+  controlsDisabled?: boolean;
   toolbar?: React.ReactNode;
   children: React.ReactNode;
 };
@@ -43,6 +44,7 @@ export default function DesktopWindow({
   onMinimize,
   onRestore,
   onToggleMaximize,
+  controlsDisabled = false,
   toolbar,
   children,
 }: DesktopWindowProps) {
@@ -123,16 +125,25 @@ export default function DesktopWindow({
               if (layout === "docked") onRestore();
               else onMinimize();
             }}
+            disabled={controlsDisabled}
             square
             size="sm"
             aria-label="Minimize"
+            style={controlsDisabled ? { opacity: 0.5 } : undefined}
           >
             <span className="minimize-icon" />
           </Button>
-          <Button onClick={onToggleMaximize} square size="sm" aria-label="Maximize">
+          <Button
+            onClick={onToggleMaximize}
+            disabled={controlsDisabled}
+            square
+            size="sm"
+            aria-label="Maximize"
+            style={controlsDisabled ? { opacity: 0.5 } : undefined}
+          >
             <span className="maximize-icon" />
           </Button>
-          <Button onClick={onClose} square size="sm" aria-label="Close">
+          <Button onClick={onClose} disabled={controlsDisabled} square size="sm" aria-label="Close" style={controlsDisabled ? { opacity: 0.5 } : undefined}>
             <span className="close-icon" />
           </Button>
         </div>
@@ -147,6 +158,9 @@ export default function DesktopWindow({
             position: "relative",
             zIndex: 2,
             transform: `translate(${toolbarJitterX}px, ${toolbarJitterY}px)`,
+            opacity: controlsDisabled ? (isMax ? 0.3 : 0.42) : 1,
+            filter: controlsDisabled ? (isMax ? "grayscale(1) brightness(0.62)" : "grayscale(1) brightness(0.78)") : undefined,
+            pointerEvents: controlsDisabled ? "none" : undefined,
           }}
         >
           {toolbar}
