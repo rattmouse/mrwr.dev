@@ -193,8 +193,7 @@ export default function StartMenu({
         [
           { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
           { label: "Projects", icon: "../w95_default.ico", size: "sm", onClick: () => pick("projects") },
-          { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") },
-          { label: "Albums", icon: "../w95_default.ico", size: "sm", onClick: () => pick("albums") }
+          { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
         ],
     },
     {
@@ -207,7 +206,8 @@ export default function StartMenu({
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
           { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
-          { label: "Music", icon: "../w98_music.ico", size: "sm", onClick: () => pick("music") }
+          { label: "REPL", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
+          { label: "Collections", icon: "../w98_collections_cards.ico", size: "sm", onClick: () => pick("collections") }
         ],
     },
     { separator: true },

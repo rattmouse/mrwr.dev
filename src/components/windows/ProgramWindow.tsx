@@ -77,6 +77,16 @@ export default function ProgramWindow({
           : id === "music"
             ? "strudel.cc"
         : "mrwr.dev";
+  const titleIcon =
+    id === "welcome"
+      ? "../w95_desktop.ico"
+      : id === "notepad"
+        ? "../w95_notepad.ico"
+        : id === "issues"
+          ? "../w98_issues.ico"
+          : id === "changes"
+            ? "../w95_changes.ico"
+            : "../w98_repl.ico";
 
   const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : 300;
   const normalWidth = id === "changes" ? 320 : undefined;
@@ -417,6 +427,7 @@ export default function ProgramWindow({
   return (
     <DesktopWindow
       title={title}
+      titleIcon={titleIcon}
       layout={layout}
       normalWidth={normalWidth}
       normalHeight={normalHeight}

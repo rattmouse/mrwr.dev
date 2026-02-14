@@ -43,3 +43,5 @@ next-env.d.ts
 package-lock.json
 src/data/issues.json
 scripts/search.sh
+public/collections/*
+!public/collections/.gitkeep
