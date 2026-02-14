@@ -7,6 +7,7 @@ import { Layout } from "@/components/windows/windowTypes";
 
 type DesktopWindowProps = {
   title: string;
+  titleIcon?: string;
   layout: Layout;
   normalWidth?: number;
   normalHeight: number;
@@ -29,6 +30,7 @@ type DesktopWindowProps = {
 
 export default function DesktopWindow({
   title,
+  titleIcon,
   layout,
   normalWidth = 280,
   normalHeight,
@@ -59,7 +61,8 @@ export default function DesktopWindow({
   const DOCK_H = 60;
   const TITLE_CHAR_PX = 10;
   const DOCK_BASE_CHROME_PX = 124; // tighter header padding + 3 control buttons
-  const dockWidth = Math.max(DOCK_W, DOCK_BASE_CHROME_PX + title.length * TITLE_CHAR_PX);
+  const TITLE_ICON_PX = titleIcon ? 22 : 0;
+  const dockWidth = Math.max(DOCK_W, DOCK_BASE_CHROME_PX + TITLE_ICON_PX + title.length * TITLE_CHAR_PX);
   const normalLeft = normalPosition === "topRightQuadrantCenter" ? "75vw" : "50%";
   const normalTop = normalPosition === "topRightQuadrantCenter" ? `calc(25vh + ${TASKBAR_H / 2}px)` : `calc(50% + ${TASKBAR_H / 2}px)`;
   const outline = Math.max(0, Math.min(1, effectOutline));
@@ -115,8 +118,16 @@ export default function DesktopWindow({
           flex: "0 0 auto",
         }}
       >
-        <span style={{ display: "inline-block", transform: `translate(${titleJitterX}px, ${titleJitterY}px)` }}>
-          {title}
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            transform: `translate(${titleJitterX}px, ${titleJitterY}px)`,
+          }}
+        >
+          {titleIcon ? <img src={titleIcon} alt="" width={14} height={14} aria-hidden /> : null}
+          <span>{title}</span>
         </span>
 
         <div style={{ display: "flex", gap: 2 }}>
