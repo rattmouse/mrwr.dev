@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbo -p 3001",
+    "dev": "next dev",
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "changelog": "node tools/generate-changelog.mjs",
