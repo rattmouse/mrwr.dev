@@ -89,7 +89,7 @@ export default function DocumentWindow({
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const title =
-    id === "about" ? "about.txt" : id === "contact" ? "contact.txt" : id === "collections" ? "collections.gif" : "projects.txt";
+    id === "about" ? "about.txt" : id === "contact" ? "contact.txt" : id === "collections" ? "collections.exe" : "projects.txt";
   const titleIcon = id === "collections" ? "../w98_collections_cards.ico" : "../w95_default.ico";
   const album = albums[activeAlbum] ?? ALBUM_COVERS[0] ?? EMPTY_ALBUM;
   const albumSize = layout === "maximized" ? 280 : 144;
@@ -535,7 +535,7 @@ export default function DocumentWindow({
             gap: 8,
           }}
         >
-          <GroupBox label="collection" style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}>
+          <GroupBox label="albums.gif" style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}>
             <div
               ref={albumsSceneRef}
               style={{
