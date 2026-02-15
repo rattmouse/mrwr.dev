@@ -45,4 +45,5 @@ src/data/issues.json
 build/
 scripts/
 public/collections/*
-!public/collections/.gitkeep
+public/collections/content.json
+/public/collections
