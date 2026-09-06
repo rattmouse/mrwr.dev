@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Anchor, GroupBox, Hourglass, ScrollView, Tab, Tabs } from "react95";
+import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
 
@@ -738,15 +738,23 @@ export default function DocumentWindow({
             gap: 8,
           }}
         >
-          <Tabs
-            value={category}
-            onChange={(value) => setCategory(value as CollectionCategory)}
-            style={{ alignSelf: "stretch" }}
-          >
-            <Tab value="albums">Albums</Tab>
-            <Tab value="paintings">Paintings</Tab>
-            <Tab value="songs">Songs</Tab>
-          </Tabs>
+          <div style={{ alignSelf: "stretch", display: "flex", gap: 4 }}>
+            {([
+              { value: "albums", label: "Albums" },
+              { value: "paintings", label: "Paintings" },
+              { value: "songs", label: "Songs" },
+            ] as const).map(({ value, label }) => (
+              <Button
+                key={value}
+                size="sm"
+                style={{ fontWeight: "bold" }}
+                active={category === value}
+                onClick={() => setCategory(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
 
           <GroupBox
             label={category === "paintings" ? "paints.gif" : category === "songs" ? "songs.gif" : "albums.gif"}
