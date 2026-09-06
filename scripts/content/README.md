@@ -72,3 +72,43 @@ Requires `gh` authenticated (`gh auth status`), ssh access to prod (same as
 **State:** `scripts/content/.search-triage-state.json` records which sessions
 you've filed or skipped so they don't come back. Gitignored, machine-local; delete
 it to start triage over.
+
+## The search-bar history dropdown
+
+The search box (top-right of the Start bar) shows a dropdown of earlier searches
+that filters as you type and replays each one at the rate it was typed. It is
+driven by `src/data/search-history.json` — like `issues.json`, gitignored and
+read only at build time.
+
+### `refresh-search-history.sh` — build the history file
+
+Fetches the durable search-log NDJSON archive from prod
+(`$PROD_BASE/shared/search-log.ndjson`, + one rotated `.1`; the same archive
+`search-to-issue.sh` reads) and runs `refresh-search-history.mjs`, which groups
+the records into **search sessions** using the exact same heuristic as
+`search_to_issue.py` (180 s idle gap, "typing reset" detection, minimum headline
+length), tags each entry with `search-guard.js`, and writes the newest ~250
+sessions.
+
+`scripts/deploy/deploy.sh` runs it before every build (best-effort: an
+unreachable prod ships an empty history, never a failed deploy — or pass
+`--skip-search-history`). Run it by hand to make `npm run dev` / a local build
+pick up newer searches.
+
+```
+scripts/content/refresh-search-history.sh                       # against prod
+scripts/content/refresh-search-history.sh --file ./search-log.ndjson
+scripts/content/refresh-search-history.sh --since 2026-08-01
+scripts/content/refresh-search-history.sh --max-sessions 100
+```
+
+### Malicious searches
+
+`search-guard.js` (repo root, next to `server.js`) classifies a query as
+`xss` / `sql` / `command` / `path-traversal` / `template-injection` /
+`prompt-injection` / `overlong`. `server.js` tags each recorded search with
+`flagged` + `categories` (the attempt is still logged verbatim and still shown
+in history); this generator re-derives the tags at build time and adds a
+`displayQuery` — a defanged, render-safe version the dropdown plays back instead
+of the raw payload. `deploy.sh` copies `search-guard.js` into the prod release
+bundle alongside `server.js`.

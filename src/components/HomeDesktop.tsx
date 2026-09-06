@@ -5,13 +5,15 @@ import StartMenu from "@/components/StartMenu";
 import ProgramWindow from "@/components/windows/ProgramWindow";
 import DocumentWindow from "@/components/windows/DocumentWindow";
 import { VersionEntry } from "@/lib/versions.types";
+import { SearchHistorySession } from "@/lib/searchHistory.types";
 import { Layout, WindowId, isDocumentWindow, isProgramWindow } from "@/components/windows/windowTypes";
 
 type HomeDesktopProps = {
   versions: VersionEntry[];
+  searchHistory: SearchHistorySession[];
 };
 
-export default function HomeDesktop({ versions }: HomeDesktopProps) {
+export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProps) {
   const [activeWindow, setActiveWindow] = useState<WindowId | null>("welcome");
   const [layout, setLayout] = useState<Layout>("normal");
   const [phoneOrientation, setPhoneOrientation] = useState<"portrait" | "landscape">("landscape");
@@ -91,6 +93,7 @@ export default function HomeDesktop({ versions }: HomeDesktopProps) {
       )}
 
       <StartMenu
+        searchHistory={searchHistory}
         openWindow={(id) => {
           setActiveWindow(id);
           setLayout("normal");

@@ -2,7 +2,8 @@
 # Build the static export locally and ship it to prod as a new release.
 #
 # Usage:
-#   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build]
+#   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build] [--skip-issues]
+#                            [--skip-search-history]
 #
 # Run this from whatever machine has the repo checked out and can reach prod
 # over ssh — that's your Kubuntu box, not a separate build VM. There's no
@@ -22,12 +23,14 @@ load_config
 ALLOW_DIRTY=0
 SKIP_BUILD=0
 SKIP_ISSUES=0
+SKIP_SEARCH_HISTORY=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
     --skip-issues) SKIP_ISSUES=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues)" ;;
+    --skip-search-history) SKIP_SEARCH_HISTORY=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history)" ;;
   esac
 done
 
@@ -67,6 +70,17 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
     warn "Skipping issue refresh (--skip-issues) — shipping src/data/issues.json as-is."
   fi
 
+  if [[ "$SKIP_SEARCH_HISTORY" -ne 1 ]]; then
+    log "Refreshing search history from the prod archive..."
+    # search-history.json is gitignored and read at build time — the data
+    # behind the search-bar history dropdown. Best-effort: an unreachable
+    # prod just ships an empty history, never a failed deploy.
+    "$REPO_ROOT/scripts/content/refresh-search-history.sh" \
+      || warn "Search-history refresh failed; shipping src/data/search-history.json as-is."
+  else
+    warn "Skipping search-history refresh (--skip-search-history) — shipping src/data/search-history.json as-is."
+  fi
+
   log "Installing dependencies..."
   if [[ -f package-lock.json ]]; then
     npm ci
@@ -87,9 +101,12 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -r "$REPO_ROOT/out/." "$STAGE_DIR/"
 cp "$REPO_ROOT/server.js" "$STAGE_DIR/server.js"
+# server.js require()s this at startup to flag hostile search queries.
+cp "$REPO_ROOT/search-guard.js" "$STAGE_DIR/search-guard.js"
 
-# server.js only ever requires "express" (+ Node's builtin "path") — it's a
-# static file server for the already-built out/, nothing else in
+# The only third-party module server.js loads is "express" (plus Node
+# builtins and the zero-dependency ./search-guard.js copied just above) —
+# it's a static file server for the already-built out/, nothing else in
 # package.json's dependencies (next, react, react95, styled-components,
 # the strudel packages — all build-time only) runs on prod. Shipping the
 # repo's real package.json had prod's `npm install` pulling in the entire

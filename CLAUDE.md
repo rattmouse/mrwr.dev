@@ -10,6 +10,12 @@ Orientation notes for working in this repo.
 - `src/data/issues.json` is gitignored and read **only at build time**. The site
   never calls GitHub (or anything else) at runtime. `scripts/deploy/deploy.sh`
   runs `scripts/content/refresh-issues.sh` before every build to refresh it.
+- `src/data/search-history.json` (the search-bar history dropdown) is the same
+  deal: gitignored, build-time only, refreshed by
+  `scripts/content/refresh-search-history.sh` — which `deploy.sh` also runs
+  before every build. It pulls the prod search-log archive over ssh; a failure
+  is non-fatal (ships an empty history). `server.js` flags malicious queries via
+  `search-guard.js` (repo root); `deploy.sh` ships that file with `server.js`.
 
 ## Completing a pull request
 

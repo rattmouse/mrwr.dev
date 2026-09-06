@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar, TextInput } from "react95";
+import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar } from "react95";
 import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
 import { usePower } from "@/components/power/PowerProvider";
 import { WindowId } from "@/components/windows/windowTypes";
+import SearchBox from "@/components/SearchBox";
+import type { SearchHistorySession } from "@/lib/searchHistory.types";
 
 type MenuAction = () => void;
 
@@ -153,27 +155,14 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 
 export default function StartMenu({
   openWindow,
+  searchHistory = [],
 }: {
   openWindow: (id: WindowId) => void;
+  searchHistory?: SearchHistorySession[];
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const lastSentRef = useRef<string>("");
-  const lastInputAtRef = useRef<number | null>(null);
-  const searchSessionIdRef = useRef<string>("");
   const { shutdown } = usePower();
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const existing = window.sessionStorage.getItem("searchLogSessionId");
-    if (existing) {
-      searchSessionIdRef.current = existing;
-      return;
-    }
-    const created = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-    window.sessionStorage.setItem("searchLogSessionId", created);
-    searchSessionIdRef.current = created;
-  }, []);
 
   const pick = (id: WindowId) => {
     openWindow(id);
@@ -248,34 +237,7 @@ export default function StartMenu({
           )}
         </div>
 
-        <TextInput
-          onChange={(e) => {
-            const nextQuery = e.target.value;
-
-            const q = nextQuery.trim();
-            if (!q) return;
-            if (q === lastSentRef.current) return;
-
-            const now = Date.now();
-            const inputDeltaMs = lastInputAtRef.current === null ? 0 : Math.max(0, now - lastInputAtRef.current);
-            lastInputAtRef.current = now;
-            lastSentRef.current = q;
-
-            fetch("/log-search", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                query: q,
-                sessionId: searchSessionIdRef.current || undefined,
-                at: new Date(now).toISOString(),
-                inputDeltaMs,
-              }),
-            }).catch((err) => {
-              console.error("log-search failed", err);
-            });
-          }}
-          placeholder="Search..."
-          width={150} />
+        <SearchBox history={searchHistory} />
       </Toolbar>
     </AppBar>
   );
