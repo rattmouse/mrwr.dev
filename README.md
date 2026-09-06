@@ -10,6 +10,7 @@ my website
 - deployed on [DigitalOcean](https://www.digitalocean.com/) - https://www.digitalocean.com/
 - some help from [Chat GPT](https://chatgpt.com/) - https://chatgpt.com/
 - and a lot of help from [Codex](https://chatgpt.com/codex/) - https://chatgpt.com/codex/
+- and some cleanup work from [Claude](https://claude.ai/) - https://claude.ai/
 
 # file complaint
 add github issue to file complaint

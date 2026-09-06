@@ -704,6 +704,12 @@ export default function DocumentWindow({
                       Codex
                     </Anchor>
                   </li>
+                  <li>
+                    - and some cleanup work from{" "}
+                    <Anchor href="https://claude.ai/" target="_blank">
+                      Claude
+                    </Anchor>
+                  </li>
                 </ul>
               </>
             )}
