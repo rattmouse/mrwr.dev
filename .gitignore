@@ -43,8 +43,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-package-lock.json
 src/data/issues.json
-public/collections/*
-public/collections/content.json
 /public/collections
