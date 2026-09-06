@@ -1,23 +1,39 @@
 #!/usr/bin/env bash
-# Refresh src/data/issues.json from GitHub issues (powers the Issues
-# window). Needs `gh` and macOS for --json stateReason support. This used
-# to scp the result to the build VM for the next deploy to pick up — that
-# VM is gone, so it just writes straight into the checked-out repo now.
-# The file stays gitignored; copy it to Kubuntu (or wherever you deploy
-# from) by hand, same as public/collections/.
+# Refresh src/data/issues.json from GitHub issues — the data behind the
+# Issues window (and the closed-issue links in the Changes window). The
+# file is gitignored and read at build time, so the site never calls
+# GitHub at runtime.
+#
+# scripts/deploy/deploy.sh runs this automatically before each build, so a
+# normal deploy always ships current issues. Run it by hand whenever you
+# want `npm run dev` or a local build to pick up new issues too.
+#
+# Needs the `gh` CLI, authenticated (`gh auth status`).
 
 set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 command -v gh >/dev/null 2>&1 || {
-  echo "gh CLI not found — install it first (e.g. brew install gh)" >&2
+  echo "gh CLI not found — install it first (e.g. brew install gh / apt install gh)" >&2
   exit 1
 }
+
+gh auth status >/dev/null 2>&1 || {
+  echo "gh is not authenticated — run 'gh auth login' first" >&2
+  exit 1
+}
+
+DEST="$REPO_ROOT/src/data/issues.json"
+TMP=$(mktemp "${DEST}.XXXXXX")
+trap 'rm -f "$TMP"' EXIT
 
 gh issue list --repo rattmouse/mrwr.dev \
   --json number,title,body,state,stateReason,comments \
   --state all --limit 1000 \
-  > "$REPO_ROOT/src/data/issues.json"
+  > "$TMP"
 
-echo "wrote $REPO_ROOT/src/data/issues.json"
+mv "$TMP" "$DEST"
+trap - EXIT
+
+echo "wrote $DEST"

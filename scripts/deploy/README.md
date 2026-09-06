@@ -14,16 +14,22 @@ is Kubuntu-specific.
 
 ```
 scripts/deploy/deploy.sh
-  1. npm ci && npm run build          (local — produces out/)
-  2. stage out/ + server.js + package.json + prod/{start,logs}.sh
+  1. refresh src/data/issues.json from GitHub  (scripts/content/refresh-issues.sh)
+  2. npm ci && npm run build          (local — produces out/)
+  3. stage out/ + server.js + package.json + prod/{start,logs}.sh
      + a systemd unit filled in from mrwr.dev.service.template
-  3. rsync the stage dir to $PROD_HOST:$PROD_BASE/releases/<timestamp>/
-  4. on prod: npm install --omit=dev, install the systemd unit,
+  4. rsync the stage dir to $PROD_HOST:$PROD_BASE/releases/<timestamp>/
+  5. on prod: npm install --omit=dev, install the systemd unit,
      atomically swap the `current` symlink to the new release, restart
-  5. health-check (systemctl is-active + curl localhost); on failure,
+  6. health-check (systemctl is-active + curl localhost); on failure,
      automatically swap `current` back and exit non-zero
-  6. prune old releases beyond KEEP_RELEASES
+  7. prune old releases beyond KEEP_RELEASES
 ```
+
+Step 1 keeps the Issues window current without a manual pre-step. It's
+skipped with `--skip-build` (nothing rebuilds) or `--skip-issues` (ships
+whatever `issues.json` is already in the tree). The site never calls
+GitHub at runtime — this is the only fetch, and it happens at build time.
 
 Prod layout:
 
@@ -57,14 +63,21 @@ Fill in `PROD_HOST` / `PROD_BASE` / etc. — see the comments in that file.
 This assumes `ssh $PROD_HOST` already works (keys set up, host reachable) —
 these scripts don't do any of that setup for you.
 
-**Also gitignored, so `git pull` alone won't bring them to a new
-machine — copy by hand once (e.g. `rsync -av` from your dev machine):**
+**Also gitignored, so `git pull` alone won't bring it to a new machine —
+copy by hand once (e.g. `rsync -av` from your dev machine):**
 
 - `public/collections/` (album cover images + `content.json`) — the
   Collections window needs these to build correctly.
-- `src/data/issues.json` — powers the Issues window.
 
-A build without them still succeeds; those two windows just come up empty.
+A build without it still succeeds; the Collections window just comes up
+empty.
+
+`src/data/issues.json` (which powers the Issues window) is no longer in
+that list — `deploy.sh` refreshes it from GitHub on every run via
+`scripts/content/refresh-issues.sh`. The deploy box just needs the `gh`
+CLI installed and authenticated (`gh auth login`). Use `--skip-issues` to
+deploy without that, shipping whatever `issues.json` is already checked
+out.
 
 ## First deploy under this pipeline
 
@@ -89,9 +102,10 @@ first deploy; accepting the host key once there is enough.
 ## Usage
 
 ```
-npm run deploy                  # build + deploy
+npm run deploy                  # refresh issues + build + deploy
 npm run deploy -- --allow-dirty # deploy with uncommitted local changes (testing)
 npm run deploy -- --skip-build  # re-deploy the existing out/ as-is
+npm run deploy -- --skip-issues # build + deploy without re-pulling issues.json
 npm run deploy:status           # what's live on prod right now
 npm run deploy:rollback         # back to the previous release
 npm run deploy:rollback -- 20260905101500   # back to a specific release

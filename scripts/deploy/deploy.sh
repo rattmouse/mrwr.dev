@@ -21,11 +21,13 @@ load_config
 
 ALLOW_DIRTY=0
 SKIP_BUILD=0
+SKIP_ISSUES=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build)" ;;
+    --skip-issues) SKIP_ISSUES=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues)" ;;
   esac
 done
 
@@ -54,6 +56,17 @@ STAGE_DIR="$REPO_ROOT/.deploy/$RELEASE_ID"
 log "Preparing release $RELEASE_ID"
 
 if [[ "$SKIP_BUILD" -ne 1 ]]; then
+  if [[ "$SKIP_ISSUES" -ne 1 ]]; then
+    log "Refreshing issues from GitHub..."
+    # issues.json is gitignored and read at build time — pull it fresh here
+    # so every deploy ships current issues without a manual pre-step. The
+    # site itself never calls GitHub at runtime.
+    "$REPO_ROOT/scripts/content/refresh-issues.sh" \
+      || fail "Issue refresh failed. Fix gh (install + 'gh auth login'), or re-run with --skip-issues to deploy the src/data/issues.json already in the tree."
+  else
+    warn "Skipping issue refresh (--skip-issues) — shipping src/data/issues.json as-is."
+  fi
+
   log "Installing dependencies..."
   if [[ -f package-lock.json ]]; then
     npm ci
