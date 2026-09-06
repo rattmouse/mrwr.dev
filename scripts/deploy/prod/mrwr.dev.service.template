@@ -1,0 +1,16 @@
+[Unit]
+Description=mrwr.dev express server
+After=network.target
+
+[Service]
+WorkingDirectory=__APP_DIR__/current
+ExecStart=/usr/bin/bash __APP_DIR__/current/start.sh
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

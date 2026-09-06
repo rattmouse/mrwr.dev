@@ -17,9 +17,12 @@
 /.next/
 /out/
 
-# production
+# production (old build-VM pipeline, retired — see scripts/deploy/)
 /build
-/deploy
+
+# local deploy staging + machine-local deploy config (see scripts/deploy/)
+/.deploy/
+scripts/deploy/deploy.config.sh
 
 # misc
 .DS_Store
@@ -42,8 +45,6 @@ yarn-error.log*
 next-env.d.ts
 package-lock.json
 src/data/issues.json
-build/
-scripts/
 public/collections/*
 public/collections/content.json
 /public/collections

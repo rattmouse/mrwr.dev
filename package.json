@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "changelog": "node tools/generate-changelog.mjs",
-    "changelog:json": "node tools/generate-changelog.mjs --json --output src/data/changelogs.json"
+    "changelog:json": "node tools/generate-changelog.mjs --json --output src/data/changelogs.json",
+    "deploy": "bash scripts/deploy/deploy.sh",
+    "deploy:rollback": "bash scripts/deploy/rollback.sh",
+    "deploy:status": "bash scripts/deploy/status.sh"
   },
   "dependencies": {
     "@strudel/codemirror": "^1.3.0",

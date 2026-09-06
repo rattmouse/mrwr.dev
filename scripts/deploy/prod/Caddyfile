@@ -1,0 +1,6 @@
+# Reference only — deploy.sh does not install this automatically.
+# Make sure a block like this exists in prod's Caddy config
+# (e.g. /etc/caddy/Caddyfile), then `systemctl reload caddy` after adding it.
+mrwr.dev {
+	reverse_proxy localhost:3000
+}
