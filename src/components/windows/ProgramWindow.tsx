@@ -68,6 +68,8 @@ export default function ProgramWindow({
   const [musicFileShowSubmenuTop, setMusicFileShowSubmenuTop] = useState(22);
   const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
+  const [midiHexOpen, setMidiHexOpen] = useState(true);
+  const [midiMetersOpen, setMidiMetersOpen] = useState(true);
 
   const title =
     id === "notepad"
@@ -94,7 +96,7 @@ export default function ProgramWindow({
               ? "../w98_music.ico"
               : "../w98_repl.ico";
 
-  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : id === "midi" ? 320 : 300;
+  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : id === "midi" ? 404 : 300;
   const normalWidth = id === "changes" ? 320 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
@@ -426,9 +428,32 @@ export default function ProgramWindow({
         </Button>
       </>
     ) : id === "midi" ? (
-      <Button variant="menu" size="sm" title="Clear" onClick={() => midiRef.current?.clear()}>
-        Clear
-      </Button>
+      <>
+        <Button variant="menu" size="sm" title="Clear" onClick={() => midiRef.current?.clear()}>
+          Clear
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          title="Raw bytes"
+          active={midiHexOpen}
+          onClick={() => midiRef.current?.toggleHex()}
+        >
+          Hex
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          title="Activity meters"
+          active={midiMetersOpen}
+          onClick={() => midiRef.current?.toggleMeters()}
+        >
+          Meters
+        </Button>
+        <Button variant="menu" size="sm" title="Re-scan MIDI inputs" onClick={() => midiRef.current?.rescan()}>
+          Rescan
+        </Button>
+      </>
     ) : undefined;
 
   return (
@@ -530,7 +555,13 @@ export default function ProgramWindow({
         />
       )}
 
-      {id === "midi" && <MidiWindow ref={midiRef} />}
+      {id === "midi" && (
+        <MidiWindow
+          ref={midiRef}
+          onHexOpenChange={setMidiHexOpen}
+          onMetersOpenChange={setMidiMetersOpen}
+        />
+      )}
     </DesktopWindow>
   );
 }
