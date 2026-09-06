@@ -43,7 +43,7 @@ const BLUESKY_ACTOR = "mrwr.dev";
 // order they should appear. The window pulls the images out of those posts.
 const PAINTINGS_PICKLIST = "/collections/paintings.json";
 const SONGS_PICKLIST = "/collections/songs.json";
-const MAX_PICKED = 24;
+const MAX_PICKED = 72;
 const FEED_PAGES = 4;
 
 function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
@@ -80,7 +80,7 @@ function normalizeAlbumsPayload(payload: unknown): AlbumCover[] {
     .filter((entry) => entry.title.length > 0 && entry.artist.length > 0);
 }
 
-type BlueskyImage = { thumb?: unknown; fullsize?: unknown; alt?: unknown; aspectRatio?: unknown };
+type BlueskyImage = { thumb?: unknown; thumbnail?: unknown; fullsize?: unknown; alt?: unknown; aspectRatio?: unknown };
 
 function readAspectRatio(value: unknown): number | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -91,13 +91,28 @@ function readAspectRatio(value: unknown): number | undefined {
   return undefined;
 }
 
+// A feed item's reply.root is the post that started the thread; return its text.
+function readRootPostText(item: unknown): string {
+  if (!item || typeof item !== "object") return "";
+  const root = (item as { reply?: { root?: unknown } }).reply?.root;
+  if (!root || typeof root !== "object") return "";
+  const rootRecord = (root as { record?: unknown }).record;
+  if (!rootRecord || typeof rootRecord !== "object") return "";
+  const t = (rootRecord as { text?: unknown }).text;
+  return typeof t === "string" ? t.trim() : "";
+}
+
 function collectBlueskyEmbedImages(embed: unknown): BlueskyImage[] {
   if (!embed || typeof embed !== "object") return [];
   const record = embed as Record<string, unknown>;
+  // Classic image embeds, and the newer multi-image "gallery" embed.
   if (Array.isArray(record.images)) return record.images as BlueskyImage[];
+  if (Array.isArray(record.items)) return record.items as BlueskyImage[];
   const media = record.media;
-  if (media && typeof media === "object" && Array.isArray((media as Record<string, unknown>).images)) {
-    return (media as Record<string, unknown>).images as BlueskyImage[];
+  if (media && typeof media === "object") {
+    const inner = media as Record<string, unknown>;
+    if (Array.isArray(inner.images)) return inner.images as BlueskyImage[];
+    if (Array.isArray(inner.items)) return inner.items as BlueskyImage[];
   }
   return [];
 }
@@ -144,15 +159,25 @@ function extractBlueskyPosts(payload: unknown): BlueskyPost[] {
     if (!rkey) continue;
     const record = (postRecord.record ?? {}) as Record<string, unknown>;
     const text = typeof record.text === "string" ? record.text.trim() : "";
+    // Many paintings are posted as replies under a titled "teaser" post — name
+    // the tile after that root post rather than the reply's own caption.
+    const rootText = readRootPostText(item);
+    const name = rootText || text;
     const createdAt = typeof record.createdAt === "string" ? record.createdAt : "";
     const when = createdAt ? createdAt.slice(0, 10) : "@mrwr.dev";
     const images: AlbumCover[] = [];
     for (const img of collectBlueskyEmbedImages(postRecord.embed)) {
       const src =
-        typeof img.fullsize === "string" ? img.fullsize : typeof img.thumb === "string" ? img.thumb : null;
+        typeof img.fullsize === "string"
+          ? img.fullsize
+          : typeof img.thumbnail === "string"
+            ? img.thumbnail
+            : typeof img.thumb === "string"
+              ? img.thumb
+              : null;
       if (!src) continue;
       const alt = typeof img.alt === "string" ? img.alt.trim() : "";
-      const label = alt || text || "untitled";
+      const label = name || alt || "untitled";
       images.push({
         title: label.length > 60 ? `${label.slice(0, 57)}…` : label,
         artist: when,
