@@ -491,7 +491,11 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
 
             .search-line {
                 text-align: left;
-                white-space: pre-wrap;
+                /* issue #29: no word wrap — long lines run on and the
+                   browser pane scrolls sideways, like Notepad with Word
+                   Wrap off. "pre" (not "nowrap") keeps the search-playback
+                   indentation and newlines intact. */
+                white-space: pre;
                 display: block;
                 width: 100%;
             }
