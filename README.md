@@ -3,7 +3,7 @@ my website
 - mrwr are my initials
 - dev is my profession
 
-# credits
+## credits
 - ui created with [react95](https://react95.io/) - https://react95.io/
 - music from [strudel.cc](https://strudel.cc) - https://strudel.cc
 - built with [Next.js](https://nextjs.org/) & [React](https://react.dev/) - https://nextjs.org/ and https://react.dev/
@@ -12,5 +12,5 @@ my website
 - and a lot of help from [Codex](https://chatgpt.com/codex/) - https://chatgpt.com/codex/
 - and some cleanup work from [Claude](https://claude.ai/) - https://claude.ai/
 
-# file complaint
+## file complaint
 add github issue to file complaint
