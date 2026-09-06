@@ -1,0 +1,83 @@
+{
+  "title": "Version history",
+  "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
+  "versions": [
+    {
+      "version": "4.0",
+      "era": "claude",
+      "name": "Claude cleanup",
+      "date": "2026-09-05",
+      "summary": "Cleanup and deploy plumbing, no new toys.",
+      "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
+      "issues": [],
+      "changes": [
+        "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
+        "Ship a minimal production package.json and track the lockfile",
+        "Refresh the issues list from GitHub as a deploy step",
+        "Cleared out ESLint errors and dead image assets",
+        "Added a Claude credit and tidied the README headings"
+      ]
+    },
+    {
+      "version": "3.1",
+      "era": "handmade",
+      "name": "Contact fix",
+      "date": "2026-09-05",
+      "summary": "A one-line hand fix between big pushes.",
+      "stats": { "commits": 1, "files": 1, "insertions": 2, "deletions": 2 },
+      "issues": [],
+      "changes": [
+        "Fixed the contact email in the About window to pm@mrwr.dev"
+      ]
+    },
+    {
+      "version": "3.0",
+      "era": "codex",
+      "name": "Codex build-out",
+      "date": "2026-02-14",
+      "summary": "The big expansion: more programs, more polish.",
+      "stats": { "commits": 54, "files": 40, "insertions": 5359, "deletions": 387 },
+      "issues": [6, 11, 13, 14, 16, 17, 18, 19, 28, 39],
+      "changes": [
+        "Reworked how desktop windows nest and stack",
+        "Added the Changes program, driven by a generated changelog",
+        "Added the Strudel music window with a live oscilloscope",
+        "Added the Albums / Collections carousel window",
+        "Rebuilt the Issues program: sizing, expand/collapse, timestamps, colors, labels",
+        "Put Documents first in the Start menu",
+        "Added search playback with relative timing to Issues and Changes"
+      ]
+    },
+    {
+      "version": "2.0",
+      "era": "chatgpt",
+      "name": "Chat GPT polish",
+      "date": "2026-02-09",
+      "summary": "A short polish pass on the Issues program.",
+      "stats": { "commits": 8, "files": 2, "insertions": 124, "deletions": 39 },
+      "issues": [9, 10],
+      "changes": [
+        "Show the issue number and state reason on each issue",
+        "Change when issue comments can expand"
+      ]
+    },
+    {
+      "version": "1.0",
+      "era": "handmade",
+      "name": "Handmade",
+      "date": "2026-02-08",
+      "summary": "The original hand-built site.",
+      "stats": { "commits": 38, "files": 39, "insertions": 1587, "deletions": 1 },
+      "issues": [4],
+      "changes": [
+        "Windows 95 desktop shell with draggable, dockable windows",
+        "Start menu, taskbar, and a working shutdown",
+        "Search bar with server-side logging",
+        "Welcome, About, and Contact windows",
+        "Project doc window, notepad, linktree, and a coffee link",
+        "First cut of the Issues program",
+        "DigitalOcean deploy and a Node server"
+      ]
+    }
+  ]
+}

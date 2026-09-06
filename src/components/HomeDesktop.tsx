@@ -4,14 +4,14 @@ import React, { useEffect, useRef, useState } from "react";
 import StartMenu from "@/components/StartMenu";
 import ProgramWindow from "@/components/windows/ProgramWindow";
 import DocumentWindow from "@/components/windows/DocumentWindow";
-import { GitChangeEntry } from "@/lib/gitChanges.types";
+import { VersionEntry } from "@/lib/versions.types";
 import { Layout, WindowId, isDocumentWindow, isProgramWindow } from "@/components/windows/windowTypes";
 
 type HomeDesktopProps = {
-  gitChanges: GitChangeEntry[];
+  versions: VersionEntry[];
 };
 
-export default function HomeDesktop({ gitChanges }: HomeDesktopProps) {
+export default function HomeDesktop({ versions }: HomeDesktopProps) {
   const [activeWindow, setActiveWindow] = useState<WindowId | null>("welcome");
   const [layout, setLayout] = useState<Layout>("normal");
   const [phoneOrientation, setPhoneOrientation] = useState<"portrait" | "landscape">("landscape");
@@ -71,7 +71,7 @@ export default function HomeDesktop({ gitChanges }: HomeDesktopProps) {
         <ProgramWindow
           id={activeWindow}
           layout={layout}
-          gitChanges={gitChanges}
+          versions={versions}
           onClose={closeWindow}
           onMinimize={dockWindow}
           onRestore={restoreWindow}
