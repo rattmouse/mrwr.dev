@@ -113,7 +113,9 @@ chmod +x "$STAGE_DIR/"*.sh
 sed "s#__APP_DIR__#$PROD_BASE#g" "$SCRIPT_DIR/prod/mrwr.dev.service.template" > "$STAGE_DIR/$SERVICE_NAME"
 
 log "Uploading to $PROD_HOST:$PROD_BASE/releases/$RELEASE_ID ..."
-ssh_prod "mkdir -p '$PROD_BASE/releases'"
+# releases/ holds the swappable release dirs; shared/ holds state that must
+# outlive them (the search-log archive — issue #55).
+ssh_prod "mkdir -p '$PROD_BASE/releases' '$PROD_BASE/shared'"
 rsync -az --delete "$STAGE_DIR/" "$PROD_HOST:$PROD_BASE/releases/$RELEASE_ID/"
 
 log "Installing dependencies + switching over on prod..."

@@ -8,6 +8,9 @@ ExecStart=/usr/bin/bash __APP_DIR__/current/start.sh
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+# Durable search-log archive, kept outside __APP_DIR__/current so it survives
+# release swaps and pruning (issue #55).
+Environment=SEARCH_LOG_FILE=__APP_DIR__/shared/search-log.ndjson
 User=root
 StandardOutput=journal
 StandardError=journal

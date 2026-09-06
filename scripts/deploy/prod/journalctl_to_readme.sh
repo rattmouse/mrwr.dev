@@ -13,7 +13,9 @@ function unquote(s) {
 
 function extract_quoted(text, key,   SQ, tail, quote, i, ch, pat) {
   SQ = sprintf("%c", 39) # single quote
-  pat = key "[ \t]*:[ \t]*"
+  # `"?` tolerates a JSON quoted key ("query":) as well as a bare key (query:),
+  # so this reads both the util.inspect stdout lines and the NDJSON archive.
+  pat = key "\"?[ \t]*:[ \t]*"
   if (!match(text, pat)) return ""
   tail = trim(substr(text, RSTART + RLENGTH))
   quote = substr(tail, 1, 1)
@@ -26,7 +28,7 @@ function extract_quoted(text, key,   SQ, tail, quote, i, ch, pat) {
 }
 
 function extract_number(text, key,   pat, tail) {
-  pat = key "[ \t]*:[ \t]*"
+  pat = key "\"?[ \t]*:[ \t]*"
   if (!match(text, pat)) return ""
   tail = substr(text, RSTART + RLENGTH)
   if (match(tail, /^[0-9]+/)) return substr(tail, RSTART, RLENGTH)

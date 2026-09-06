@@ -2,7 +2,6 @@
 
 import React, {
     forwardRef,
-    useEffect,
     useImperativeHandle,
     useMemo,
     useState,
@@ -10,9 +9,15 @@ import React, {
 import { GroupBox, TreeLeaf } from "react95";
 import { TreeView } from "@/components/issues/React95TreeViewPatched";
 import useImagePreview from "@/components/common/useImagePreview";
+import { renderSearchPrompt, SearchPlaybackText } from "@/components/common/SearchPlayback";
 
 import issuesRaw from "@/data/issues.json";
 import { stripImagesAndCollect } from "@/lib/imageRefs";
+import {
+    parseSearchEntryLine,
+    type ParsedSearchLine,
+    type SearchEntryLine,
+} from "@/lib/searchPlayback";
 import { formatRelativeCompact, replaceIsoDateTimesWithRelative } from "@/lib/relativeTime";
 
 import styled from "styled-components";
@@ -47,211 +52,19 @@ function parseTime(s?: string): number {
     return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
 }
 
-const SEARCH_PROMPT_HOST = "mrwr.dev";
-
-function stripDuplicateSearchPrefix(entry: string): string {
-    const stripped = entry.replace(
-        /^\s*(?:from\s+search\s+bar(?:\s+logging)?|search(?:ed)?)\s*:?\s*/i,
-        ""
-    );
-    return stripped || entry;
-}
-
-type SearchEntryLine = {
-    entry: string;
-    when: string;
-    atMs: number;
-    deltaMs: number | null;
-};
-
-type ParsedSearchLine = {
-    idx: number;
-    parsed: SearchEntryLine;
-};
-
-function parseSearchEntryLine(line: string): SearchEntryLine | null {
-    const isoMatch = line.match(
-        /^(.*?)(?:\s*@\s*)(\d{4}-\d{2}-\d{2}T[^ \n]+)(?:\s+(?:\+|Δ|delta_ms=|input_delta_ms=)(\d+)\s*ms)?\s*$/i
-    );
-    if (isoMatch) {
-        const explicitDeltaMs = isoMatch[3] ? Math.max(0, Number.parseInt(isoMatch[3], 10) || 0) : null;
-        const atMs = Date.parse(isoMatch[2]);
-        return {
-            entry: stripDuplicateSearchPrefix(isoMatch[1].trimEnd()),
-            when: formatRelativeCompact(isoMatch[2]),
-            atMs: explicitDeltaMs === null && Number.isFinite(atMs) ? atMs : Number.NaN,
-            deltaMs: explicitDeltaMs,
-        };
-    }
-
-    const deltaMatch = line.match(/^(.*?)(?:\s*@\s*)?(?:\+|Δ|delta_ms=)(\d+)\s*ms\s*$/i);
-    if (!deltaMatch) return null;
-    const deltaMs = Math.max(0, Number.parseInt(deltaMatch[2], 10) || 0);
-    return {
-        entry: stripDuplicateSearchPrefix(deltaMatch[1].trimEnd()),
-        when: deltaMs === 0 ? "just now" : `${Math.round(deltaMs / 100) / 10}s later`,
-        atMs: Number.NaN,
-        deltaMs,
-    };
-}
-
-function withResolvedSearchTimes(entries: SearchEntryLine[]): SearchEntryLine[] {
-    let cursor = 0;
-    return entries.map((entry, index) => {
-        const hasAbsolute = Number.isFinite(entry.atMs);
-        if (hasAbsolute) {
-            cursor = entry.atMs;
-            return entry;
-        }
-
-        const deltaMs = Math.max(0, entry.deltaMs ?? (index === 0 ? 0 : 60));
-        cursor += deltaMs;
-        return {
-            ...entry,
-            atMs: cursor,
-        };
-    });
-}
-
-function getSearchSpanSeconds(entries: SearchEntryLine[]): number {
-    if (entries.length < 2) return 0;
-    const first = entries[0]?.atMs ?? 0;
-    const last = entries[entries.length - 1]?.atMs ?? first;
-    const spanMs = Math.max(0, last - first);
-    return spanMs / 1000;
-}
-
-function renderSearchPrompt(entry: string, when: string, _spanSeconds: number): React.ReactNode {
-    return (
-        <>
-            <span style={{ color: "#ffe066", textShadow: "0 0 1px #000, 0 0 2px #000" }}>{`@[${when}] `}</span>
-            <span style={{ color: "#0057d8" }}>os</span>
-            {"@"}
-            <span style={{ color: "#a00055" }}>{SEARCH_PROMPT_HOST}</span>
-            {`: ${entry}`}
-        </>
-    );
-}
-
 type SearchPlaybackLineProps = {
     entries: SearchEntryLine[];
     reserveBodyIconSpace: boolean;
     showBodyIcon: boolean;
 };
 
-function commonPrefixLen(a: string, b: string): number {
-    const max = Math.min(a.length, b.length);
-    let i = 0;
-    while (i < max && a[i] === b[i]) i += 1;
-    return i;
-}
-
-function textAfterTransitionStep(from: string, to: string, step: number): string {
-    const cpl = commonPrefixLen(from, to);
-    const deletes = from.length - cpl;
-    const inserts = to.slice(cpl);
-    if (step <= deletes) return from.slice(0, from.length - step);
-    return from.slice(0, cpl) + inserts.slice(0, step - deletes);
-}
-
+// Thin wrapper: keeps the issue-tree line/gutter markup; the recorded-rate
+// typing animation itself lives in the shared <SearchPlaybackText />.
 function SearchPlaybackLine({
     entries,
     reserveBodyIconSpace,
     showBodyIcon,
 }: SearchPlaybackLineProps): React.ReactNode {
-    const timedEntries = useMemo(() => withResolvedSearchTimes(entries), [entries]);
-    const spanSeconds = useMemo(() => getSearchSpanSeconds(timedEntries), [timedEntries]);
-    const timeline = useMemo(() => {
-        if (!timedEntries.length) return null;
-        if (timedEntries.length === 1) {
-            return {
-                segments: [],
-                totalMs: 1200,
-                finalEntry: timedEntries[0],
-            };
-        }
-
-        const initialDurationMs = 850;
-        let cursor = 0;
-        const segments = [
-            {
-                start: cursor,
-                duration: initialDurationMs,
-                from: "",
-                to: timedEntries[0].entry,
-                when: timedEntries[0].when,
-            },
-        ];
-        cursor += initialDurationMs;
-
-        for (let i = 1; i < timedEntries.length; i += 1) {
-            const prev = timedEntries[i - 1];
-            const next = timedEntries[i];
-            const deltaMs = Math.max(60, next.atMs - prev.atMs);
-            segments.push({
-                start: cursor,
-                duration: deltaMs,
-                from: prev.entry,
-                to: next.entry,
-                when: next.when,
-            });
-            cursor += deltaMs;
-        }
-
-        const holdMs = 1200;
-        return {
-            segments,
-            totalMs: cursor + holdMs,
-            finalEntry: timedEntries[timedEntries.length - 1],
-        };
-    }, [timedEntries]);
-
-    const [elapsedMs, setElapsedMs] = useState(0);
-    useEffect(() => {
-        if (!timeline) return;
-        const startedAt = Date.now();
-        const tick = () => setElapsedMs((Date.now() - startedAt) % timeline.totalMs);
-        tick();
-        const timer = window.setInterval(tick, 33);
-        return () => window.clearInterval(timer);
-    }, [timeline]);
-
-    if (!timeline || !timeline.segments.length) {
-        const single = timedEntries[0];
-        return (
-            <span className={`search-line${reserveBodyIconSpace ? " search-line-with-gutter" : ""}`}>
-                {reserveBodyIconSpace ? (
-                    <span className="body-inline-icon-slot" aria-hidden>
-                        {showBodyIcon ? <span className="body-inline-icon">📝</span> : null}
-                    </span>
-                ) : null}
-                <span className="search-line-text">{renderSearchPrompt(single?.entry ?? "", single?.when ?? "unknown", spanSeconds)}</span>
-            </span>
-        );
-    }
-
-    const currentSegment = timeline.segments.find((seg) => elapsedMs >= seg.start && elapsedMs < seg.start + seg.duration);
-    const fallback = timeline.finalEntry;
-    let currentText = fallback.entry;
-    let currentWhen = fallback.when;
-
-    if (currentSegment) {
-        currentWhen = currentSegment.when;
-        const cpl = commonPrefixLen(currentSegment.from, currentSegment.to);
-        const deleteOps = currentSegment.from.length - cpl;
-        const insertOps = currentSegment.to.length - cpl;
-        const totalOps = deleteOps + insertOps;
-        if (totalOps <= 0) {
-            currentText = currentSegment.to;
-        }
-        else {
-            const localMs = elapsedMs - currentSegment.start;
-            const stepMs = currentSegment.duration / totalOps;
-            const step = Math.max(0, Math.min(totalOps, Math.floor(localMs / stepMs)));
-            currentText = textAfterTransitionStep(currentSegment.from, currentSegment.to, step);
-        }
-    }
-
     return (
         <span className={`search-line${reserveBodyIconSpace ? " search-line-with-gutter" : ""}`}>
             {reserveBodyIconSpace ? (
@@ -259,7 +72,9 @@ function SearchPlaybackLine({
                     {showBodyIcon ? <span className="body-inline-icon">📝</span> : null}
                 </span>
             ) : null}
-            <span className="search-line-text">{renderSearchPrompt(currentText, currentWhen, spanSeconds)}</span>
+            <span className="search-line-text">
+                <SearchPlaybackText entries={entries} />
+            </span>
         </span>
     );
 }
@@ -275,7 +90,7 @@ function renderSearchAwareLine(
     const parsed = parseSearchEntryLine(extracted.text);
     const content = !parsed ? (
         replaceIsoDateTimesWithRelative(extracted.text) || "\u00a0"
-    ) : renderSearchPrompt(parsed.entry, parsed.when, 0);
+    ) : renderSearchPrompt(parsed.entry, parsed.when);
 
     return (
         <span
