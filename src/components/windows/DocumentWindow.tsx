@@ -211,6 +211,13 @@ function getFallbackScatterPosition(
   };
 }
 
+// Size a box of the given aspect ratio so its longest edge is `size`. Undefined
+// aspect (album covers) stays square.
+function fitBox(size: number, aspect: number | undefined): { w: number; h: number } {
+  const a = aspect && aspect > 0 ? aspect : 1;
+  return a >= 1 ? { w: size, h: Math.round(size / a) } : { w: Math.round(size * a), h: size };
+}
+
 export default function DocumentWindow({
   id,
   layout,
@@ -230,13 +237,13 @@ export default function DocumentWindow({
     category === "paintings" ? EMPTY_PAINTING : category === "songs" ? EMPTY_SONG : EMPTY_ALBUM;
   const album = albums[activeAlbum] ?? emptyEntry;
   const albumSize = layout === "maximized" ? 280 : 144;
-  // The centre frame fills a square for square covers, but takes the picture's
-  // own proportions when we know them (paintings), so nothing gets cropped.
-  const frameAspect = album.aspect && album.aspect > 0 ? album.aspect : 1;
-  const frameWidth = frameAspect >= 1 ? albumSize : Math.round(albumSize * frameAspect);
-  const frameHeight = frameAspect >= 1 ? Math.round(albumSize / frameAspect) : albumSize;
+  // The centre frame and the scattered tiles take each picture's own
+  // proportions when we know them (paintings), so nothing gets cropped. Album
+  // covers have no aspect data and stay square.
+  const { w: frameWidth, h: frameHeight } = fitBox(albumSize, album.aspect);
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
   const iconSize = layout === "maximized" ? 58 : 42;
+  const { w: activeTileWidth, h: activeTileHeight } = fitBox(iconSize, album.aspect);
   const shouldCenterSelection = layout === "normal";
   const albumsSceneRef = useRef<HTMLDivElement | null>(null);
   const [albumsSceneSize, setAlbumsSceneSize] = useState({ width: 0, height: 0 });
@@ -244,6 +251,7 @@ export default function DocumentWindow({
   const albumTilePositionsRef = useRef<AlbumTilePosition[]>([]);
   const albumTileHomePositionsRef = useRef<AlbumTilePosition[]>([]);
   const albumTileVelocityRef = useRef<number[]>([]);
+  const albumTileSizesRef = useRef<{ w: number; h: number }[]>([]);
   const previousActiveAlbumRef = useRef<number>(0);
   const draggingAlbumIndexRef = useRef<number | null>(null);
   const draggingOffsetRef = useRef<{ x: number; y: number } | null>(null);
@@ -382,6 +390,10 @@ export default function DocumentWindow({
   }, [albumTilePositions]);
 
   useEffect(() => {
+    albumTileSizesRef.current = albums.map((entry) => fitBox(iconSize, entry.aspect));
+  }, [albums, iconSize]);
+
+  useEffect(() => {
     if (id !== "collections") return;
     const node = albumsSceneRef.current;
     if (!node) return;
@@ -401,10 +413,10 @@ export default function DocumentWindow({
 
   const centerTilePosition = useMemo(
     () => ({
-      x: Math.max(0, Math.round((albumsSceneSize.width - iconSize) / 2)),
-      y: Math.max(0, Math.round((albumsSceneSize.height - iconSize) / 2)),
+      x: Math.max(0, Math.round((albumsSceneSize.width - activeTileWidth) / 2)),
+      y: Math.max(0, Math.round((albumsSceneSize.height - activeTileHeight) / 2)),
     }),
-    [albumsSceneSize.height, albumsSceneSize.width, iconSize]
+    [albumsSceneSize.height, albumsSceneSize.width, activeTileWidth, activeTileHeight]
   );
 
   useEffect(() => {
@@ -478,7 +490,7 @@ export default function DocumentWindow({
     if (id !== "collections" || layout !== "normal" || albumsLoading || albumTilePositions.length === 0) return;
 
     let raf = 0;
-    const floorY = () => Math.max(6, albumsSceneSize.height - iconSize - 6);
+    const floorY = (tileH: number) => Math.max(6, albumsSceneSize.height - tileH - 6);
     const GRAVITY = 0.42;
     const BOUNCE = 0.24;
     const STOP_EPS = 0.08;
@@ -489,10 +501,10 @@ export default function DocumentWindow({
         return;
       }
 
-      const floor = floorY();
       let changed = false;
       setAlbumTilePositions((prev) => {
         const next = prev.map((pos, index) => {
+          const floor = floorY(albumTileSizesRef.current[index]?.h ?? iconSize);
           let vy = albumTileVelocityRef.current[index] ?? 0;
           let y = pos.y;
 
@@ -774,6 +786,7 @@ export default function DocumentWindow({
                   const miniImage = getSizedCover(entry.image, "low");
                   const isActive = index === activeAlbum;
                   const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
+                  const tileBox = fitBox(iconSize, entry.aspect);
                   return (
                     <div
                       key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
@@ -785,8 +798,8 @@ export default function DocumentWindow({
                         position: "absolute",
                         left: pos.x,
                         top: pos.y,
-                        width: iconSize,
-                        height: iconSize,
+                        width: tileBox.w,
+                        height: tileBox.h,
                         borderTop: "1px solid #fff",
                         borderLeft: "1px solid #fff",
                         borderRight: "1px solid #808080",
@@ -812,7 +825,10 @@ export default function DocumentWindow({
                             width: "100%",
                             height: "100%",
                             display: "block",
-                            objectFit: category === "albums" ? "cover" : "contain",
+                            // Tile box already matches the picture when we know its
+                            // aspect, so cover fills it exactly; fall back to
+                            // contain when the aspect is unknown.
+                            objectFit: entry.aspect ? "cover" : "contain",
                             imageRendering: "pixelated",
                           }}
                         />
