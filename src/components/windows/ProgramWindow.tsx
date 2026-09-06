@@ -429,15 +429,25 @@ export default function ProgramWindow({
       </>
     ) : id === "midi" ? (
       <>
-        <Button variant="menu" size="sm" title="Request MIDI access and re-scan inputs" onClick={() => midiRef.current?.scan()}>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Request MIDI access and re-scan inputs"
+          onClick={() => midiRef.current?.scan()}
+        >
           Scan
         </Button>
-        <Button variant="menu" size="sm" title="Clear" onClick={() => midiRef.current?.clear()}>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Clear the log"
+          onClick={() => midiRef.current?.clear()}
+        >
           Clear
         </Button>
         <Button
-          variant="menu"
           size="sm"
+          style={{ fontWeight: "bold" }}
           title="Raw bytes"
           active={midiHexOpen}
           onClick={() => midiRef.current?.toggleHex()}
@@ -445,8 +455,8 @@ export default function ProgramWindow({
           Hex
         </Button>
         <Button
-          variant="menu"
           size="sm"
+          style={{ fontWeight: "bold" }}
           title="Activity meters"
           active={midiMetersOpen}
           onClick={() => midiRef.current?.toggleMeters()}
