@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Anchor, GroupBox, Hourglass, ScrollView } from "react95";
+import { Anchor, GroupBox, Hourglass, ScrollView, Tab, Tabs } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
 
@@ -13,6 +13,8 @@ type DocumentWindowProps = {
   onRestore: () => void;
   onToggleMaximize: () => void;
 };
+
+type CollectionCategory = "albums" | "paintings" | "songs";
 
 type AlbumCover = {
   title: string;
@@ -30,6 +32,16 @@ const ALBUM_COVERS: AlbumCover[] = [
   // Fallback when /public/collections/content.json is missing.
 ];
 const EMPTY_ALBUM: AlbumCover = { title: "no albums found", artist: "collections/content.json", image: null };
+const EMPTY_PAINTING: AlbumCover = { title: "no paintings found", artist: "collections/paintings.json", image: null };
+const EMPTY_SONG: AlbumCover = { title: "no songs found", artist: "collections/songs.json", image: null };
+const BLUESKY_ACTOR = "mrwr.dev";
+// Hand-picked Bluesky post lists (gitignored, like content.json). Each is a JSON
+// array of post links — https://bsky.app/profile/<handle>/post/<rkey> — in the
+// order they should appear. The window pulls the images out of those posts.
+const PAINTINGS_PICKLIST = "/collections/paintings.json";
+const SONGS_PICKLIST = "/collections/songs.json";
+const MAX_PICKED = 24;
+const FEED_PAGES = 4;
 
 function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
   const next = [...input];
@@ -44,6 +56,9 @@ function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
 
 function getSizedCover(image: string | null, size: "low" | "normal" | "high"): string | null {
   if (!image) return null;
+  if (image.includes("/feed_fullsize/")) {
+    return size === "low" ? image.replace("/feed_fullsize/", "/feed_thumbnail/") : image;
+  }
   if (!image.includes("/front-500")) return image;
   if (size === "high") return image.replace("/front-500", "/front-1200");
   if (size === "low") return image.replace("/front-500", "/front-250");
@@ -60,6 +75,81 @@ function normalizeAlbumsPayload(payload: unknown): AlbumCover[] {
       image: typeof entry.image === "string" && entry.image.trim() ? entry.image.trim() : null,
     }))
     .filter((entry) => entry.title.length > 0 && entry.artist.length > 0);
+}
+
+type BlueskyImage = { thumb?: unknown; fullsize?: unknown; alt?: unknown };
+
+function collectBlueskyEmbedImages(embed: unknown): BlueskyImage[] {
+  if (!embed || typeof embed !== "object") return [];
+  const record = embed as Record<string, unknown>;
+  if (Array.isArray(record.images)) return record.images as BlueskyImage[];
+  const media = record.media;
+  if (media && typeof media === "object" && Array.isArray((media as Record<string, unknown>).images)) {
+    return (media as Record<string, unknown>).images as BlueskyImage[];
+  }
+  return [];
+}
+
+type BlueskyPost = { rkey: string; images: AlbumCover[] };
+
+// Pull the trailing record key out of a bsky.app permalink, an at:// URI, or a
+// bare rkey.
+function extractPostRkey(ref: string): string {
+  const trimmed = ref.trim();
+  if (!trimmed) return "";
+  const match = trimmed.match(/([A-Za-z0-9]+)\/*$/);
+  return match ? match[1] : "";
+}
+
+// A picklist is a JSON array of post links (or { post: "<link>" } objects, or
+// bare rkeys). Returns the rkeys in the given order.
+function parsePicklist(payload: unknown): string[] {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .map((entry) => {
+      if (typeof entry === "string") return entry;
+      if (entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).post === "string") {
+        return (entry as Record<string, unknown>).post as string;
+      }
+      return "";
+    })
+    .map(extractPostRkey)
+    .filter((rkey) => rkey.length > 0);
+}
+
+function extractBlueskyPosts(payload: unknown): BlueskyPost[] {
+  if (!payload || typeof payload !== "object") return [];
+  const feed = (payload as { feed?: unknown }).feed;
+  if (!Array.isArray(feed)) return [];
+  const posts: BlueskyPost[] = [];
+  for (const item of feed) {
+    // Skip reposts — only surface the account's own posts.
+    if (item && typeof item === "object" && (item as { reason?: unknown }).reason) continue;
+    const post = (item as { post?: unknown }).post;
+    if (!post || typeof post !== "object") continue;
+    const postRecord = post as Record<string, unknown>;
+    const rkey = typeof postRecord.uri === "string" ? extractPostRkey(postRecord.uri) : "";
+    if (!rkey) continue;
+    const record = (postRecord.record ?? {}) as Record<string, unknown>;
+    const text = typeof record.text === "string" ? record.text.trim() : "";
+    const createdAt = typeof record.createdAt === "string" ? record.createdAt : "";
+    const when = createdAt ? createdAt.slice(0, 10) : "@mrwr.dev";
+    const images: AlbumCover[] = [];
+    for (const img of collectBlueskyEmbedImages(postRecord.embed)) {
+      const src =
+        typeof img.fullsize === "string" ? img.fullsize : typeof img.thumb === "string" ? img.thumb : null;
+      if (!src) continue;
+      const alt = typeof img.alt === "string" ? img.alt.trim() : "";
+      const label = alt || text || "untitled";
+      images.push({
+        title: label.length > 60 ? `${label.slice(0, 57)}…` : label,
+        artist: when,
+        image: src,
+      });
+    }
+    if (images.length > 0) posts.push({ rkey, images });
+  }
+  return posts;
 }
 
 function buildScatterPositions(count: number, width: number, height: number, iconSize: number): AlbumTilePosition[] {
@@ -117,12 +207,15 @@ export default function DocumentWindow({
   onToggleMaximize,
 }: DocumentWindowProps) {
   const [activeAlbum, setActiveAlbum] = useState(0);
+  const [category, setCategory] = useState<CollectionCategory>("albums");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const title =
     id === "about" ? "about.txt" : id === "contact" ? "contact.txt" : id === "collections" ? "collections.exe" : "projects.txt";
   const titleIcon = id === "collections" ? "../w98_collections_cards.ico" : "../w95_default.ico";
-  const album = albums[activeAlbum] ?? ALBUM_COVERS[0] ?? EMPTY_ALBUM;
+  const emptyEntry =
+    category === "paintings" ? EMPTY_PAINTING : category === "songs" ? EMPTY_SONG : EMPTY_ALBUM;
+  const album = albums[activeAlbum] ?? emptyEntry;
   const albumSize = layout === "maximized" ? 280 : 144;
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
   const iconSize = layout === "maximized" ? 58 : 42;
@@ -186,37 +279,85 @@ export default function DocumentWindow({
       }
     }
 
-    async function loadAlbums() {
+    async function loadAlbumsSource(): Promise<AlbumCover[]> {
+      let sourceAlbums = ALBUM_COVERS;
       try {
-        let sourceAlbums = ALBUM_COVERS;
-        try {
-          const privateResponse = await fetch("/collections/content.json", { cache: "no-store" });
-          if (privateResponse.ok) {
-            const privatePayload = (await privateResponse.json()) as unknown;
-            const parsedPrivate = normalizeAlbumsPayload(privatePayload);
-            if (parsedPrivate.length > 0) {
-              sourceAlbums = parsedPrivate;
+        const privateResponse = await fetch("/collections/content.json", { cache: "no-store" });
+        if (privateResponse.ok) {
+          const privatePayload = (await privateResponse.json()) as unknown;
+          const parsedPrivate = normalizeAlbumsPayload(privatePayload);
+          if (parsedPrivate.length > 0) {
+            sourceAlbums = parsedPrivate;
+          }
+        }
+      } catch {
+        // fall through to bundled fallback list
+      }
+      const shuffled = shuffleAlbums(sourceAlbums);
+      return Promise.all(shuffled.map(resolveCover));
+    }
+
+    // Paintings and Songs both come from a hand-picked list of Bluesky posts.
+    // Walk the author feed (a few pages if needed) collecting the picked posts,
+    // then emit their images in picklist order.
+    async function loadPickedPosts(picklistFile: string): Promise<AlbumCover[]> {
+      try {
+        const picklistResponse = await fetch(picklistFile, { cache: "no-store" });
+        if (!picklistResponse.ok) return [];
+        const rkeys = parsePicklist((await picklistResponse.json()) as unknown);
+        if (rkeys.length === 0) return [];
+
+        const wanted = new Set(rkeys);
+        const imagesByRkey = new Map<string, AlbumCover[]>();
+        let cursor: string | undefined;
+        for (let page = 0; page < FEED_PAGES && imagesByRkey.size < wanted.size; page += 1) {
+          const url =
+            `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(BLUESKY_ACTOR)}` +
+            `&limit=100&filter=posts_with_media${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+          const response = await fetch(url);
+          if (!response.ok) break;
+          const payload = (await response.json()) as { cursor?: unknown };
+          for (const post of extractBlueskyPosts(payload)) {
+            if (wanted.has(post.rkey) && !imagesByRkey.has(post.rkey)) {
+              imagesByRkey.set(post.rkey, post.images);
             }
           }
-        } catch {
-          // fall through to bundled fallback list
+          cursor = typeof payload.cursor === "string" ? payload.cursor : undefined;
+          if (!cursor) break;
         }
 
-        const shuffled = shuffleAlbums(sourceAlbums);
-        const resolvedAlbums = await Promise.all(shuffled.map(resolveCover));
-        if (!cancelled) setAlbums(resolvedAlbums);
+        const tiles: AlbumCover[] = [];
+        for (const rkey of rkeys) {
+          const images = imagesByRkey.get(rkey);
+          if (images) tiles.push(...images);
+        }
+        return tiles.slice(0, MAX_PICKED);
+      } catch {
+        return [];
+      }
+    }
+
+    async function load() {
+      try {
+        const next =
+          category === "paintings"
+            ? await loadPickedPosts(PAINTINGS_PICKLIST)
+            : category === "songs"
+              ? await loadPickedPosts(SONGS_PICKLIST)
+              : await loadAlbumsSource();
+        if (!cancelled) setAlbums(next);
       } catch (error) {
-        console.error("Failed to load album covers:", error);
+        console.error("Failed to load collection tiles:", error);
       } finally {
         if (!cancelled) setAlbumsLoading(false);
       }
     }
 
-    void loadAlbums();
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, category]);
 
   useEffect(() => {
     albumTilePositionsRef.current = albumTilePositions;
@@ -508,7 +649,7 @@ export default function DocumentWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
-      normalHeight={id === "collections" ? 280 : 200}
+      normalHeight={id === "collections" ? 312 : 200}
       normalWidth={id === "collections" ? 340 : undefined}
       onClose={onClose}
       onMinimize={onMinimize}
@@ -542,7 +683,20 @@ export default function DocumentWindow({
             gap: 8,
           }}
         >
-          <GroupBox label="albums.gif" style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}>
+          <Tabs
+            value={category}
+            onChange={(value) => setCategory(value as CollectionCategory)}
+            style={{ alignSelf: "stretch" }}
+          >
+            <Tab value="albums">Albums</Tab>
+            <Tab value="paintings">Paintings</Tab>
+            <Tab value="songs">Songs</Tab>
+          </Tabs>
+
+          <GroupBox
+            label={category === "paintings" ? "paints.gif" : category === "songs" ? "songs.gif" : "albums.gif"}
+            style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}
+          >
             <div
               ref={albumsSceneRef}
               style={{
@@ -604,7 +758,7 @@ export default function DocumentWindow({
                   const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
                   return (
                     <div
-                      key={`${entry.artist}-${entry.title}`}
+                      key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
                       data-collection-album-tile="true"
                       onPointerDown={(event) => onAlbumTilePointerDown(index, event)}
                       onPointerMove={onAlbumTilePointerMove}
