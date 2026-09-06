@@ -9,14 +9,15 @@
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [53, 55, 66],
+      "issues": [53, 55, 66, 70],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
         "Ship a minimal production package.json and track the lockfile",
         "Refresh the issues list from GitHub as a deploy step",
         "Cleared out ESLint errors and dead image assets",
         "Added a Claude credit and tidied the README headings",
-        "Renamed the REPL program to Sounds in the Start menu"
+        "Renamed the REPL program to Sounds in the Start menu",
+        "Swapped the LinkedIn social link for Bluesky"
       ]
     },
     {
