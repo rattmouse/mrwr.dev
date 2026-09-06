@@ -14,7 +14,7 @@ export type MidiWindowHandle = {
   clear: () => void;
   toggleHex: () => void;
   toggleMeters: () => void;
-  rescan: () => void;
+  scan: () => void;
 };
 
 type MidiWindowProps = {
@@ -22,7 +22,7 @@ type MidiWindowProps = {
   onMetersOpenChange?: (open: boolean) => void;
 };
 
-type MidiStatus = "checking" | "unsupported" | "denied" | "ready";
+type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
 
 type DeviceInfo = {
   id: string;
@@ -199,6 +199,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const startedAt = useRef(0);
   const accessRef = useRef<MIDIAccess | null>(null);
   const epochRef = useRef(0);
+  // Shared in-flight requestMIDIAccess promise, so a dev StrictMode double-mount
+  // (or a fast double Scan) fires one browser request, not two — Firefox blocks
+  // an origin after repeated gesture-less attempts.
+  const pendingRef = useRef<Promise<MIDIAccess> | null>(null);
   const metersRef = useRef<Meters>({
     channels: new Array(16).fill(0),
     velocity: 0,
@@ -260,8 +264,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     setDevices(list);
   }, [handleMessage]);
 
-  const teardown = useCallback(() => {
-    epochRef.current++;
+  const detachAccess = useCallback(() => {
     const access = accessRef.current;
     if (!access) return;
     access.removeEventListener("statechange", syncDevices);
@@ -271,35 +274,81 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     accessRef.current = null;
   }, [handleMessage, syncDevices]);
 
-  const connect = useCallback(() => {
-    if (typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function") {
-      setStatus("unsupported");
-      return;
-    }
+  const connect = useCallback(
+    (userInitiated = false) => {
+      if (typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function") {
+        setStatus("unsupported");
+        return;
+      }
 
-    teardown();
-    const epoch = ++epochRef.current;
-    setStatus("checking");
-    if (startedAt.current === 0) startedAt.current = performance.now();
+      const epoch = ++epochRef.current;
+      setStatus("checking");
+      if (startedAt.current === 0) startedAt.current = performance.now();
 
-    navigator
-      .requestMIDIAccess({ sysex: false })
-      .then((granted) => {
-        if (epoch !== epochRef.current) return;
-        accessRef.current = granted;
-        setStatus("ready");
-        granted.addEventListener("statechange", syncDevices);
-        syncDevices();
-      })
-      .catch(() => {
-        if (epoch === epochRef.current) setStatus("denied");
-      });
-  }, [teardown, syncDevices]);
+      // A Scan click should force a fresh request even if one is already pending.
+      if (userInitiated) pendingRef.current = null;
+      if (!pendingRef.current) {
+        pendingRef.current = navigator.requestMIDIAccess({ sysex: false });
+      }
+      const req = pendingRef.current;
+
+      req
+        .then((granted) => {
+          if (epoch !== epochRef.current) return;
+          detachAccess();
+          accessRef.current = granted;
+          setStatus("ready");
+          granted.addEventListener("statechange", syncDevices);
+          syncDevices();
+        })
+        .catch(() => {
+          if (epoch !== epochRef.current) return;
+          // Firefox only shows the MIDI prompt on a user gesture; a gesture-less
+          // attempt rejects. Distinguish that from a real block.
+          setStatus(userInitiated ? "denied" : "needsGesture");
+        })
+        .finally(() => {
+          if (pendingRef.current === req) pendingRef.current = null;
+        });
+    },
+    [detachAccess, syncDevices],
+  );
 
   useEffect(() => {
-    connect();
-    return () => teardown();
-  }, [connect, teardown]);
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      if (typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function") {
+        setStatus("unsupported");
+        return;
+      }
+
+      // If the permission is already decided, honour it without firing a
+      // gesture-less request (which Firefox penalises). Otherwise try once;
+      // on failure we fall back to asking the user to press Scan.
+      let permission: PermissionState | null = null;
+      try {
+        const result = await navigator.permissions?.query({ name: "midi" as PermissionName });
+        permission = result?.state ?? null;
+      } catch {
+        permission = null;
+      }
+      if (cancelled) return;
+
+      if (permission === "denied") {
+        setStatus("denied");
+        return;
+      }
+      connect(false);
+    };
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+      epochRef.current++;
+      detachAccess();
+    };
+  }, [connect, detachAccess]);
 
   // Decay the channel-activity cells and publish a throttled snapshot for the meters.
   useEffect(() => {
@@ -343,7 +392,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       clear: () => setEntries([]),
       toggleHex: () => setHexOpen((v) => !v),
       toggleMeters: () => setMetersOpen((v) => !v),
-      rescan: () => connect(),
+      scan: () => connect(true),
     }),
     [connect],
   );
@@ -366,7 +415,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {status === "unsupported" && (
           <div>Web MIDI is not supported in this browser. Try Chrome or Firefox.</div>
         )}
-        {status === "denied" && <div>MIDI access was blocked. Allow it and press Rescan.</div>}
+        {status === "needsGesture" && <div>MIDI needs your permission. Press Scan to connect.</div>}
+        {status === "denied" && (
+          <div>MIDI access is blocked. Allow it in your browser settings, then press Scan.</div>
+        )}
         {status === "ready" && devices.length === 0 && <div>No MIDI inputs detected. Plug one in.</div>}
         {status === "ready" && devices.length > 0 && (
           <div>

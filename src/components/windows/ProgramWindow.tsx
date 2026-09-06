@@ -429,6 +429,9 @@ export default function ProgramWindow({
       </>
     ) : id === "midi" ? (
       <>
+        <Button variant="menu" size="sm" title="Request MIDI access and re-scan inputs" onClick={() => midiRef.current?.scan()}>
+          Scan
+        </Button>
         <Button variant="menu" size="sm" title="Clear" onClick={() => midiRef.current?.clear()}>
           Clear
         </Button>
@@ -449,9 +452,6 @@ export default function ProgramWindow({
           onClick={() => midiRef.current?.toggleMeters()}
         >
           Meters
-        </Button>
-        <Button variant="menu" size="sm" title="Re-scan MIDI inputs" onClick={() => midiRef.current?.rescan()}>
-          Rescan
         </Button>
       </>
     ) : undefined;
