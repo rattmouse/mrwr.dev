@@ -58,6 +58,7 @@ export default function ProgramWindow({
   const strudelRef = useRef<StrudelReplHandle>(null);
   const midiRef = useRef<MidiWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
+  const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
   const [musicJitter, setMusicJitter] = useState({ x: 0, y: 0 });
@@ -68,8 +69,10 @@ export default function ProgramWindow({
   const [musicFileShowSubmenuTop, setMusicFileShowSubmenuTop] = useState(22);
   const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
-  const [midiHexOpen, setMidiHexOpen] = useState(true);
-  const [midiMetersOpen, setMidiMetersOpen] = useState(true);
+  const [midiFileOpen, setMidiFileOpen] = useState(false);
+  const [midiHexOpen, setMidiHexOpen] = useState(false);
+  const [midiMetersOpen, setMidiMetersOpen] = useState(false);
+  const [midiKeysOpen, setMidiKeysOpen] = useState(false);
 
   const title =
     id === "notepad"
@@ -167,6 +170,24 @@ export default function ProgramWindow({
     setMusicFileOpenSubmenu(false);
     setMusicFileShowSubmenu(false);
   }, [musicFileOpen]);
+
+  useEffect(() => {
+    if (id !== "midi") {
+      setMidiFileOpen(false);
+      return;
+    }
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!(midiFileMenuRef.current?.contains(target) ?? false)) {
+        setMidiFileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [id]);
 
   useEffect(() => {
     if (id !== "issues") {
@@ -429,22 +450,51 @@ export default function ProgramWindow({
       </>
     ) : id === "midi" ? (
       <>
-        <Button
-          size="sm"
-          style={{ fontWeight: "bold" }}
-          title="Request MIDI access and re-scan inputs"
-          onClick={() => midiRef.current?.scan()}
-        >
-          Scan
-        </Button>
-        <Button
-          size="sm"
-          style={{ fontWeight: "bold" }}
-          title="Clear the log"
-          onClick={() => midiRef.current?.clear()}
-        >
-          Clear
-        </Button>
+        <div ref={midiFileMenuRef} style={{ position: "relative", display: "inline-block" }}>
+          <Button
+            variant="menu"
+            size="sm"
+            active={midiFileOpen}
+            aria-label="File"
+            title="File"
+            onClick={() => setMidiFileOpen((prev) => !prev)}
+          >
+            File
+          </Button>
+          {midiFileOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% - 2px)",
+                left: 0,
+                zIndex: 1000,
+                width: "max-content",
+              }}
+              onMouseLeave={() => setMidiFileOpen(false)}
+            >
+              <MenuList style={{ marginTop: 0 }}>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    midiRef.current?.scan();
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Scan
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    midiRef.current?.clear();
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Clear
+                </MenuListItem>
+              </MenuList>
+            </div>
+          )}
+        </div>
         <Button
           size="sm"
           style={{ fontWeight: "bold" }}
@@ -462,6 +512,15 @@ export default function ProgramWindow({
           onClick={() => midiRef.current?.toggleMeters()}
         >
           Meters
+        </Button>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="One-octave keyboard"
+          active={midiKeysOpen}
+          onClick={() => midiRef.current?.toggleKeys()}
+        >
+          Keys
         </Button>
       </>
     ) : undefined;
@@ -570,6 +629,7 @@ export default function ProgramWindow({
           ref={midiRef}
           onHexOpenChange={setMidiHexOpen}
           onMetersOpenChange={setMidiMetersOpen}
+          onKeysOpenChange={setMidiKeysOpen}
         />
       )}
     </DesktopWindow>

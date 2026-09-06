@@ -14,12 +14,14 @@ export type MidiWindowHandle = {
   clear: () => void;
   toggleHex: () => void;
   toggleMeters: () => void;
+  toggleKeys: () => void;
   scan: () => void;
 };
 
 type MidiWindowProps = {
   onHexOpenChange?: (open: boolean) => void;
   onMetersOpenChange?: (open: boolean) => void;
+  onKeysOpenChange?: (open: boolean) => void;
 };
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
@@ -46,6 +48,7 @@ type Parsed = {
   channel: number | null;
   type: string;
   detail: string;
+  note?: number;
   velocity?: number;
   cc?: number;
   ccValue?: number;
@@ -117,12 +120,13 @@ function describe(data: Uint8Array): Parsed | null {
 
   switch (kind) {
     case 0x80:
-      return { channel, type: "Note Off", detail: `${noteName(d1)}  vel ${d2}` };
+      return { channel, type: "Note Off", detail: `${noteName(d1)}  vel ${d2}`, note: d1 };
     case 0x90:
       return {
         channel,
         type: d2 === 0 ? "Note Off" : "Note On",
         detail: `${noteName(d1)}  vel ${d2}`,
+        note: d1,
         velocity: d2 === 0 ? undefined : d2,
       };
     case 0xa0:
@@ -180,21 +184,63 @@ function MeterBar({
   );
 }
 
+// Pitch classes of the white keys, left to right, and the black keys with the
+// x offset (in a 140-wide viewBox) they sit at.
+const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
+const BLACK_KEYS = [
+  { pc: 1, x: 14 },
+  { pc: 3, x: 34 },
+  { pc: 6, x: 74 },
+  { pc: 8, x: 94 },
+  { pc: 10, x: 114 },
+];
+
+function Keyboard({ held }: { held: number[] }) {
+  return (
+    <svg viewBox="0 0 140 48" width="140" height="48" style={{ display: "block" }}>
+      {WHITE_PCS.map((pc, i) => (
+        <rect
+          key={pc}
+          x={i * 20}
+          y={0}
+          width={20}
+          height={48}
+          fill={held[pc] > 0 ? "#1d9e75" : "#ffffff"}
+          stroke="#404040"
+        />
+      ))}
+      {BLACK_KEYS.map(({ pc, x }) => (
+        <rect
+          key={pc}
+          x={x}
+          y={0}
+          width={12}
+          height={28}
+          fill={held[pc] > 0 ? "#0f6e56" : "#202020"}
+          stroke="#404040"
+        />
+      ))}
+    </svg>
+  );
+}
+
 const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWindow(
-  { onHexOpenChange, onMetersOpenChange },
+  { onHexOpenChange, onMetersOpenChange, onKeysOpenChange },
   ref,
 ) {
   const [status, setStatus] = useState<MidiStatus>("checking");
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [hexOpen, setHexOpen] = useState(true);
-  const [metersOpen, setMetersOpen] = useState(true);
+  const [hexOpen, setHexOpen] = useState(false);
+  const [metersOpen, setMetersOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const [meters, setMeters] = useState<Meters>(() => ({
     channels: new Array(16).fill(0),
     velocity: 0,
     cc: null,
     ccValue: 0,
   }));
+  const [held, setHeld] = useState<number[]>(() => new Array(12).fill(0));
 
   const nextId = useRef(0);
   const startedAt = useRef(0);
@@ -210,6 +256,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     cc: null,
     ccValue: 0,
   });
+  // Held-note count per pitch class (0-11), across every octave and channel.
+  const heldRef = useRef<number[]>(new Array(12).fill(0));
 
   const pushEntry = useCallback((source: string, data: Uint8Array) => {
     const parsed = describe(data);
@@ -221,6 +269,14 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     if (parsed.cc != null) {
       m.cc = parsed.cc;
       m.ccValue = parsed.ccValue ?? 0;
+    }
+    if (parsed.note != null) {
+      const pc = parsed.note % 12;
+      if (parsed.type === "Note On") heldRef.current[pc] += 1;
+      else if (parsed.type === "Note Off") {
+        heldRef.current[pc] = Math.max(0, heldRef.current[pc] - 1);
+      }
+      setHeld(heldRef.current.slice());
     }
 
     const entry: LogEntry = {
@@ -397,12 +453,21 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     onMetersOpenChange?.(metersOpen);
   }, [metersOpen, onMetersOpenChange]);
 
+  useEffect(() => {
+    onKeysOpenChange?.(keysOpen);
+  }, [keysOpen, onKeysOpenChange]);
+
   useImperativeHandle(
     ref,
     () => ({
-      clear: () => setEntries([]),
+      clear: () => {
+        setEntries([]);
+        heldRef.current = new Array(12).fill(0);
+        setHeld(heldRef.current.slice());
+      },
       toggleHex: () => setHexOpen((v) => !v),
       toggleMeters: () => setMetersOpen((v) => !v),
+      toggleKeys: () => setKeysOpen((v) => !v),
       scan: () => connect(true),
     }),
     [connect],
@@ -487,6 +552,19 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             value={meters.ccValue}
             hasValue={meters.cc != null}
           />
+        </div>
+      )}
+
+      {keysOpen && (
+        <div
+          style={{
+            flex: "0 0 auto",
+            padding: "3px 4px",
+            border: "2px solid",
+            borderColor: "#808080 #ffffff #ffffff #808080",
+          }}
+        >
+          <Keyboard held={held} />
         </div>
       )}
 
