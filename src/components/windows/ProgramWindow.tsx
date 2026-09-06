@@ -14,7 +14,7 @@ import ChangesTreeView, { ChangesTreeViewHandle } from "@/components/changes/Cha
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
-import { GitChangeEntry } from "@/lib/gitChanges.types";
+import { VersionEntry } from "@/lib/versions.types";
 import strudelSongs from "@/data/strudelSongs.json";
 
 const SONG_ICON_FILES = [
@@ -27,7 +27,7 @@ const SONG_ICON_FILES = [
 type ProgramWindowProps = {
   id: ProgramWindowId;
   layout: Layout;
-  gitChanges: GitChangeEntry[];
+  versions: VersionEntry[];
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
@@ -37,7 +37,7 @@ type ProgramWindowProps = {
 export default function ProgramWindow({
   id,
   layout,
-  gitChanges,
+  versions,
   onClose,
   onMinimize,
   onRestore,
@@ -161,7 +161,7 @@ export default function ProgramWindow({
   }, [musicFileOpen]);
 
   useEffect(() => {
-    if (id !== "issues" && id !== "changes") {
+    if (id !== "issues") {
       setContentModalOpen(false);
     }
   }, [id]);
@@ -184,23 +184,20 @@ export default function ProgramWindow({
       </>
     ) : id === "changes" ? (
       <>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFeatures()} disabled={contentModalOpen}>
-          ✨
+        <Button variant="menu" size="sm" title="Handmade" onClick={() => changesTreeRef.current?.filterHandmade()}>
+          ✋
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandFixes()} disabled={contentModalOpen}>
-          🛠️
+        <Button variant="menu" size="sm" title="Chat GPT" onClick={() => changesTreeRef.current?.filterChatgpt()}>
+          💬
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandDocs()} disabled={contentModalOpen}>
-          📝
+        <Button variant="menu" size="sm" title="Codex" onClick={() => changesTreeRef.current?.filterCodex()}>
+          ⚙️
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandOther()} disabled={contentModalOpen}>
-          📦
+        <Button variant="menu" size="sm" title="Claude" onClick={() => changesTreeRef.current?.filterClaude()}>
+          🧹
         </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.expandAll()} disabled={contentModalOpen}>
-          ➕
-        </Button>
-        <Button variant="menu" size="sm" onClick={() => changesTreeRef.current?.collapseAll()} disabled={contentModalOpen}>
-          ➖
+        <Button variant="menu" size="sm" title="All versions" onClick={() => changesTreeRef.current?.filterAll()}>
+          🌐
         </Button>
       </>
     ) : id === "music" ? (
@@ -508,18 +505,7 @@ export default function ProgramWindow({
       {id === "changes" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
           <ScrollView style={{ width: "100%", height: "100%" }}>
-            <ChangesTreeView
-              ref={changesTreeRef}
-              entries={gitChanges}
-              showFrame={false}
-              onModalOpenChange={setContentModalOpen}
-              modalScale={contentModalScale}
-              modalForceButtonOnly={useFakeModalButtonOnly}
-              modalButtonOnlyWidth={modalButtonOnlyWidth}
-              modalFakePreviewOnly={useFakePreviewOnly}
-              openImagesInNewTab={openImagesInNewTab}
-              modalHideTitleBar={modalHideTitleBar}
-            />
+            <ChangesTreeView ref={changesTreeRef} versions={versions} showFrame={false} />
           </ScrollView>
         </div>
       )}
