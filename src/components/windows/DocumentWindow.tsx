@@ -719,8 +719,8 @@ export default function DocumentWindow({
                   </li>
                   <li>
                     -{" "}
-                    <Anchor href="mailto:rattmouse@pm.me" target="_blank">
-                      rattmouse@pm.me
+                    <Anchor href="mailto:pm@mrwr.dev" target="_blank">
+                      pm@mrwr.dev
                     </Anchor>
                   </li>
                 </ul>
