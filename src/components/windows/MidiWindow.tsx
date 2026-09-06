@@ -29,6 +29,7 @@ type DeviceInfo = {
   name: string;
   manufacturer: string;
   state: string;
+  connection: string;
 };
 
 type LogEntry = {
@@ -256,12 +257,20 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         name: input.name ?? "Unknown",
         manufacturer: input.manufacturer ?? "",
         state: input.state,
+        connection: input.connection,
       });
-      // Assigning onmidimessage (not addEventListener) is what implicitly opens
-      // the input port in Chrome; open() covers other engines and is a no-op if
-      // already open. Without an open port no midimessage events ever fire.
+      // A port must be open before it delivers midimessage events, and neither
+      // engine opens it reliably just from attaching a handler — call open()
+      // explicitly. It's a no-op on an already-open port.
       input.onmidimessage = handleMessage;
-      void input.open().catch(() => {});
+      input.open().then(
+        () => {
+          setDevices((prev) =>
+            prev.map((d) => (d.id === input.id ? { ...d, connection: input.connection } : d)),
+          );
+        },
+        () => {},
+      );
     });
     setDevices(list);
   }, [handleMessage]);
@@ -428,7 +437,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             {devices.map((device) => (
               <div key={device.id}>
                 {device.name}
-                {device.manufacturer ? ` — ${device.manufacturer}` : ""} [{device.state}]
+                {device.manufacturer ? ` — ${device.manufacturer}` : ""} [{device.state}/{device.connection}]
               </div>
             ))}
           </div>
