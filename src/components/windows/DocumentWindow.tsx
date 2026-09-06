@@ -68,13 +68,44 @@ function buildScatterPositions(count: number, width: number, height: number, ico
   const maxX = Math.max(minX, width - iconSize - 6);
   const maxY = Math.max(minY, height - iconSize - 6);
   const rand = (min: number, max: number) => min + Math.random() * Math.max(0, max - min);
-  return Array.from({ length: count }, (_, index) => {
+  return Array.from({ length: count }, () => {
     return {
       x: rand(minX, maxX),
       y: rand(minY, maxY),
       rot: rand(-8, 8),
     };
   });
+}
+
+function getFallbackScatterPosition(
+  sceneWidth: number,
+  sceneHeight: number,
+  iconSize: number,
+  excludeCenter = true
+): { x: number; y: number } {
+  const minX = 6;
+  const minY = 6;
+  const maxX = Math.max(minX, sceneWidth - iconSize - 6);
+  const maxY = Math.max(minY, sceneHeight - iconSize - 6);
+  const centerX = Math.max(1, sceneWidth) / 2;
+  const centerY = Math.max(1, sceneHeight) / 2;
+  const minDist = Math.max(iconSize * 1.1, 54);
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const x = minX + Math.random() * Math.max(0, maxX - minX);
+    const y = minY + Math.random() * Math.max(0, maxY - minY);
+    if (!excludeCenter) return { x, y };
+    const tileCenterX = x + iconSize / 2;
+    const tileCenterY = y + iconSize / 2;
+    if (Math.hypot(tileCenterX - centerX, tileCenterY - centerY) >= minDist) {
+      return { x, y };
+    }
+  }
+
+  return {
+    x: minX + Math.random() * Math.max(0, maxX - minX),
+    y: minY + Math.random() * Math.max(0, maxY - minY),
+  };
 }
 
 export default function DocumentWindow({
@@ -389,32 +420,6 @@ export default function DocumentWindow({
     );
   };
 
-  const getFallbackScatterPosition = (excludeCenter = true) => {
-    const minX = 6;
-    const minY = 6;
-    const maxX = Math.max(minX, albumsSceneSize.width - iconSize - 6);
-    const maxY = Math.max(minY, albumsSceneSize.height - iconSize - 6);
-    const centerX = Math.max(1, albumsSceneSize.width) / 2;
-    const centerY = Math.max(1, albumsSceneSize.height) / 2;
-    const minDist = Math.max(iconSize * 1.1, 54);
-
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const x = minX + Math.random() * Math.max(0, maxX - minX);
-      const y = minY + Math.random() * Math.max(0, maxY - minY);
-      if (!excludeCenter) return { x, y };
-      const tileCenterX = x + iconSize / 2;
-      const tileCenterY = y + iconSize / 2;
-      if (Math.hypot(tileCenterX - centerX, tileCenterY - centerY) >= minDist) {
-        return { x, y };
-      }
-    }
-
-    return {
-      x: minX + Math.random() * Math.max(0, maxX - minX),
-      y: minY + Math.random() * Math.max(0, maxY - minY),
-    };
-  };
-
   const onAlbumTilePointerDown = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const sceneRect = albumsSceneRef.current?.getBoundingClientRect();
@@ -424,23 +429,25 @@ export default function DocumentWindow({
     const prevActive = activeAlbum;
 
     if (shouldCenterSelection && prevActive !== index) {
+      // Resolve the deactivated tile's next spot up front (it may involve
+      // Math.random) so the setAlbumTilePositions updater below stays pure.
+      const prevHome = albumTileHomePositionsRef.current[prevActive];
+      const prevFallback = prevHome ? null : getFallbackScatterPosition(albumsSceneSize.width, albumsSceneSize.height, iconSize, true);
       setAlbumTilePositions((prev) =>
         prev.map((tilePos, tileIndex) => {
           if (tileIndex !== prevActive) return tilePos;
-          const home = albumTileHomePositionsRef.current[tileIndex];
-          if (home) {
+          if (prevHome) {
             return {
               ...tilePos,
-              x: home.x,
-              y: home.y,
-              rot: home.rot,
+              x: prevHome.x,
+              y: prevHome.y,
+              rot: prevHome.rot,
             };
           }
-          const fallback = getFallbackScatterPosition(true);
           return {
             ...tilePos,
-            x: fallback.x,
-            y: fallback.y,
+            x: prevFallback!.x,
+            y: prevFallback!.y,
             rot: tilePos.rot || 0,
           };
         })
@@ -510,7 +517,7 @@ export default function DocumentWindow({
     >
       {id === "projects" && (
         <>
-          <h1>can't share most of them</h1>
+          <h1>can&apos;t share most of them</h1>
           <ul>
             <li>
               - but this one is on{" "}

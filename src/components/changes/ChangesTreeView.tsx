@@ -147,7 +147,7 @@ function textAfterTransitionStep(from: string, to: string, step: number): string
   return from.slice(0, cpl) + inserts.slice(0, step - deletes);
 }
 
-function renderSearchPrompt(entry: string, when: string, spanSeconds: number): React.ReactNode {
+function renderSearchPrompt(entry: string, when: string, _spanSeconds: number): React.ReactNode {
   return (
     <>
       <span style={{ color: "#ffe066", textShadow: "0 0 1px #000, 0 0 2px #000" }}>{`@[${when}] `}</span>

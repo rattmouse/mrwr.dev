@@ -121,7 +121,7 @@ function getSearchSpanSeconds(entries: SearchEntryLine[]): number {
     return spanMs / 1000;
 }
 
-function renderSearchPrompt(entry: string, when: string, spanSeconds: number): React.ReactNode {
+function renderSearchPrompt(entry: string, when: string, _spanSeconds: number): React.ReactNode {
     return (
         <>
             <span style={{ color: "#ffe066", textShadow: "0 0 1px #000, 0 0 2px #000" }}>{`@[${when}] `}</span>
@@ -441,7 +441,7 @@ function normalizeIssues(raw: unknown): Issue[] {
                     createdAt: typeof c.createdAt === "string" ? c.createdAt : undefined,
                     author:
                         c.author && typeof c.author === "object"
-                            ? { login: typeof (c.author as any).login === "string" ? (c.author as any).login : undefined }
+                            ? { login: typeof (c.author as { login?: string }).login === "string" ? (c.author as { login?: string }).login : undefined }
                             : undefined,
                 }));
 
@@ -687,14 +687,21 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             }
         `;
 
-        const PatchedTreeView = TreeView as any;
+        type PatchedTreeViewProps = {
+            tree?: TreeLeaf<string>[];
+            selected?: string[];
+            expanded?: string[];
+            onNodeSelect?: (event: unknown, idOrIds: unknown) => void;
+            onNodeToggle?: (event: unknown, ids: string[]) => void;
+        };
+        const PatchedTreeView = TreeView as unknown as React.ComponentType<PatchedTreeViewProps>;
 
         const content = (
             <div style={{ overflow: "auto", padding: 2 }}>
                 <TreeContainer>
                     <PatchedTreeView
                         tree={tree}
-                        selected={selected as any}
+                        selected={selected}
                         expanded={expanded}
                         onNodeSelect={(_event: unknown, idOrIds: unknown) => {
                             const next = normalizeSelected(idOrIds, selected[0] ?? initialSelected);

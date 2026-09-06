@@ -20,7 +20,7 @@ export default function StyledComponentsRegistry({
   if (typeof window !== "undefined") return <>{children}</>;
 
   return (
-    <StyleSheetManager sheet={sheet.instance as any}>
+    <StyleSheetManager sheet={sheet.instance as unknown as React.ComponentProps<typeof StyleSheetManager>["sheet"]}>
       {children}
     </StyleSheetManager>
   );

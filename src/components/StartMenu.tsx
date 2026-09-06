@@ -102,7 +102,7 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
                   flex: "0 0 auto",
                 }}
               >
-                <img src={item.icon} width={itemIsLarge ? "48" : "24"} />
+                <img src={item.icon} width={itemIsLarge ? "48" : "24"} alt="" />
               </span>
               <span style={{ marginLeft: 6, flex: "1 1 auto", textAlign: "left" }}>
                 {item.label}
