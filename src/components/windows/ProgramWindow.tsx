@@ -58,6 +58,7 @@ export default function ProgramWindow({
   const strudelRef = useRef<StrudelReplHandle>(null);
   const midiRef = useRef<MidiWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
+  const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
   const [musicJitter, setMusicJitter] = useState({ x: 0, y: 0 });
@@ -68,6 +69,10 @@ export default function ProgramWindow({
   const [musicFileShowSubmenuTop, setMusicFileShowSubmenuTop] = useState(22);
   const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
+  const [midiFileOpen, setMidiFileOpen] = useState(false);
+  const [midiHexOpen, setMidiHexOpen] = useState(false);
+  const [midiMetersOpen, setMidiMetersOpen] = useState(false);
+  const [midiKeysOpen, setMidiKeysOpen] = useState(false);
 
   const title =
     id === "notepad"
@@ -94,7 +99,7 @@ export default function ProgramWindow({
               ? "../w98_music.ico"
               : "../w98_repl.ico";
 
-  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : id === "midi" ? 320 : 300;
+  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : id === "midi" ? 404 : 300;
   const normalWidth = id === "changes" ? 320 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
@@ -165,6 +170,24 @@ export default function ProgramWindow({
     setMusicFileOpenSubmenu(false);
     setMusicFileShowSubmenu(false);
   }, [musicFileOpen]);
+
+  useEffect(() => {
+    if (id !== "midi") {
+      setMidiFileOpen(false);
+      return;
+    }
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!(midiFileMenuRef.current?.contains(target) ?? false)) {
+        setMidiFileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [id]);
 
   useEffect(() => {
     if (id !== "issues") {
@@ -426,9 +449,80 @@ export default function ProgramWindow({
         </Button>
       </>
     ) : id === "midi" ? (
-      <Button variant="menu" size="sm" title="Clear" onClick={() => midiRef.current?.clear()}>
-        Clear
-      </Button>
+      <>
+        <div ref={midiFileMenuRef} style={{ position: "relative", display: "inline-block" }}>
+          <Button
+            variant="menu"
+            size="sm"
+            active={midiFileOpen}
+            aria-label="File"
+            title="File"
+            onClick={() => setMidiFileOpen((prev) => !prev)}
+          >
+            File
+          </Button>
+          {midiFileOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% - 2px)",
+                left: 0,
+                zIndex: 1000,
+                width: "max-content",
+              }}
+              onMouseLeave={() => setMidiFileOpen(false)}
+            >
+              <MenuList style={{ marginTop: 0 }}>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    midiRef.current?.scan();
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Scan
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    midiRef.current?.clear();
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Clear
+                </MenuListItem>
+              </MenuList>
+            </div>
+          )}
+        </div>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Raw bytes"
+          active={midiHexOpen}
+          onClick={() => midiRef.current?.toggleHex()}
+        >
+          Hex
+        </Button>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Activity meters"
+          active={midiMetersOpen}
+          onClick={() => midiRef.current?.toggleMeters()}
+        >
+          Meters
+        </Button>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="One-octave keyboard"
+          active={midiKeysOpen}
+          onClick={() => midiRef.current?.toggleKeys()}
+        >
+          Keys
+        </Button>
+      </>
     ) : undefined;
 
   return (
@@ -530,7 +624,14 @@ export default function ProgramWindow({
         />
       )}
 
-      {id === "midi" && <MidiWindow ref={midiRef} />}
+      {id === "midi" && (
+        <MidiWindow
+          ref={midiRef}
+          onHexOpenChange={setMidiHexOpen}
+          onMetersOpenChange={setMidiMetersOpen}
+          onKeysOpenChange={setMidiKeysOpen}
+        />
+      )}
     </DesktopWindow>
   );
 }
