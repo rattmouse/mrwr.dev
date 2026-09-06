@@ -67,6 +67,11 @@ function resolveIssueRefs(numbers: number[] | undefined, index: Map<number, Issu
   });
 }
 
+export function getLatestVersion(): string {
+  const payload = versionData as { versions?: RawVersion[] };
+  return payload.versions?.[0]?.version?.trim() ?? "";
+}
+
 export function getVersions(): VersionEntry[] {
   const payload = versionData as { versions?: RawVersion[] };
   const issueIndex = buildIssueIndex(issues as unknown);

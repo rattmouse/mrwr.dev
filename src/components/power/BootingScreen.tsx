@@ -16,17 +16,17 @@ function useTypewriter(text: string, msPerChar = 10, linePauseMs = 250) {
   return text.slice(0, i);
 }
 
-export default function BootingScreen() {
+export default function BootingScreen({ version }: { version: string }) {
   const lines = useMemo(
     () =>
       [
-        "mrwrOS bootloader v0.1",
+        `mrwrOS bootloader v${version || "0.1"}`,
         "Checking memory... ok",
         "Loading desktop... ok",
         "",
         "Starting UI...",
       ].join("\n"),
-    []
+    [version]
   );
 
   const typed = useTypewriter(lines);
