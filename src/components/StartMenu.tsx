@@ -196,6 +196,7 @@ export default function StartMenu({
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
           { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
           { label: "Sounds", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
+          { label: "Keys", icon: "../w98_music.ico", size: "sm", onClick: () => pick("midi") },
           { label: "Collections", icon: "../w98_collections_cards.ico", size: "sm", onClick: () => pick("collections") }
         ],
     },

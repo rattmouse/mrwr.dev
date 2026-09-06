@@ -17,7 +17,8 @@
         "Cleared out ESLint errors and dead image assets",
         "Added a Claude credit and tidied the README headings",
         "Renamed the REPL program to Sounds in the Start menu",
-        "Swapped the LinkedIn social link for Bluesky"
+        "Swapped the LinkedIn social link for Bluesky",
+        "Added the Keys program: lists connected MIDI inputs and logs their messages live"
       ]
     },
     {
