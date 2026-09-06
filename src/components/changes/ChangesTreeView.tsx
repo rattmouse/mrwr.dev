@@ -126,6 +126,9 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
                 {entry.issueRefs.map((issue) => (
                   <div key={`${entry.version}:issue:${issue.number}`} style={{ paddingLeft: 6 }}>
                     {issue.closed ? "✓" : "•"} #{issue.number} {issue.title}
+                    {issue.closedByPr && (
+                      <span style={{ color: "#555" }}> · PR #{issue.closedByPr.number}</span>
+                    )}
                   </div>
                 ))}
               </div>

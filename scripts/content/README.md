@@ -11,10 +11,24 @@ and read only at build time.
 
 ### `refresh-issues.sh` — pull issues out of GitHub
 
-Rewrites `src/data/issues.json` from `gh issue list`. `scripts/deploy/deploy.sh`
-runs it automatically before every build, so a normal deploy always ships current
-issues. Run it by hand when you want `npm run dev` or a local build to pick up new
-issues too.
+Rewrites `src/data/issues.json` from `gh issue list`, then runs `link-prs.mjs`
+(below). `scripts/deploy/deploy.sh` runs it automatically before every build, so a
+normal deploy always ships current issues. Run it by hand when you want
+`npm run dev` or a local build to pick up new issues too.
+
+### `link-prs.mjs` — link closed issues to the PR that fixed them
+
+Runs as the last step of `refresh-issues.sh`. Reads `gh pr list --state merged` and
+stamps a `closedByPr` (`{ number, title, url }`) onto each **closed** issue in
+`src/data/issues.json`. The Issues window and the Changes window render it as
+"closed by PR #NN".
+
+Matching, strongest first: (1) GitHub's own closing-issue references, (2) a closing
+keyword + `#NN` in the PR title or body (`fixes #12`, `closes #12`, …), (3) a bare
+`#NN` anywhere in the PR title or body — this last one only for issues that are
+already closed, so an open issue a PR merely mentions never gets linked. Earliest
+merge wins ties. A missing/broken `gh` is non-fatal: it warns and leaves
+`issues.json` as-is.
 
 ### `search-to-issue.sh` — turn recorded searches into issues
 
