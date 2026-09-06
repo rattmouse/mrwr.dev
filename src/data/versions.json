@@ -20,7 +20,8 @@
         "Swapped the LinkedIn social link for Bluesky",
         "Added the Keys program: lists connected MIDI inputs and logs their messages live",
         "Gave Collections its own Albums, Paintings, and Songs tabs, with paintings and songs drawn from picked Bluesky posts",
-        "Expanded the Keys monitor with activity meters, a one-octave keyboard, raw message bytes, and a Scan button to grant MIDI access"
+        "Expanded the Keys monitor with activity meters, a one-octave keyboard, raw message bytes, and a Scan button to grant MIDI access",
+        "Switched the Collections category picker from tabs to toggle buttons that match the Sounds and Keys toolbars"
       ]
     },
     {
