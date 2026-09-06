@@ -4,6 +4,9 @@
 # file is gitignored and read at build time, so the site never calls
 # GitHub at runtime.
 #
+# After the refresh it runs link-prs.mjs, which stamps a `closedByPr`
+# field onto each closed issue that a merged pull request resolved.
+#
 # scripts/deploy/deploy.sh runs this automatically before each build, so a
 # normal deploy always ships current issues. Run it by hand whenever you
 # want `npm run dev` or a local build to pick up new issues too.
@@ -37,3 +40,8 @@ mv "$TMP" "$DEST"
 trap - EXIT
 
 echo "wrote $DEST"
+
+# Link closed issues to the PR that resolved them. Non-fatal: a failure here
+# just means issues.json ships without closedByPr data.
+node "$SCRIPT_DIR/link-prs.mjs" \
+  || echo "warning: PR link pass failed; issues.json has no closedByPr data" >&2

@@ -31,6 +31,11 @@ type IssueComment = {
     author?: { login?: string };
 };
 
+type ClosedByPr = {
+    number: number;
+    title: string;
+};
+
 type Issue = {
     number?: number;
     title: string;
@@ -38,6 +43,7 @@ type Issue = {
     stateReason?: string;
     body?: string;
     comments?: IssueComment[];
+    closedByPr?: ClosedByPr;
 };
 
 function safeSnippet(text: string, max = 2800) {
@@ -260,7 +266,20 @@ function normalizeIssues(raw: unknown): Issue[] {
                             : undefined,
                 }));
 
-            return { number, title, state, stateReason, body, comments };
+            const rawPr = x.closedByPr;
+            let closedByPr: ClosedByPr | undefined;
+            if (rawPr && typeof rawPr === "object") {
+                const prNo = (rawPr as { number?: unknown }).number;
+                if (typeof prNo === "number" && Number.isFinite(prNo)) {
+                    const prTitle = (rawPr as { title?: unknown }).title;
+                    closedByPr = {
+                        number: prNo,
+                        title: typeof prTitle === "string" ? prTitle : "",
+                    };
+                }
+            }
+
+            return { number, title, state, stateReason, body, comments, closedByPr };
         });
 }
 
@@ -297,6 +316,15 @@ function buildIssuesTree(issues: Issue[], onOpenImage: (url: string) => void): T
                         id: `${issueId}:stateReason`,
                         label: reasonText,
                         icon: <>ℹ️</>,
+                    });
+                }
+
+                if (issue.state === "CLOSED" && issue.closedByPr) {
+                    const pr = issue.closedByPr;
+                    nodes.push({
+                        id: `${issueId}:closedByPr`,
+                        label: `closed by PR #${pr.number}${pr.title ? ` ${pr.title}` : ""}`,
+                        icon: <>🔀</>,
                     });
                 }
 

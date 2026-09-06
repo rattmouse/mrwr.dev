@@ -1,9 +1,16 @@
 export type ChangeEra = "handmade" | "chatgpt" | "codex" | "claude";
 
+export type ClosingPrRef = {
+  number: number;
+  title: string;
+  url: string;
+};
+
 export type VersionIssueRef = {
   number: number;
   title: string;
   closed: boolean;
+  closedByPr?: ClosingPrRef;
 };
 
 export type VersionStats = {

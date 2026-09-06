@@ -1,4 +1,4 @@
-import type { ChangeEra, VersionEntry, VersionIssueRef } from "@/lib/versions.types";
+import type { ChangeEra, ClosingPrRef, VersionEntry, VersionIssueRef } from "@/lib/versions.types";
 import versionData from "@/data/versions.json";
 import issues from "@/data/issues.json";
 
@@ -22,7 +22,21 @@ type IssueItem = {
   number?: number;
   state?: string;
   title?: string;
+  closedByPr?: {
+    number?: number;
+    title?: string;
+    url?: string;
+  };
 };
+
+function resolveClosingPr(raw: IssueItem["closedByPr"]): ClosingPrRef | undefined {
+  if (!raw || typeof raw.number !== "number") return undefined;
+  return {
+    number: raw.number,
+    title: raw.title?.trim() || `PR #${raw.number}`,
+    url: raw.url?.trim() ?? "",
+  } satisfies ClosingPrRef;
+}
 
 const ERAS: ChangeEra[] = ["handmade", "chatgpt", "codex", "claude"];
 
@@ -43,10 +57,12 @@ function resolveIssueRefs(numbers: number[] | undefined, index: Map<number, Issu
   if (!Array.isArray(numbers)) return [];
   return numbers.map((number) => {
     const match = index.get(number);
+    const closed = match?.state === "CLOSED";
     return {
       number,
       title: match?.title?.trim() || `issue #${number}`,
-      closed: match?.state === "CLOSED",
+      closed,
+      closedByPr: closed ? resolveClosingPr(match?.closedByPr) : undefined,
     } satisfies VersionIssueRef;
   });
 }
