@@ -13,6 +13,7 @@ import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/Issues
 import ChangesTreeView, { ChangesTreeViewHandle } from "@/components/changes/ChangesTreeView";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
+import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import strudelSongs from "@/data/strudelSongs.json";
@@ -55,6 +56,7 @@ export default function ProgramWindow({
   const issuesTreeRef = useRef<IssuesTreeViewHandle>(null);
   const changesTreeRef = useRef<ChangesTreeViewHandle>(null);
   const strudelRef = useRef<StrudelReplHandle>(null);
+  const midiRef = useRef<MidiWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
@@ -76,6 +78,8 @@ export default function ProgramWindow({
           ? "changes.exe"
           : id === "music"
             ? "strudel.cc"
+            : id === "midi"
+              ? "midi.exe"
         : "mrwr.dev";
   const titleIcon =
     id === "welcome"
@@ -86,9 +90,11 @@ export default function ProgramWindow({
           ? "../w98_issues.ico"
           : id === "changes"
             ? "../w95_changes.ico"
-            : "../w98_repl.ico";
+            : id === "midi"
+              ? "../w98_music.ico"
+              : "../w98_repl.ico";
 
-  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : 300;
+  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : id === "midi" ? 320 : 300;
   const normalWidth = id === "changes" ? 320 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
@@ -419,6 +425,10 @@ export default function ProgramWindow({
           Set
         </Button>
       </>
+    ) : id === "midi" ? (
+      <Button variant="menu" size="sm" title="Clear" onClick={() => midiRef.current?.clear()}>
+        Clear
+      </Button>
     ) : undefined;
 
   return (
@@ -519,6 +529,8 @@ export default function ProgramWindow({
           scopePopupCompact={layout !== "maximized"}
         />
       )}
+
+      {id === "midi" && <MidiWindow ref={midiRef} />}
     </DesktopWindow>
   );
 }
