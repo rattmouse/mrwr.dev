@@ -9,7 +9,7 @@
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [53, 55, 66, 70],
+      "issues": [53, 55, 66, 67, 70],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
         "Ship a minimal production package.json and track the lockfile",
@@ -18,7 +18,8 @@
         "Added a Claude credit and tidied the README headings",
         "Renamed the REPL program to Sounds in the Start menu",
         "Swapped the LinkedIn social link for Bluesky",
-        "Added the Keys program: lists connected MIDI inputs and logs their messages live"
+        "Added the Keys program: lists connected MIDI inputs and logs their messages live",
+        "Gave Collections its own Albums, Paintings, and Songs tabs, with paintings and songs drawn from picked Bluesky posts"
       ]
     },
     {
