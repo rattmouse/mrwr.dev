@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Anchor, GroupBox, Hourglass, ScrollView } from "react95";
+import { Anchor, GroupBox, Hourglass, ScrollView, Tab, Tabs } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
 
@@ -13,6 +13,8 @@ type DocumentWindowProps = {
   onRestore: () => void;
   onToggleMaximize: () => void;
 };
+
+type CollectionCategory = "albums" | "paintings" | "songs";
 
 type AlbumCover = {
   title: string;
@@ -30,6 +32,10 @@ const ALBUM_COVERS: AlbumCover[] = [
   // Fallback when /public/collections/content.json is missing.
 ];
 const EMPTY_ALBUM: AlbumCover = { title: "no albums found", artist: "collections/content.json", image: null };
+const EMPTY_PAINTING: AlbumCover = { title: "no paintings found", artist: "@mrwr.dev on bluesky", image: null };
+const BLUESKY_ACTOR = "mrwr.dev";
+const SOUNDCLOUD_URL = "https://soundcloud.com/ratt-mouse";
+const MAX_PAINTINGS = 24;
 
 function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
   const next = [...input];
@@ -44,6 +50,9 @@ function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
 
 function getSizedCover(image: string | null, size: "low" | "normal" | "high"): string | null {
   if (!image) return null;
+  if (image.includes("/feed_fullsize/")) {
+    return size === "low" ? image.replace("/feed_fullsize/", "/feed_thumbnail/") : image;
+  }
   if (!image.includes("/front-500")) return image;
   if (size === "high") return image.replace("/front-500", "/front-1200");
   if (size === "low") return image.replace("/front-500", "/front-250");
@@ -60,6 +69,50 @@ function normalizeAlbumsPayload(payload: unknown): AlbumCover[] {
       image: typeof entry.image === "string" && entry.image.trim() ? entry.image.trim() : null,
     }))
     .filter((entry) => entry.title.length > 0 && entry.artist.length > 0);
+}
+
+type BlueskyImage = { thumb?: unknown; fullsize?: unknown; alt?: unknown };
+
+function collectBlueskyEmbedImages(embed: unknown): BlueskyImage[] {
+  if (!embed || typeof embed !== "object") return [];
+  const record = embed as Record<string, unknown>;
+  if (Array.isArray(record.images)) return record.images as BlueskyImage[];
+  const media = record.media;
+  if (media && typeof media === "object" && Array.isArray((media as Record<string, unknown>).images)) {
+    return (media as Record<string, unknown>).images as BlueskyImage[];
+  }
+  return [];
+}
+
+function extractBlueskyPaintings(payload: unknown): AlbumCover[] {
+  if (!payload || typeof payload !== "object") return [];
+  const feed = (payload as { feed?: unknown }).feed;
+  if (!Array.isArray(feed)) return [];
+  const tiles: AlbumCover[] = [];
+  for (const item of feed) {
+    // Skip reposts — only surface the account's own paintings.
+    if (item && typeof item === "object" && (item as { reason?: unknown }).reason) continue;
+    const post = (item as { post?: unknown }).post;
+    if (!post || typeof post !== "object") continue;
+    const postRecord = post as Record<string, unknown>;
+    const record = (postRecord.record ?? {}) as Record<string, unknown>;
+    const text = typeof record.text === "string" ? record.text.trim() : "";
+    const createdAt = typeof record.createdAt === "string" ? record.createdAt : "";
+    const when = createdAt ? createdAt.slice(0, 10) : "@mrwr.dev";
+    for (const img of collectBlueskyEmbedImages(postRecord.embed)) {
+      const src =
+        typeof img.fullsize === "string" ? img.fullsize : typeof img.thumb === "string" ? img.thumb : null;
+      if (!src) continue;
+      const alt = typeof img.alt === "string" ? img.alt.trim() : "";
+      const label = alt || text || "untitled";
+      tiles.push({
+        title: label.length > 60 ? `${label.slice(0, 57)}…` : label,
+        artist: when,
+        image: src,
+      });
+    }
+  }
+  return tiles;
 }
 
 function buildScatterPositions(count: number, width: number, height: number, iconSize: number): AlbumTilePosition[] {
@@ -117,12 +170,14 @@ export default function DocumentWindow({
   onToggleMaximize,
 }: DocumentWindowProps) {
   const [activeAlbum, setActiveAlbum] = useState(0);
+  const [category, setCategory] = useState<CollectionCategory>("albums");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const title =
     id === "about" ? "about.txt" : id === "contact" ? "contact.txt" : id === "collections" ? "collections.exe" : "projects.txt";
   const titleIcon = id === "collections" ? "../w98_collections_cards.ico" : "../w95_default.ico";
-  const album = albums[activeAlbum] ?? ALBUM_COVERS[0] ?? EMPTY_ALBUM;
+  const emptyEntry = category === "paintings" ? EMPTY_PAINTING : EMPTY_ALBUM;
+  const album = albums[activeAlbum] ?? emptyEntry;
   const albumSize = layout === "maximized" ? 280 : 144;
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
   const iconSize = layout === "maximized" ? 58 : 42;
@@ -139,6 +194,12 @@ export default function DocumentWindow({
 
   useEffect(() => {
     if (id !== "collections") return;
+    if (category === "songs") {
+      setAlbums([]);
+      setActiveAlbum(0);
+      setAlbumsLoading(false);
+      return;
+    }
     let cancelled = false;
     setAlbumsLoading(true);
     setActiveAlbum(0);
@@ -186,37 +247,54 @@ export default function DocumentWindow({
       }
     }
 
-    async function loadAlbums() {
+    async function loadAlbumsSource(): Promise<AlbumCover[]> {
+      let sourceAlbums = ALBUM_COVERS;
       try {
-        let sourceAlbums = ALBUM_COVERS;
-        try {
-          const privateResponse = await fetch("/collections/content.json", { cache: "no-store" });
-          if (privateResponse.ok) {
-            const privatePayload = (await privateResponse.json()) as unknown;
-            const parsedPrivate = normalizeAlbumsPayload(privatePayload);
-            if (parsedPrivate.length > 0) {
-              sourceAlbums = parsedPrivate;
-            }
+        const privateResponse = await fetch("/collections/content.json", { cache: "no-store" });
+        if (privateResponse.ok) {
+          const privatePayload = (await privateResponse.json()) as unknown;
+          const parsedPrivate = normalizeAlbumsPayload(privatePayload);
+          if (parsedPrivate.length > 0) {
+            sourceAlbums = parsedPrivate;
           }
-        } catch {
-          // fall through to bundled fallback list
         }
+      } catch {
+        // fall through to bundled fallback list
+      }
+      const shuffled = shuffleAlbums(sourceAlbums);
+      return Promise.all(shuffled.map(resolveCover));
+    }
 
-        const shuffled = shuffleAlbums(sourceAlbums);
-        const resolvedAlbums = await Promise.all(shuffled.map(resolveCover));
-        if (!cancelled) setAlbums(resolvedAlbums);
+    async function loadPaintingsSource(): Promise<AlbumCover[]> {
+      try {
+        const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(
+          BLUESKY_ACTOR
+        )}&limit=100&filter=posts_with_media`;
+        const response = await fetch(url);
+        if (!response.ok) return [];
+        const payload = (await response.json()) as unknown;
+        return shuffleAlbums(extractBlueskyPaintings(payload)).slice(0, MAX_PAINTINGS);
+      } catch {
+        return [];
+      }
+    }
+
+    async function load() {
+      try {
+        const next = category === "paintings" ? await loadPaintingsSource() : await loadAlbumsSource();
+        if (!cancelled) setAlbums(next);
       } catch (error) {
-        console.error("Failed to load album covers:", error);
+        console.error("Failed to load collection tiles:", error);
       } finally {
         if (!cancelled) setAlbumsLoading(false);
       }
     }
 
-    void loadAlbums();
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, category]);
 
   useEffect(() => {
     albumTilePositionsRef.current = albumTilePositions;
@@ -508,7 +586,7 @@ export default function DocumentWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
-      normalHeight={id === "collections" ? 280 : 200}
+      normalHeight={id === "collections" ? 312 : 200}
       normalWidth={id === "collections" ? 340 : undefined}
       onClose={onClose}
       onMinimize={onMinimize}
@@ -542,7 +620,39 @@ export default function DocumentWindow({
             gap: 8,
           }}
         >
-          <GroupBox label="albums.gif" style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}>
+          <Tabs
+            value={category}
+            onChange={(value) => setCategory(value as CollectionCategory)}
+            style={{ alignSelf: "stretch" }}
+          >
+            <Tab value="albums">Albums</Tab>
+            <Tab value="paintings">Paintings</Tab>
+            <Tab value="songs">Songs</Tab>
+          </Tabs>
+
+          {category === "songs" ? (
+            <GroupBox
+              label="songs"
+              style={{
+                width: "100%",
+                flex: "1 1 auto",
+                minHeight: 0,
+                padding: 4,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, textAlign: "center" }}>
+                <div>more songs coming soon</div>
+                <Anchor href={SOUNDCLOUD_URL} target="_blank">
+                  SoundCloud
+                </Anchor>
+              </div>
+            </GroupBox>
+          ) : (
+          <>
+          <GroupBox label={category === "paintings" ? "paints.gif" : "albums.gif"} style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}>
             <div
               ref={albumsSceneRef}
               style={{
@@ -604,7 +714,7 @@ export default function DocumentWindow({
                   const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
                   return (
                     <div
-                      key={`${entry.artist}-${entry.title}`}
+                      key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
                       data-collection-album-tile="true"
                       onPointerDown={(event) => onAlbumTilePointerDown(index, event)}
                       onPointerMove={onAlbumTilePointerMove}
@@ -654,6 +764,8 @@ export default function DocumentWindow({
             <div style={{ fontWeight: 700 }}>{album.title}</div>
             <div>{album.artist}</div>
           </div>
+          </>
+          )}
         </div>
       )}
 
