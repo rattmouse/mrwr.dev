@@ -13,7 +13,7 @@ load_config
 
 TARGET_RELEASE="${1:-}"
 
-ssh "$PROD_HOST" bash -s -- "$PROD_BASE" "$SERVICE_NAME" "$APP_PORT" "$TARGET_RELEASE" <<'REMOTE'
+ssh_prod bash -s -- "$PROD_BASE" "$SERVICE_NAME" "$APP_PORT" "$TARGET_RELEASE" <<'REMOTE'
 set -euo pipefail
 PROD_BASE="$1"
 SERVICE_NAME="$2"
@@ -45,7 +45,7 @@ mv -Tf "$PROD_BASE/current.tmp" "$PROD_BASE/current"
 systemctl restart "$SERVICE_NAME"
 sleep 2
 
-if systemctl is-active --quiet "$SERVICE_NAME" && curl -fsS -o /dev/null "http://localhost:$APP_PORT/"; then
+if systemctl is-active --quiet "$SERVICE_NAME" && curl -fsS --max-time 5 -o /dev/null "http://localhost:$APP_PORT/"; then
   echo "Now serving $TARGET_RELEASE"
 else
   echo "Rolled back but health check failed — check: journalctl -u $SERVICE_NAME -n 100 --no-pager" >&2

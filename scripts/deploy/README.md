@@ -75,6 +75,17 @@ you've confirmed the new deploy works, the old directory and
 `build/scripts/` are no longer used and can be removed whenever you like
 (`rm -rf /root/dev/mrwr` on prod, `rm -rf build/` locally).
 
+## If it hangs
+
+All ssh calls use `BatchMode=yes` + a connect timeout, and the remote
+`npm install` is capped with `timeout 300`, specifically so a stuck deploy
+fails with a clear error instead of hanging forever. If you're on an older
+copy of these scripts (or still see a hang), the most likely cause is the
+very first ssh connection from a *new* machine to `$PROD_HOST` — the "are
+you sure you want to continue connecting (yes/no)?" host-key prompt. Try a
+plain `ssh <your PROD_HOST value>` by hand first on any machine before its
+first deploy; accepting the host key once there is enough.
+
 ## Usage
 
 ```

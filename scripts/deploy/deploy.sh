@@ -83,12 +83,12 @@ chmod +x "$STAGE_DIR/"*.sh
 sed "s#__APP_DIR__#$PROD_BASE#g" "$SCRIPT_DIR/prod/mrwr.dev.service.template" > "$STAGE_DIR/$SERVICE_NAME"
 
 log "Uploading to $PROD_HOST:$PROD_BASE/releases/$RELEASE_ID ..."
-ssh "$PROD_HOST" "mkdir -p '$PROD_BASE/releases'"
+ssh_prod "mkdir -p '$PROD_BASE/releases'"
 rsync -az --delete "$STAGE_DIR/" "$PROD_HOST:$PROD_BASE/releases/$RELEASE_ID/"
 
 log "Installing dependencies + switching over on prod..."
 set +e
-ssh "$PROD_HOST" bash -s -- "$PROD_BASE" "$RELEASE_ID" "$SERVICE_NAME" "$APP_PORT" "$KEEP_RELEASES" <<'REMOTE'
+ssh_prod bash -s -- "$PROD_BASE" "$RELEASE_ID" "$SERVICE_NAME" "$APP_PORT" "$KEEP_RELEASES" <<'REMOTE'
 set -euo pipefail
 PROD_BASE="$1"
 RELEASE_ID="$2"
@@ -103,7 +103,7 @@ if [ -L "$PROD_BASE/current" ]; then
 fi
 
 cd "$RELEASE_DIR"
-npm install --omit=dev
+timeout 300 npm install --omit=dev
 
 cp "$RELEASE_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
 systemctl daemon-reload
@@ -114,7 +114,7 @@ mv -Tf "$PROD_BASE/current.tmp" "$PROD_BASE/current"
 systemctl restart "$SERVICE_NAME"
 sleep 2
 
-if systemctl is-active --quiet "$SERVICE_NAME" && curl -fsS -o /dev/null "http://localhost:$APP_PORT/"; then
+if systemctl is-active --quiet "$SERVICE_NAME" && curl -fsS --max-time 5 -o /dev/null "http://localhost:$APP_PORT/"; then
   echo "HEALTHY"
 else
   echo "UNHEALTHY: new release failed to come up cleanly" >&2
