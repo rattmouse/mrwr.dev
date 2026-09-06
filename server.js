@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,6 +15,37 @@ const MAX_DELTA_MS = 30 * 1000;
 const MAX_INPUT_DELTA_MS = 5 * 60 * 1000;
 
 const OUT_DIR = path.join(__dirname, ".");
+
+// Durable, append-only archive of recorded searches. stdout still gets each
+// record for operational visibility, but journald rotates and silently drops
+// old entries (issue #55) — this file is the source of truth. In prod the
+// systemd unit points SEARCH_LOG_FILE at a path OUTSIDE the release dir so it
+// survives release swaps and pruning.
+const SEARCH_LOG_FILE = process.env.SEARCH_LOG_FILE || path.join(__dirname, "search-log.ndjson");
+const SEARCH_LOG_MAX_BYTES = 8 * 1024 * 1024;
+
+try {
+  fs.mkdirSync(path.dirname(SEARCH_LOG_FILE), { recursive: true });
+} catch (err) {
+  console.error("search-log dir create failed", err);
+}
+
+// Best-effort single-generation rotation so the archive can't grow unbounded.
+function rotateSearchLogIfLarge() {
+  fs.stat(SEARCH_LOG_FILE, (statErr, stats) => {
+    if (statErr || stats.size <= SEARCH_LOG_MAX_BYTES) return;
+    fs.rename(SEARCH_LOG_FILE, `${SEARCH_LOG_FILE}.1`, (renameErr) => {
+      if (renameErr) console.error("search-log rotate failed", renameErr);
+    });
+  });
+}
+
+function appendSearchRecord(record) {
+  rotateSearchLogIfLarge();
+  fs.appendFile(SEARCH_LOG_FILE, `${JSON.stringify(record)}\n`, (err) => {
+    if (err) console.error("search-log append failed", err);
+  });
+}
 
 app.use(express.json());
 app.use(express.static(OUT_DIR, {
@@ -110,13 +142,15 @@ app.post("/log-search", (req, res) => {
   const now = Date.now();
   if (shouldLogQuery(sessionId, query, now)) {
     const deltaMs = getPlaybackDeltaMs(sessionId, now);
-    console.log({
+    const record = {
       query,
       at: clientAt || new Date(now).toISOString(),
       session: sessionId || undefined,
       delta_ms: deltaMs,
       input_delta_ms: inputDeltaMs,
-    });
+    };
+    console.log(record);
+    appendSearchRecord(record);
   }
 
   res.sendStatus(204); // No Content
