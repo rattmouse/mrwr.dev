@@ -748,8 +748,8 @@ export default function DocumentWindow({
                   </li>
                   <li>
                     -{" "}
-                    <Anchor href="https://www.linkedin.com/in/rattmouse/" target="_blank">
-                      LinkedIn
+                    <Anchor href="https://bsky.app/profile/mrwr.dev" target="_blank">
+                      Bluesky
                     </Anchor>
                   </li>
                   <li>
