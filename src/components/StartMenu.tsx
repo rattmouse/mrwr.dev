@@ -195,7 +195,7 @@ export default function StartMenu({
           { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
           { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
           { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
-          { label: "REPL", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
+          { label: "Sounds", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
           { label: "Collections", icon: "../w98_collections_cards.ico", size: "sm", onClick: () => pick("collections") }
         ],
     },
