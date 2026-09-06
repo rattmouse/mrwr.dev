@@ -2,6 +2,17 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 
+// Malicious-search classifier. A missing module (e.g. a deploy that forgot to
+// ship search-guard.js) must not 500 every search — degrade to "nothing is
+// flagged" and say so once, loudly.
+let detectMaliciousSearch;
+try {
+  ({ detectMaliciousSearch } = require("./search-guard"));
+} catch (err) {
+  console.error("search-guard module missing — searches will not be flagged", err);
+  detectMaliciousSearch = () => ({ flagged: false, categories: [] });
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MAX_QUERY_LOG_LENGTH = 200;
@@ -142,6 +153,7 @@ app.post("/log-search", (req, res) => {
   const now = Date.now();
   if (shouldLogQuery(sessionId, query, now)) {
     const deltaMs = getPlaybackDeltaMs(sessionId, now);
+    const { flagged, categories } = detectMaliciousSearch(query);
     const record = {
       query,
       at: clientAt || new Date(now).toISOString(),
@@ -149,7 +161,17 @@ app.post("/log-search", (req, res) => {
       delta_ms: deltaMs,
       input_delta_ms: inputDeltaMs,
     };
+    // A hostile query is still recorded verbatim (sanitized) and still played
+    // back in the History window — it's just tagged so the UI can render it
+    // inert and labelled, and so triage never suggests it as an issue title.
+    if (flagged) {
+      record.flagged = true;
+      record.categories = categories;
+    }
     console.log(record);
+    if (flagged) {
+      console.warn("flagged-search", { categories, session: sessionId || undefined });
+    }
     appendSearchRecord(record);
   }
 

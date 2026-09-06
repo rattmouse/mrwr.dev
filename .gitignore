@@ -45,6 +45,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 src/data/issues.json
+src/data/search-history.json
 /public/collections
 
 # durable search-log archive written by server.js at runtime (issue #55)
