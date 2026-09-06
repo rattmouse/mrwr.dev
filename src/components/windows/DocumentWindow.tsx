@@ -20,6 +20,9 @@ type AlbumCover = {
   title: string;
   artist: string;
   image: string | null;
+  // width / height of the source image, when known (Bluesky reports it). Album
+  // covers are square, so this is left undefined for them.
+  aspect?: number;
 };
 
 type AlbumTilePosition = {
@@ -77,7 +80,16 @@ function normalizeAlbumsPayload(payload: unknown): AlbumCover[] {
     .filter((entry) => entry.title.length > 0 && entry.artist.length > 0);
 }
 
-type BlueskyImage = { thumb?: unknown; fullsize?: unknown; alt?: unknown };
+type BlueskyImage = { thumb?: unknown; fullsize?: unknown; alt?: unknown; aspectRatio?: unknown };
+
+function readAspectRatio(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { width, height } = value as { width?: unknown; height?: unknown };
+  if (typeof width === "number" && typeof height === "number" && width > 0 && height > 0) {
+    return width / height;
+  }
+  return undefined;
+}
 
 function collectBlueskyEmbedImages(embed: unknown): BlueskyImage[] {
   if (!embed || typeof embed !== "object") return [];
@@ -145,6 +157,7 @@ function extractBlueskyPosts(payload: unknown): BlueskyPost[] {
         title: label.length > 60 ? `${label.slice(0, 57)}…` : label,
         artist: when,
         image: src,
+        aspect: readAspectRatio(img.aspectRatio),
       });
     }
     if (images.length > 0) posts.push({ rkey, images });
@@ -217,6 +230,11 @@ export default function DocumentWindow({
     category === "paintings" ? EMPTY_PAINTING : category === "songs" ? EMPTY_SONG : EMPTY_ALBUM;
   const album = albums[activeAlbum] ?? emptyEntry;
   const albumSize = layout === "maximized" ? 280 : 144;
+  // The centre frame fills a square for square covers, but takes the picture's
+  // own proportions when we know them (paintings), so nothing gets cropped.
+  const frameAspect = album.aspect && album.aspect > 0 ? album.aspect : 1;
+  const frameWidth = frameAspect >= 1 ? albumSize : Math.round(albumSize * frameAspect);
+  const frameHeight = frameAspect >= 1 ? Math.round(albumSize / frameAspect) : albumSize;
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
   const iconSize = layout === "maximized" ? 58 : 42;
   const shouldCenterSelection = layout === "normal";
@@ -712,8 +730,8 @@ export default function DocumentWindow({
                   position: "absolute",
                   left: "50%",
                   top: "50%",
-                  width: albumSize,
-                  height: albumSize,
+                  width: frameWidth,
+                  height: frameHeight,
                   transform: "translate(-50%, -50%)",
                   boxSizing: "border-box",
                   borderTop: "2px solid #fff",
@@ -739,7 +757,7 @@ export default function DocumentWindow({
                         style={{
                           width: "100%",
                           height: "100%",
-                          objectFit: "cover",
+                          objectFit: "contain",
                           display: "block",
                         }}
                       />
@@ -794,7 +812,7 @@ export default function DocumentWindow({
                             width: "100%",
                             height: "100%",
                             display: "block",
-                            objectFit: "cover",
+                            objectFit: category === "albums" ? "cover" : "contain",
                             imageRendering: "pixelated",
                           }}
                         />
