@@ -74,8 +74,25 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -r "$REPO_ROOT/out/." "$STAGE_DIR/"
 cp "$REPO_ROOT/server.js" "$STAGE_DIR/server.js"
-cp "$REPO_ROOT/package.json" "$STAGE_DIR/package.json"
-[[ -f "$REPO_ROOT/package-lock.json" ]] && cp "$REPO_ROOT/package-lock.json" "$STAGE_DIR/package-lock.json"
+
+# server.js only ever requires "express" (+ Node's builtin "path") — it's a
+# static file server for the already-built out/, nothing else in
+# package.json's dependencies (next, react, react95, styled-components,
+# the strudel packages — all build-time only) runs on prod. Shipping the
+# repo's real package.json had prod's `npm install` pulling in the entire
+# Next.js/React toolchain on every deploy, which is almost certainly what
+# was getting OOM-killed on a small prod box. Ship a minimal one instead.
+EXPRESS_SPEC=$(node -p "require('$REPO_ROOT/package.json').dependencies.express")
+cat > "$STAGE_DIR/package.json" <<PKGJSON
+{
+  "name": "mrwr-dev-prod",
+  "private": true,
+  "dependencies": {
+    "express": "$EXPRESS_SPEC"
+  }
+}
+PKGJSON
+
 cp "$SCRIPT_DIR/prod/start.sh" "$STAGE_DIR/start.sh"
 cp "$SCRIPT_DIR/prod/logs.sh" "$STAGE_DIR/logs.sh"
 cp "$SCRIPT_DIR/prod/journalctl_to_readme.sh" "$STAGE_DIR/journalctl_to_readme.sh"
