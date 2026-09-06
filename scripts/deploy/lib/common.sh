@@ -29,4 +29,16 @@ load_config() {
   : "${APP_PORT:=3000}"
 
   export PROD_HOST PROD_BASE SERVICE_NAME KEEP_RELEASES APP_PORT
+
+  # -o BatchMode=yes: never sit waiting on a password/passphrase/host-key
+  # prompt that has nowhere to go in a script — fail fast with a clear
+  # error instead of hanging silently (this is what a first-ever
+  # connection from a new machine to $PROD_HOST would otherwise do: block
+  # on an "are you sure you want to continue connecting?" prompt).
+  # -o ConnectTimeout=10: same idea for an unreachable host.
+  SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
+}
+
+ssh_prod() {
+  ssh "${SSH_OPTS[@]}" "$PROD_HOST" "$@"
 }

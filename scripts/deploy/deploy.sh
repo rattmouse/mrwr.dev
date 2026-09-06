@@ -21,11 +21,13 @@ load_config
 
 ALLOW_DIRTY=0
 SKIP_BUILD=0
+SKIP_ISSUES=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build)" ;;
+    --skip-issues) SKIP_ISSUES=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues)" ;;
   esac
 done
 
@@ -54,6 +56,17 @@ STAGE_DIR="$REPO_ROOT/.deploy/$RELEASE_ID"
 log "Preparing release $RELEASE_ID"
 
 if [[ "$SKIP_BUILD" -ne 1 ]]; then
+  if [[ "$SKIP_ISSUES" -ne 1 ]]; then
+    log "Refreshing issues from GitHub..."
+    # issues.json is gitignored and read at build time — pull it fresh here
+    # so every deploy ships current issues without a manual pre-step. The
+    # site itself never calls GitHub at runtime.
+    "$REPO_ROOT/scripts/content/refresh-issues.sh" \
+      || fail "Issue refresh failed. Fix gh (install + 'gh auth login'), or re-run with --skip-issues to deploy the src/data/issues.json already in the tree."
+  else
+    warn "Skipping issue refresh (--skip-issues) — shipping src/data/issues.json as-is."
+  fi
+
   log "Installing dependencies..."
   if [[ -f package-lock.json ]]; then
     npm ci
@@ -74,8 +87,25 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -r "$REPO_ROOT/out/." "$STAGE_DIR/"
 cp "$REPO_ROOT/server.js" "$STAGE_DIR/server.js"
-cp "$REPO_ROOT/package.json" "$STAGE_DIR/package.json"
-[[ -f "$REPO_ROOT/package-lock.json" ]] && cp "$REPO_ROOT/package-lock.json" "$STAGE_DIR/package-lock.json"
+
+# server.js only ever requires "express" (+ Node's builtin "path") — it's a
+# static file server for the already-built out/, nothing else in
+# package.json's dependencies (next, react, react95, styled-components,
+# the strudel packages — all build-time only) runs on prod. Shipping the
+# repo's real package.json had prod's `npm install` pulling in the entire
+# Next.js/React toolchain on every deploy, which is almost certainly what
+# was getting OOM-killed on a small prod box. Ship a minimal one instead.
+EXPRESS_SPEC=$(node -p "require('$REPO_ROOT/package.json').dependencies.express")
+cat > "$STAGE_DIR/package.json" <<PKGJSON
+{
+  "name": "mrwr-dev-prod",
+  "private": true,
+  "dependencies": {
+    "express": "$EXPRESS_SPEC"
+  }
+}
+PKGJSON
+
 cp "$SCRIPT_DIR/prod/start.sh" "$STAGE_DIR/start.sh"
 cp "$SCRIPT_DIR/prod/logs.sh" "$STAGE_DIR/logs.sh"
 cp "$SCRIPT_DIR/prod/journalctl_to_readme.sh" "$STAGE_DIR/journalctl_to_readme.sh"
@@ -83,12 +113,12 @@ chmod +x "$STAGE_DIR/"*.sh
 sed "s#__APP_DIR__#$PROD_BASE#g" "$SCRIPT_DIR/prod/mrwr.dev.service.template" > "$STAGE_DIR/$SERVICE_NAME"
 
 log "Uploading to $PROD_HOST:$PROD_BASE/releases/$RELEASE_ID ..."
-ssh "$PROD_HOST" "mkdir -p '$PROD_BASE/releases'"
+ssh_prod "mkdir -p '$PROD_BASE/releases'"
 rsync -az --delete "$STAGE_DIR/" "$PROD_HOST:$PROD_BASE/releases/$RELEASE_ID/"
 
 log "Installing dependencies + switching over on prod..."
 set +e
-ssh "$PROD_HOST" bash -s -- "$PROD_BASE" "$RELEASE_ID" "$SERVICE_NAME" "$APP_PORT" "$KEEP_RELEASES" <<'REMOTE'
+ssh_prod bash -s -- "$PROD_BASE" "$RELEASE_ID" "$SERVICE_NAME" "$APP_PORT" "$KEEP_RELEASES" <<'REMOTE'
 set -euo pipefail
 PROD_BASE="$1"
 RELEASE_ID="$2"
@@ -103,7 +133,7 @@ if [ -L "$PROD_BASE/current" ]; then
 fi
 
 cd "$RELEASE_DIR"
-npm install --omit=dev
+timeout 300 npm install --omit=dev
 
 cp "$RELEASE_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
 systemctl daemon-reload
@@ -114,7 +144,7 @@ mv -Tf "$PROD_BASE/current.tmp" "$PROD_BASE/current"
 systemctl restart "$SERVICE_NAME"
 sleep 2
 
-if systemctl is-active --quiet "$SERVICE_NAME" && curl -fsS -o /dev/null "http://localhost:$APP_PORT/"; then
+if systemctl is-active --quiet "$SERVICE_NAME" && curl -fsS --max-time 5 -o /dev/null "http://localhost:$APP_PORT/"; then
   echo "HEALTHY"
 else
   echo "UNHEALTHY: new release failed to come up cleanly" >&2
