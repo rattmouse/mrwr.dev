@@ -13,17 +13,18 @@ function useTypewriter(text: string, msPerChar = 14) {
   return text.slice(0, i);
 }
 
-export default function ShuttingDownScreen() {
+export default function ShuttingDownScreen({ version }: { version: string }) {
   const lines = useMemo(
     () =>
       [
+        `mrwrOS v${version || "0.1"}`,
         "Saving session...",
         "Stopping services: ok",
         "Syncing disks... done",
         "",
         "Powering off.",
       ].join("\n"),
-    []
+    [version]
   );
 
   const typed = useTypewriter(lines);

@@ -14,6 +14,19 @@ const PowerContext = createContext<PowerContextValue | null>(null);
 
 const STORAGE_KEY = "mrwr:poweredOff";
 
+// A reboot should behave like a real one: come back on the *newest* deploy, not
+// whatever the browser cached (server.js serves with max-age=3600, so a plain
+// reload can be served entirely from cache). Force the document past the HTTP
+// cache first, then reload — the fresh HTML pulls its new hashed chunks itself.
+async function hardReload() {
+  try {
+    await fetch(window.location.href, { cache: "reload" });
+  } catch {
+    // offline or fetch blocked — fall through to a normal reload
+  }
+  window.location.reload();
+}
+
 export function PowerProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<PowerState>("on");
   const timerRef = useRef<number | null>(null);
@@ -78,7 +91,7 @@ export function PowerProvider({ children }: { children: React.ReactNode }) {
     timerRef.current = window.setTimeout(() => {
       if (refreshOnBootRef.current) {
         refreshOnBootRef.current = false;
-        window.location.reload();
+        void hardReload();
         return;
       }
       setState("on");
