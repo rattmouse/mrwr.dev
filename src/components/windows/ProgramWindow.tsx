@@ -14,6 +14,7 @@ import ChangesTreeView, { ChangesTreeViewHandle } from "@/components/changes/Cha
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
+import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import strudelSongs from "@/data/strudelSongs.json";
@@ -24,6 +25,19 @@ const SONG_ICON_FILES = [
   "../w98_midi_mg.ico",
   "../w98_midi_tl.ico",
 ] as const;
+
+// Paint's fixed palette and the three pencil widths, in CSS px.
+const PAINT_COLORS = [
+  "#000000",
+  "#7f7f7f",
+  "#a80000",
+  "#ff7f00",
+  "#ffd400",
+  "#008000",
+  "#0000c0",
+  "#7f007f",
+] as const;
+const PAINT_SIZES = [2, 6, 14] as const;
 
 type ProgramWindowProps = {
   id: ProgramWindowId;
@@ -57,6 +71,7 @@ export default function ProgramWindow({
   const changesTreeRef = useRef<ChangesTreeViewHandle>(null);
   const strudelRef = useRef<StrudelReplHandle>(null);
   const midiRef = useRef<MidiWindowHandle>(null);
+  const paintRef = useRef<PaintWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
@@ -73,6 +88,8 @@ export default function ProgramWindow({
   const [midiHexOpen, setMidiHexOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
   const [midiKeysOpen, setMidiKeysOpen] = useState(false);
+  const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
+  const [paintBrush, setPaintBrush] = useState<number>(6);
 
   const title =
     id === "notepad"
@@ -85,6 +102,8 @@ export default function ProgramWindow({
             ? "strudel.cc"
             : id === "midi"
               ? "midi.exe"
+              : id === "paint"
+                ? "paint.exe"
         : "mrwr.dev";
   const titleIcon =
     id === "welcome"
@@ -97,10 +116,18 @@ export default function ProgramWindow({
             ? "../w95_changes.ico"
             : id === "midi"
               ? "../w98_music.ico"
-              : "../w98_repl.ico";
+              : id === "paint"
+                ? "../w95_paint.ico"
+                : "../w98_repl.ico";
 
-  const normalHeight = id === "welcome" ? 160 : id === "changes" ? 360 : id === "music" ? 220 : id === "midi" ? 404 : 300;
-  const normalWidth = id === "changes" ? 320 : undefined;
+  const normalHeight =
+    id === "welcome" ? 160
+      : id === "changes" ? 360
+        : id === "music" ? 220
+          : id === "midi" ? 404
+            : id === "paint" ? 320
+              : 300;
+  const normalWidth = id === "changes" ? 320 : id === "paint" ? 360 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -523,6 +550,57 @@ export default function ProgramWindow({
           Keys
         </Button>
       </>
+    ) : id === "paint" ? (
+      <>
+        {PAINT_COLORS.map((swatch) => (
+          <button
+            key={swatch}
+            type="button"
+            aria-label={`Colour ${swatch}`}
+            aria-pressed={paintColor === swatch}
+            title={swatch}
+            onClick={() => setPaintColor(swatch)}
+            style={{
+              width: 18,
+              height: 18,
+              padding: 0,
+              flex: "0 0 auto",
+              background: swatch,
+              border: "2px solid",
+              borderColor:
+                paintColor === swatch
+                  ? "#000000 #ffffff #ffffff #000000"
+                  : "#ffffff #808080 #808080 #ffffff",
+              cursor: "pointer",
+            }}
+          />
+        ))}
+        <span aria-hidden style={{ display: "inline-block", width: 6, flex: "0 0 auto" }} />
+        {PAINT_SIZES.map((size) => (
+          <Button
+            key={size}
+            variant="menu"
+            size="sm"
+            active={paintBrush === size}
+            aria-label={`Brush ${size}px`}
+            title={`${size}px brush`}
+            onClick={() => setPaintBrush(size)}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                width: Math.min(size, 14),
+                height: Math.min(size, 14),
+                borderRadius: "50%",
+                background: "currentColor",
+              }}
+            />
+          </Button>
+        ))}
+        <Button variant="menu" size="sm" onClick={() => paintRef.current?.clear()}>
+          Clear
+        </Button>
+      </>
     ) : undefined;
 
   return (
@@ -631,6 +709,10 @@ export default function ProgramWindow({
           onMetersOpenChange={setMidiMetersOpen}
           onKeysOpenChange={setMidiKeysOpen}
         />
+      )}
+
+      {id === "paint" && (
+        <PaintWindow ref={paintRef} color={paintColor} brushSize={paintBrush} />
       )}
     </DesktopWindow>
   );
