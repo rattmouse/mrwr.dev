@@ -9,7 +9,7 @@
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [53, 55, 66, 67, 70],
+      "issues": [29, 53, 55, 66, 67, 70],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
         "Ship a minimal production package.json and track the lockfile",
@@ -22,7 +22,8 @@
         "Gave Collections its own Albums, Paintings, and Songs tabs, with paintings and songs drawn from picked Bluesky posts",
         "Expanded the Keys monitor with activity meters, a one-octave keyboard, raw message bytes, and a Scan button to grant MIDI access",
         "Switched the Collections category picker from tabs to toggle buttons that match the Sounds and Keys toolbars",
-        "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens"
+        "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens",
+        "Stopped the Issues window from wrapping long lines — they run on and scroll sideways now, like Notepad with word wrap off"
       ]
     },
     {
