@@ -9,7 +9,7 @@
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [],
+      "issues": [53, 55],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
         "Ship a minimal production package.json and track the lockfile",
