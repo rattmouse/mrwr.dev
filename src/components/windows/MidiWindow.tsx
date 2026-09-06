@@ -238,11 +238,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, []);
 
   const handleMessage = useCallback(
-    (event: Event) => {
-      const msg = event as MIDIMessageEvent;
-      const target = msg.target as MIDIInput | null;
-      if (!msg.data) return;
-      pushEntry(target?.name ?? "input", msg.data);
+    (event: MIDIMessageEvent) => {
+      const target = event.target as MIDIInput | null;
+      if (!event.data) return;
+      pushEntry(target?.name ?? "input", event.data);
     },
     [pushEntry],
   );
@@ -258,8 +257,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         manufacturer: input.manufacturer ?? "",
         state: input.state,
       });
-      input.removeEventListener("midimessage", handleMessage);
-      input.addEventListener("midimessage", handleMessage);
+      // Assigning onmidimessage (not addEventListener) is what implicitly opens
+      // the input port in Chrome; open() covers other engines and is a no-op if
+      // already open. Without an open port no midimessage events ever fire.
+      input.onmidimessage = handleMessage;
+      void input.open().catch(() => {});
     });
     setDevices(list);
   }, [handleMessage]);
@@ -269,10 +271,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     if (!access) return;
     access.removeEventListener("statechange", syncDevices);
     access.inputs.forEach((input) => {
-      input.removeEventListener("midimessage", handleMessage);
+      input.onmidimessage = null;
     });
     accessRef.current = null;
-  }, [handleMessage, syncDevices]);
+  }, [syncDevices]);
 
   const connect = useCallback(
     (userInitiated = false) => {
