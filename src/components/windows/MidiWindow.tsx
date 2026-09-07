@@ -17,12 +17,10 @@ export type MidiWindowHandle = {
   toggleMeters: () => void;
   toggleKeys: () => void;
   setWaveform: (waveform: Waveform) => void;
-  startRecording: () => void;
-  stopRecording: () => void;
   loadSmf: (bytes: Uint8Array, name: string) => void;
   play: () => void;
   stop: () => void;
-  hasRecording: () => boolean;
+  hasMessages: () => boolean;
   exportMid: () => Uint8Array | null;
   exportLog: (fmt: "csv" | "json") => string;
 };
@@ -31,9 +29,8 @@ type MidiWindowProps = {
   onMetersOpenChange?: (open: boolean) => void;
   onKeysOpenChange?: (open: boolean) => void;
   onWaveformChange?: (waveform: Waveform) => void;
-  onRecordingChange?: (recording: boolean) => void;
   onPlayingChange?: (playing: boolean) => void;
-  onLoadedFileChange?: (name: string | null) => void;
+  onHasMessagesChange?: (hasMessages: boolean) => void;
 };
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
@@ -48,6 +45,8 @@ type DeviceInfo = {
 
 type LogEntry = {
   id: number;
+  atMs: number;
+  raw: number[];
   clock: string;
   source: string;
   channel: number | null;
@@ -73,20 +72,12 @@ type Meters = {
   ccValue: number;
 };
 
-type LoadedFile = {
-  name: string;
-  events: { atMs: number; data: Uint8Array }[];
-  durationMs: number;
-};
-
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const MAX_ENTRIES = 250;
 // Raw bytes past this are trimmed with an ellipsis (keeps SysEx from bloating rows).
 const MAX_HEX_BYTES = 8;
 // How long a channel-activity cell takes to fade back to idle, in ms.
 const DECAY_MS = 600;
-// Guard against a huge imported file scheduling an unreasonable pile of timers.
-const MAX_PLAYBACK_EVENTS = 6000;
 // System real-time messages that would otherwise flood the log.
 const SKIP_STATUS = new Set<number>([0xf8, 0xfe]);
 
@@ -271,10 +262,12 @@ const KEYBOARD_LAYOUT = buildKeyboard();
 
 function PlayableKeyboard({
   held,
+  disabled,
   onNoteOn,
   onNoteOff,
 }: {
   held: number[];
+  disabled: boolean;
   onNoteOn: (note: number) => void;
   onNoteOff: (note: number) => void;
 }) {
@@ -302,15 +295,18 @@ function PlayableKeyboard({
     onNoteOn(note);
   };
 
-  const cellProps = (note: number) => ({
-    onPointerDown: (e: React.PointerEvent) => {
-      e.preventDefault();
-      press(note);
-    },
-    onPointerEnter: (e: React.PointerEvent) => {
-      if (e.buttons === 1) press(note);
-    },
-  });
+  const cellProps = (note: number) =>
+    disabled
+      ? {}
+      : {
+          onPointerDown: (e: React.PointerEvent) => {
+            e.preventDefault();
+            press(note);
+          },
+          onPointerEnter: (e: React.PointerEvent) => {
+            if (e.buttons === 1) press(note);
+          },
+        };
 
   return (
     <div
@@ -320,6 +316,8 @@ function PlayableKeyboard({
         height: 84,
         userSelect: "none",
         touchAction: "none",
+        opacity: disabled ? 0.4 : 1,
+        pointerEvents: disabled ? "none" : "auto",
       }}
     >
       {KEYBOARD_LAYOUT.whites.map(({ note, leftPct, widthPct }) => (
@@ -364,9 +362,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     onMetersOpenChange,
     onKeysOpenChange,
     onWaveformChange,
-    onRecordingChange,
     onPlayingChange,
-    onLoadedFileChange,
+    onHasMessagesChange,
   },
   ref,
 ) {
@@ -376,11 +373,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [metersOpen, setMetersOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(true);
   const [waveform, setWaveformState] = useState<Waveform>("square");
-  const [recording, setRecording] = useState(false);
-  const [recCount, setRecCount] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [playPos, setPlayPos] = useState(0);
-  const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
+  const [playTotal, setPlayTotal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [octaveShift, setOctaveShift] = useState(0);
   const [meters, setMeters] = useState<Meters>(() => ({
@@ -396,8 +391,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const accessRef = useRef<MIDIAccess | null>(null);
   const epochRef = useRef(0);
   // Shared in-flight requestMIDIAccess promise, so a dev StrictMode double-mount
-  // (or a fast double Scan) fires one browser request, not two — Firefox blocks
-  // an origin after repeated gesture-less attempts.
+  // fires one browser request, not two — Firefox blocks an origin after repeated
+  // gesture-less attempts.
   const pendingRef = useRef<Promise<MIDIAccess> | null>(null);
   const metersRef = useRef<Meters>({
     channels: new Array(16).fill(0),
@@ -409,11 +404,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const heldRef = useRef<Map<number, number>>(new Map());
 
   const synthRef = useRef<MidiSynth | null>(null);
-  const recordingRef = useRef(false);
-  const recordBufRef = useRef<{ atMs: number; data: number[] }[]>([]);
-  const recordStartRef = useRef(0);
   const entriesRef = useRef<LogEntry[]>([]);
-  const loadedFileRef = useRef<LoadedFile | null>(null);
+  const playingRef = useRef(false);
   const playTimeoutsRef = useRef<number[]>([]);
   const playIntervalRef = useRef<number | null>(null);
   const octaveShiftRef = useRef(0);
@@ -425,6 +417,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   useEffect(() => {
     octaveShiftRef.current = octaveShift;
   }, [octaveShift]);
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
 
   const ensureSynth = useCallback(() => {
     if (!synthRef.current) {
@@ -434,18 +429,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return synthRef.current;
   }, [waveform]);
 
-  const pushEntry = useCallback(
-    (source: string, data: Uint8Array) => {
-      const parsed = describe(data);
-      if (!parsed) return;
+  // The synth is always on, but its AudioContext still needs a user gesture to
+  // start — resume it on the first key press / Open / Play.
+  const ensureAudio = useCallback(() => {
+    ensureSynth().resume();
+  }, [ensureSynth]);
 
-      if (recordingRef.current) {
-        recordBufRef.current.push({
-          atMs: performance.now() - recordStartRef.current,
-          data: Array.from(data),
-        });
-        setRecCount(recordBufRef.current.length);
-      }
+  // Sound + meters + held-note highlight for one message. No logging — used both
+  // by pushEntry (which adds the log row) and by playback (which does not).
+  const applyMessage = useCallback(
+    (data: Uint8Array): Parsed | null => {
+      const parsed = describe(data);
+      if (!parsed) return null;
 
       if (parsed.note != null) {
         const synth = ensureSynth();
@@ -471,10 +466,22 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         }
         setHeld(Array.from(counts.keys()));
       }
+      return parsed;
+    },
+    [ensureSynth],
+  );
 
+  const pushEntry = useCallback(
+    (source: string, data: Uint8Array, atMsOverride?: number) => {
+      const parsed = applyMessage(data);
+      if (!parsed) return;
+
+      const atMs = atMsOverride ?? performance.now() - startedAt.current;
       const entry: LogEntry = {
         id: nextId.current++,
-        clock: formatClock(performance.now() - startedAt.current),
+        atMs,
+        raw: Array.from(data),
+        clock: formatClock(atMs),
         source,
         channel: parsed.channel,
         type: parsed.type,
@@ -486,11 +493,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         return next.length > MAX_ENTRIES ? next.slice(0, MAX_ENTRIES) : next;
       });
     },
-    [ensureSynth],
+    [applyMessage],
   );
 
   const handleMessage = useCallback(
     (event: MIDIMessageEvent) => {
+      if (playingRef.current) return; // inputs are disabled during playback
       const target = event.target as MIDIInput | null;
       if (!event.data) return;
       pushEntry(target?.name ?? "input", event.data);
@@ -498,17 +506,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     [pushEntry],
   );
 
-  // The synth is always on, but its AudioContext still needs a user gesture to
-  // start — resume it on the first key press / file open / playback.
-  const ensureAudio = useCallback(() => {
-    ensureSynth().resume();
-  }, [ensureSynth]);
-
-  // Play a note from the on-screen or computer keyboard: routed through
-  // pushEntry so the log, meters, held highlight, synth, and recording all react.
+  // Play a note from the on-screen or computer keyboard.
   const handleKeyNote = useCallback(
     (note: number, on: boolean) => {
-      if (note < 0 || note > 127) return;
+      if (playingRef.current || note < 0 || note > 127) return;
       ensureAudio();
       if (startedAt.current === 0) startedAt.current = performance.now();
       pushEntry("keys", Uint8Array.from(on ? [0x90, note, 96] : [0x80, note, 0]));
@@ -529,31 +530,42 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     synthRef.current?.allNotesOff();
     heldRef.current.clear();
     setHeld([]);
+    playingRef.current = false;
     setPlaying(false);
     setPlayPos(0);
+    setPlayTotal(0);
   }, []);
 
+  // Replay every message currently in the log through the synth. Inputs stay
+  // disabled (playingRef) until this finishes or Stop is pressed.
   const play = useCallback(() => {
-    const file = loadedFileRef.current;
-    if (!file || file.events.length === 0) return;
+    const msgs = entriesRef.current;
+    if (msgs.length === 0) return;
     stopPlayback();
     ensureAudio();
-    if (startedAt.current === 0) startedAt.current = performance.now();
+
+    const ordered = [...msgs].sort((a, b) => a.atMs - b.atMs);
+    const t0 = ordered[0].atMs;
+    const total = ordered[ordered.length - 1].atMs - t0;
+
+    playingRef.current = true;
+    setPlaying(true);
+    setPlayTotal(total);
     const startPerf = performance.now();
-    const events = file.events.slice(0, MAX_PLAYBACK_EVENTS);
-    for (const ev of events) {
+
+    for (const msg of ordered) {
       playTimeoutsRef.current.push(
-        window.setTimeout(() => pushEntry("file", ev.data), ev.atMs),
+        window.setTimeout(
+          () => applyMessage(Uint8Array.from(msg.raw)),
+          Math.max(0, msg.atMs - t0),
+        ),
       );
     }
-    playTimeoutsRef.current.push(
-      window.setTimeout(() => stopPlayback(), file.durationMs + 400),
-    );
+    playTimeoutsRef.current.push(window.setTimeout(() => stopPlayback(), total + 400));
     playIntervalRef.current = window.setInterval(() => {
       setPlayPos(performance.now() - startPerf);
     }, 100);
-    setPlaying(true);
-  }, [ensureAudio, pushEntry, stopPlayback]);
+  }, [applyMessage, ensureAudio, stopPlayback]);
 
   const loadSmf = useCallback(
     (bytes: Uint8Array, name: string) => {
@@ -563,30 +575,38 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         decoded = decodeSmf(bytes);
       } catch (err) {
         setLoadError((err as Error).message || "Could not read that MIDI file");
-        setLoadedFile(null);
-        loadedFileRef.current = null;
-        onLoadedFileChange?.(null);
         return;
       }
       if (decoded.events.length === 0) {
-        setLoadError("That file has no playable notes");
-        setLoadedFile(null);
-        loadedFileRef.current = null;
-        onLoadedFileChange?.(null);
+        setLoadError("That file has no playable messages");
         return;
       }
       setLoadError(null);
-      const file: LoadedFile = {
-        name,
-        events: decoded.events,
-        durationMs: decoded.durationMs,
-      };
-      loadedFileRef.current = file;
-      setLoadedFile(file);
-      onLoadedFileChange?.(name);
-      requestAnimationFrame(() => play());
+      if (startedAt.current === 0) startedAt.current = performance.now();
+
+      // Replace the log with the file's messages, keeping the file's own timing
+      // so Play and Save reproduce it. Newest-first for display, like live input.
+      const rows: LogEntry[] = [];
+      for (const ev of decoded.events.slice(-MAX_ENTRIES)) {
+        const parsed = describe(ev.data);
+        if (!parsed) continue;
+        rows.unshift({
+          id: nextId.current++,
+          atMs: ev.atMs,
+          raw: Array.from(ev.data),
+          clock: formatClock(ev.atMs),
+          source: name.slice(0, 8) || "file",
+          channel: parsed.channel,
+          type: parsed.type,
+          detail: parsed.detail,
+          bytes: formatBytes(ev.data),
+        });
+      }
+      heldRef.current.clear();
+      setHeld([]);
+      setEntries(rows);
     },
-    [onLoadedFileChange, play, stopPlayback],
+    [stopPlayback],
   );
 
   const syncDevices = useCallback(() => {
@@ -699,7 +719,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, [connect, detachAccess]);
 
   // Decay the channel-activity cells and publish a throttled snapshot for the
-  // meters. Runs whenever the panel is open — the on-screen keyboard and file
+  // meters. Runs whenever the panel is open — the on-screen keyboard and
   // playback feed it too, not just hardware input.
   useEffect(() => {
     if (!metersOpen) return;
@@ -728,9 +748,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return () => cancelAnimationFrame(raf);
   }, [metersOpen]);
 
-  // Computer-keyboard playing. Live whenever the synth is on (the on-screen
-  // keyboard and the Sound button both switch it on); a typing target — the
-  // search box, Notepad — always wins so letters go there instead.
+  // Computer-keyboard playing. A typing target — the search box, Notepad —
+  // always wins so letters go there instead; playback disables it too.
   useEffect(() => {
     const isTypingTarget = (el: EventTarget | null) => {
       const node = el as HTMLElement | null;
@@ -740,7 +759,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       );
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (playingRef.current || event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
       if (event.code === "KeyZ") {
         if (!event.repeat) {
@@ -798,30 +817,24 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, [waveform, onWaveformChange]);
 
   useEffect(() => {
-    onRecordingChange?.(recording);
-  }, [recording, onRecordingChange]);
-
-  useEffect(() => {
     onPlayingChange?.(playing);
   }, [playing, onPlayingChange]);
+
+  const hasMessages = entries.length > 0;
+  useEffect(() => {
+    onHasMessagesChange?.(hasMessages);
+  }, [hasMessages, onHasMessagesChange]);
 
   useImperativeHandle(
     ref,
     () => ({
       newSession: () => {
         stopPlayback();
-        recordingRef.current = false;
-        setRecording(false);
-        recordBufRef.current = [];
-        setRecCount(0);
         synthRef.current?.allNotesOff();
         heldRef.current.clear();
         setHeld([]);
         setEntries([]);
         setLoadError(null);
-        setLoadedFile(null);
-        loadedFileRef.current = null;
-        onLoadedFileChange?.(null);
       },
       toggleMeters: () => setMetersOpen((v) => !v),
       toggleKeys: () => setKeysOpen((v) => !v),
@@ -829,26 +842,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setWaveformState(next);
         ensureSynth().setWaveform(next);
       },
-      startRecording: () => {
-        recordBufRef.current = [];
-        setRecCount(0);
-        recordStartRef.current = performance.now();
-        if (startedAt.current === 0) startedAt.current = recordStartRef.current;
-        recordingRef.current = true;
-        setRecording(true);
-      },
-      stopRecording: () => {
-        recordingRef.current = false;
-        setRecording(false);
-      },
-      hasRecording: () => recordBufRef.current.length > 0,
       loadSmf,
       play,
       stop: stopPlayback,
-      exportMid: () =>
-        recordBufRef.current.length > 0
-          ? encodeSmf(recordBufRef.current, { name: "Keys recording" })
-          : null,
+      hasMessages: () => entriesRef.current.length > 0,
+      exportMid: () => {
+        const rows = [...entriesRef.current].sort((a, b) => a.atMs - b.atMs);
+        if (rows.length === 0) return null;
+        return encodeSmf(
+          rows.map((r) => ({ atMs: r.atMs, data: r.raw })),
+          { name: "Keys log" },
+        );
+      },
       exportLog: (fmt: "csv" | "json") => {
         const rows = entriesRef.current;
         if (fmt === "json") {
@@ -877,7 +882,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         return `${header}\n${body}`;
       },
     }),
-    [ensureSynth, loadSmf, onLoadedFileChange, play, stopPlayback],
+    [ensureSynth, loadSmf, play, stopPlayback],
   );
 
   const octaveLabel = octaveShift === 0 ? "" : ` · keys ${octaveShift > 0 ? "+" : ""}${octaveShift} oct`;
@@ -976,7 +981,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             borderColor: "#808080 #ffffff #ffffff #808080",
           }}
         >
-          <PlayableKeyboard held={held} onNoteOn={keyboardNoteOn} onNoteOff={keyboardNoteOff} />
+          <PlayableKeyboard
+            held={held}
+            disabled={playing}
+            onNoteOn={keyboardNoteOn}
+            onNoteOff={keyboardNoteOff}
+          />
           <div style={{ marginTop: 3, fontSize: 9, color: "#404040" }}>
             click, or type A–K (W E T Y U for sharps){octaveShift !== 0 ? ` · ${octaveShift > 0 ? "+" : ""}${octaveShift} oct` : ""} · Z / X shifts octave
           </div>
@@ -1001,12 +1011,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {entries.length >= MAX_ENTRIES ? " (capped)" : ""}
         {"  ·  "}
         {`wave ${waveform}`}
-        {recording ? `  ·  ● rec ${recCount}` : ""}
-        {playing && loadedFile
-          ? `  ·  ▶ ${formatTransport(playPos)} / ${formatTransport(loadedFile.durationMs)}`
-          : loadedFile
-            ? `  ·  ${loadedFile.name}`
-            : ""}
+        {playing ? `  ·  ▶ ${formatTransport(playPos)} / ${formatTransport(playTotal)}` : ""}
         {octaveLabel}
       </div>
     </div>

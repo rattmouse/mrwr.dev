@@ -112,10 +112,8 @@ export default function ProgramWindow({
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
   const [midiKeysOpen, setMidiKeysOpen] = useState(false);
   const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
-  const [midiRecording, setMidiRecording] = useState(false);
-  const [midiCanSave, setMidiCanSave] = useState(false);
   const [midiPlaying, setMidiPlaying] = useState(false);
-  const [midiLoadedFile, setMidiLoadedFile] = useState<string | null>(null);
+  const [midiHasMessages, setMidiHasMessages] = useState(false);
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
   const [paintBrush, setPaintBrush] = useState<number>(6);
 
@@ -517,14 +515,13 @@ export default function ProgramWindow({
             variant="menu"
             size="sm"
             active={midiFileOpen}
+            disabled={midiPlaying}
             aria-label="File"
             title="File"
             onClick={() =>
               setMidiFileOpen((prev) => {
-                const next = !prev;
                 setMidiSaveAsOpen(false);
-                if (next) setMidiCanSave(!!midiRef.current?.hasRecording());
-                return next;
+                return !prev;
               })
             }
           >
@@ -567,7 +564,7 @@ export default function ProgramWindow({
                 </MenuListItem>
                 <MenuListItem
                   size="sm"
-                  disabled={!midiCanSave}
+                  disabled={!midiHasMessages}
                   onMouseEnter={() => setMidiSaveAsOpen(false)}
                   onClick={() => {
                     const data = midiRef.current?.exportMid();
@@ -657,6 +654,7 @@ export default function ProgramWindow({
             variant="menu"
             size="sm"
             active={midiEditOpen}
+            disabled={midiPlaying}
             aria-label="Edit"
             title="Edit"
             onClick={() => setMidiEditOpen((prev) => !prev)}
@@ -695,18 +693,22 @@ export default function ProgramWindow({
         <Button
           size="sm"
           style={{ fontWeight: "bold" }}
-          title="Record incoming and played notes"
-          active={midiRecording}
-          onClick={() => {
-            if (midiRecording) {
-              midiRef.current?.stopRecording();
-            } else {
-              midiRef.current?.startRecording();
-              setMidiCanSave(true);
-            }
-          }}
+          title="Play the messages listed below"
+          active={midiPlaying}
+          disabled={midiPlaying || !midiHasMessages}
+          onClick={() => midiRef.current?.play()}
         >
-          {midiRecording ? "■ Rec" : "● Rec"}
+          Play
+        </Button>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Stop playing"
+          active={!midiPlaying}
+          disabled={!midiPlaying}
+          onClick={() => midiRef.current?.stop()}
+        >
+          Stop
         </Button>
         <Button
           size="sm"
@@ -726,28 +728,6 @@ export default function ProgramWindow({
         >
           Keys
         </Button>
-        {midiLoadedFile && (
-          <>
-            <Button
-              size="sm"
-              style={{ fontWeight: "bold" }}
-              title={`Play ${midiLoadedFile}`}
-              active={midiPlaying}
-              onClick={() => midiRef.current?.play()}
-            >
-              ▶
-            </Button>
-            <Button
-              size="sm"
-              style={{ fontWeight: "bold" }}
-              title="Stop playback"
-              active={!midiPlaying}
-              onClick={() => midiRef.current?.stop()}
-            >
-              ■
-            </Button>
-          </>
-        )}
         <input
           ref={midiFileInputRef}
           type="file"
@@ -920,9 +900,8 @@ export default function ProgramWindow({
           onMetersOpenChange={setMidiMetersOpen}
           onKeysOpenChange={setMidiKeysOpen}
           onWaveformChange={setMidiWaveform}
-          onRecordingChange={setMidiRecording}
           onPlayingChange={setMidiPlaying}
-          onLoadedFileChange={setMidiLoadedFile}
+          onHasMessagesChange={setMidiHasMessages}
         />
       )}
 
