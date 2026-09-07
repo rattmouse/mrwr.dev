@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
+import MockupList from "@/components/projects/MockupList";
 import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
 
 type DocumentWindowProps = {
@@ -704,26 +705,14 @@ export default function DocumentWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
-      normalHeight={id === "collections" ? 312 : 200}
-      normalWidth={id === "collections" ? 340 : undefined}
+      normalHeight={id === "collections" ? 312 : id === "projects" ? 360 : 200}
+      normalWidth={id === "collections" ? 340 : id === "projects" ? 340 : undefined}
       onClose={onClose}
       onMinimize={onMinimize}
       onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
     >
-      {id === "projects" && (
-        <>
-          <h1>can&apos;t share most of them</h1>
-          <ul>
-            <li>
-              - but this one is on{" "}
-              <Anchor href="https://github.com/rattmouse/mrwr.dev" target="_blank">
-                GitHub
-              </Anchor>
-            </li>
-          </ul>
-        </>
-      )}
+      {id === "projects" && <MockupList layout={layout} />}
 
       {id === "collections" && (
         <div

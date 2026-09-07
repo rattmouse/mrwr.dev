@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Foundry Supply — Storefront</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#fffdf9;color:#191714;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;font-size:14px;
+ -webkit-font-smoothing:antialiased}
+.serif{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+:root{--ink:#191714;--ink2:#5b564d;--ink3:#948d80;--line:#e8e3d8;--acc:#1f3a2e}
+.ann{height:32px;background:var(--acc);color:#e8e3d8;display:grid;place-items:center;font-size:11.8px;letter-spacing:.03em}
+header{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 34px;gap:30px;background:#fffdf9}
+.brand{font-size:19px;font-weight:640;letter-spacing:-.5px}
+.brand span{font-weight:400;color:var(--ink3);font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;margin-left:8px}
+nav{display:flex;gap:24px;font-size:13.5px;color:var(--ink2)}
+nav b{color:var(--ink);font-weight:550;box-shadow:inset 0 -1.5px 0 var(--ink)}
+.hact{margin-left:auto;display:flex;align-items:center;gap:16px;font-size:13px;color:var(--ink2)}
+.cart{position:relative;background:var(--acc);color:#fff;border-radius:8px;padding:7px 13px;font-size:12.8px;font-weight:520}
+.cart i{position:absolute;top:-5px;right:-5px;background:#c2603a;color:#fff;width:18px;height:18px;border-radius:50%;font-size:10px;font-weight:700;display:grid;place-items:center;font-style:normal}
+.hero{height:184px;margin:16px 34px 0;border-radius:16px;background:linear-gradient(115deg,#1f3a2e 0%,#2e5344 46%,#3f6a55 100%);position:relative;overflow:hidden;padding:24px 38px;color:#f3f0e8}
+.hero:after{content:"";position:absolute;right:-40px;top:-60px;width:340px;height:340px;border-radius:50%;background:rgba(255,255,255,.06)}
+.hero:before{content:"";position:absolute;right:120px;bottom:-110px;width:230px;height:230px;border-radius:50%;background:rgba(255,255,255,.05)}
+.hero .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.72;margin-bottom:7px}
+.hero h2{font-size:31px;letter-spacing:-.8px;line-height:1.1;font-weight:500;margin-bottom:8px}
+.hero p{font-size:13.5px;opacity:.8;max-width:52ch;line-height:1.55}
+.hero .cta{margin-top:12px;display:inline-block;background:#f3f0e8;color:#1f3a2e;border-radius:8px;padding:8px 17px;font-size:13px;font-weight:600}
+.wrap{display:grid;grid-template-columns:214px 1fr;gap:30px;padding:18px 34px 0}
+/* facets */
+.fac h4{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px}
+.fac .grp{border-bottom:1px solid var(--line);padding-bottom:15px;margin-bottom:15px}
+.fac label{display:flex;align-items:center;gap:9px;font-size:13.2px;color:var(--ink2);margin-bottom:8px}
+.box{width:15px;height:15px;border:1.5px solid #cfc8b9;border-radius:4px;flex:none}
+.box.on{background:var(--acc);border-color:var(--acc);position:relative}
+.box.on:after{content:"✓";position:absolute;inset:0;color:#fff;font-size:10px;display:grid;place-items:center}
+.fac .n{margin-left:auto;color:var(--ink3);font-size:11.5px}
+.swatches{display:flex;gap:7px;flex-wrap:wrap}
+.swatches i{width:24px;height:24px;border-radius:50%;border:1px solid rgba(0,0,0,.12);display:block}
+.swatches i.on{box-shadow:0 0 0 2px #fffdf9,0 0 0 3.5px var(--acc)}
+/* grid */
+.gh{display:flex;align-items:center;margin-bottom:13px}
+.gh h3{font-size:16px;font-weight:600;letter-spacing:-.3px}
+.gh .c{color:var(--ink3);font-size:12.8px;margin-left:9px}
+.sort{margin-left:auto;border:1px solid var(--line);border-radius:8px;padding:5px 11px;font-size:12.8px;color:var(--ink2);background:#fff}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.prod .img{height:148px;border-radius:12px;position:relative;overflow:hidden;margin-bottom:10px}
+.prod .tagp{position:absolute;top:10px;left:10px;background:#fffdf9;border-radius:20px;padding:2.5px 9px;font-size:10.5px;font-weight:650;letter-spacing:.02em}
+.prod .heart{position:absolute;top:9px;right:9px;width:26px;height:26px;border-radius:50%;background:rgba(255,253,249,.9);display:grid;place-items:center;font-size:12px;color:#5b564d}
+.prod .nm{font-size:13.8px;font-weight:550;margin-bottom:3px}
+.prod .mt{font-size:12.2px;color:var(--ink3);margin-bottom:6px}
+.prod .pr{font-size:13.8px;font-weight:600}
+.prod .pr s{color:var(--ink3);font-weight:400;margin-left:6px;font-size:12.5px}
+.stars{color:#c98500;font-size:11.5px;margin-left:auto}
+.prow{display:flex;align-items:center}
+</style></head><body>
+<div class="ann">Free shipping on orders over $75 — ships same day from Portland</div>
+<header>
+  <div class="brand">Foundry<span>Supply Co.</span></div>
+  <nav><b>Desk</b><span>Paper</span><span>Ink</span><span>Bags</span><span>Archive</span><span>Journal</span></nav>
+  <div class="hact"><span>Search</span><span>Account</span><span class="cart">Cart · $148<i>3</i></span></div>
+</header>
+<div class="hero">
+  <div class="eyebrow">Autumn release</div>
+  <h2 class="serif">Tools that outlast the desk<br>they sit on.</h2>
+  <p>Machined brass, waxed canvas, and paper heavy enough to take fountain ink without a ghost. Made in small runs.</p>
+  <span class="cta">Shop the collection →</span>
+</div>
+<div class="wrap">
+  <aside class="fac">
+    <div class="grp"><h4>Category</h4>
+      <label><span class="box on"></span>Writing<span class="n">24</span></label>
+      <label><span class="box on"></span>Desk objects<span class="n">18</span></label>
+      <label><span class="box"></span>Notebooks<span class="n">31</span></label>
+      <label><span class="box"></span>Carry<span class="n">12</span></label>
+      <label><span class="box"></span>Refills<span class="n">9</span></label>
+    </div>
+    <div class="grp"><h4>Material</h4>
+      <label><span class="box"></span>Brass<span class="n">14</span></label>
+      <label><span class="box on"></span>Walnut<span class="n">7</span></label>
+      <label><span class="box"></span>Canvas<span class="n">11</span></label>
+      <label><span class="box"></span>Steel<span class="n">6</span></label>
+    </div>
+    <div class="grp"><h4>Colour</h4>
+      <div class="swatches">
+        <i style="background:#1f3a2e" class="on"></i><i style="background:#c2603a"></i><i style="background:#2d2b28"></i>
+        <i style="background:#c9b98f"></i><i style="background:#8b8f7a"></i><i style="background:#f0ece1"></i></div>
+    </div>
+    <div class="grp" style="border:0"><h4>Price</h4>
+      <div style="height:4px;background:#e8e3d8;border-radius:2px;position:relative;margin:14px 0 10px">
+        <div style="position:absolute;left:12%;right:34%;top:0;bottom:0;background:#1f3a2e;border-radius:2px"></div>
+        <div style="position:absolute;left:12%;top:-5px;width:14px;height:14px;border-radius:50%;background:#fff;border:1.5px solid #1f3a2e;transform:translateX(-7px)"></div>
+        <div style="position:absolute;right:34%;top:-5px;width:14px;height:14px;border-radius:50%;background:#fff;border:1.5px solid #1f3a2e;transform:translateX(7px)"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#5b564d"><span>$18</span><span>$164</span></div>
+    </div>
+  </aside>
+  <div>
+    <div class="gh"><h3>Desk</h3><span class="c">42 products</span><span class="sort">Sort: Featured ▾</span></div>
+    <div class="grid">
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#d8cdb6,#b39d76)"><span class="tagp">New</span><span class="heart">♡</span></div>
+        <div class="nm">Machinist Pen No. 4</div><div class="mt">Solid brass · fine nib</div>
+        <div class="prow"><span class="pr">$78</span><span class="stars">★★★★★ 214</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#2e4b3f,#1b2f27)"><span class="heart">♡</span></div>
+        <div class="nm">Field Notebook, 3-pack</div><div class="mt">Grid · 120gsm · sewn</div>
+        <div class="prow"><span class="pr">$24</span><span class="stars">★★★★☆ 861</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#e4d9c3,#c2a882)"><span class="tagp" style="background:#c2603a;color:#fff">−20%</span><span class="heart">♡</span></div>
+        <div class="nm">Walnut Desk Tray</div><div class="mt">Oiled walnut · 12″</div>
+        <div class="prow"><span class="pr">$52<s>$65</s></span><span class="stars">★★★★★ 96</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#c9c4b4,#8b8f7a)"><span class="heart">♡</span></div>
+        <div class="nm">Blotter, Large</div><div class="mt">Vegetable-tanned leather</div>
+        <div class="prow"><span class="pr">$142</span><span class="stars">★★★★☆ 37</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#e8ded0,#cdb79a)"><span class="heart">♡</span></div>
+        <div class="nm">Iron Gall Ink, 50ml</div><div class="mt">Archival · deep blue-black</div>
+        <div class="prow"><span class="pr">$18</span><span class="stars">★★★★★ 502</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#3b3a37,#22211f)"><span class="tagp">Restock</span><span class="heart">♡</span></div>
+        <div class="nm">Shop Apron</div><div class="mt">18oz waxed canvas</div>
+        <div class="prow"><span class="pr">$96</span><span class="stars">★★★★★ 143</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#d5c9ae,#a8916b)"><span class="heart">♡</span></div>
+        <div class="nm">Brass Ruler, 6″</div><div class="mt">Etched · imperial + metric</div>
+        <div class="prow"><span class="pr">$34</span><span class="stars">★★★★☆ 78</span></div></div>
+      <div class="prod">
+        <div class="img" style="background:linear-gradient(150deg,#cfd6cd,#93a396)"><span class="heart">♡</span></div>
+        <div class="nm">Letter Opener</div><div class="mt">Stainless · hand-finished</div>
+        <div class="prow"><span class="pr">$44</span><span class="stars">★★★★★ 61</span></div></div>
+    </div>
+  </div>
+</div>
+</body></html>

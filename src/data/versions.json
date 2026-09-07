@@ -12,6 +12,7 @@
       "issues": [29, 53, 55, 66, 67, 70, 81, 85],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
+        "Projects now shows nine interface demos \u2014 marked as demos, not client work \u2014 with the full set at /mockups/",
         "Ship a minimal production package.json and track the lockfile",
         "Refresh the issues list from GitHub as a deploy step",
         "Cleared out ESLint errors and dead image assets",

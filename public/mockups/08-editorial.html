@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Longform — Editorial</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#faf8f4;color:#14130f;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;font-size:14px;
+ -webkit-font-smoothing:antialiased}
+.serif{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif}
+:root{--ink:#14130f;--ink2:#565248;--ink3:#8f897c;--line:#e3ded2;--acc:#8a2b1f}
+header{height:70px;display:flex;align-items:center;padding:0 44px;border-bottom:1px solid var(--line)}
+.mast{font-size:23px;letter-spacing:-.6px;font-weight:600}
+.mast i{font-style:normal;color:var(--acc)}
+nav{margin-left:38px;display:flex;gap:26px;font-size:13px;color:var(--ink2);text-transform:uppercase;letter-spacing:.07em}
+nav b{color:var(--ink);font-weight:600}
+.hr{margin-left:auto;display:flex;gap:12px;align-items:center;font-size:13px;color:var(--ink2)}
+.sub{background:var(--ink);color:#faf8f4;border-radius:20px;padding:7px 16px;font-size:12.5px;font-weight:550}
+.rule{height:1px;background:var(--line)}
+main{display:grid;grid-template-columns:1fr 336px;gap:44px;padding:30px 44px 0}
+/* lead */
+.lead{display:grid;grid-template-columns:1.06fr 1fr;gap:28px;padding-bottom:26px;border-bottom:1px solid var(--line)}
+.leadimg{height:318px;border-radius:4px;background:linear-gradient(150deg,#2c3a4a 0%,#4a5f74 55%,#8a9bab 100%);position:relative;overflow:hidden}
+.leadimg:after{content:"";position:absolute;left:-30px;bottom:-70px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.07)}
+.leadimg:before{content:"";position:absolute;right:30px;top:36px;width:120px;height:120px;border:1px solid rgba(255,255,255,.25);border-radius:50%}
+.kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--acc);font-weight:650;margin-bottom:11px}
+.lead h1{font-size:42px;line-height:1.1;letter-spacing:-1.2px;font-weight:500;margin-bottom:14px}
+.lead .dek{font-size:16.5px;line-height:1.62;color:var(--ink2);margin-bottom:18px;max-width:44ch}
+.byline{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink3)}
+.byline .av{width:30px;height:30px;border-radius:50%;background:#8a2b1f;color:#fff;display:grid;place-items:center;font-size:11.5px;font-weight:700}
+.byline b{color:var(--ink);font-weight:600}
+/* grid */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;padding:24px 0}
+.card .thumb{height:132px;border-radius:4px;margin-bottom:12px}
+.card .k{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);font-weight:650;margin-bottom:6px}
+.card h3{font-size:19px;line-height:1.24;letter-spacing:-.5px;font-weight:500;margin-bottom:7px}
+.card p{font-size:13.5px;line-height:1.6;color:var(--ink2);margin-bottom:9px}
+.card .meta{font-size:11.8px;color:var(--ink3)}
+/* rail */
+.rail{border-left:1px solid var(--line);padding-left:30px}
+.rail h4{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);padding-bottom:11px;border-bottom:2px solid var(--ink);margin-bottom:14px}
+.pop{display:flex;gap:13px;padding:12px 0;border-bottom:1px solid var(--line)}
+.pop .num{font-size:25px;line-height:1;color:#dbd4c4;font-weight:600;letter-spacing:-1px}
+.pop b{font-size:14.5px;line-height:1.3;font-weight:500;display:block;margin-bottom:4px}
+.pop span{font-size:11.5px;color:var(--ink3)}
+.news{margin-top:22px;background:#f0ece1;border-radius:6px;padding:18px}
+.news b{font-size:17px;letter-spacing:-.4px;font-weight:550;display:block;margin-bottom:6px}
+.news p{font-size:13px;line-height:1.55;color:var(--ink2);margin-bottom:12px}
+.field{background:#fff;border:1px solid #ddd6c6;border-radius:5px;padding:8px 10px;font-size:12.5px;color:var(--ink3);margin-bottom:7px}
+.go{background:var(--acc);color:#fff;border-radius:5px;padding:8px;text-align:center;font-size:12.5px;font-weight:600}
+.tags{margin-top:20px;display:flex;flex-wrap:wrap;gap:7px}
+.tag{border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:12px;color:var(--ink2);background:#fff}
+</style></head><body>
+<header>
+  <div class="mast serif">Long<i>form</i></div>
+  <nav><b>Essays</b><span>Notes</span><span>Interviews</span><span>Archive</span><span>About</span></nav>
+  <div class="hr"><span>Search</span><span class="sub">Subscribe</span></div>
+</header>
+<main>
+  <div>
+    <section class="lead">
+      <div class="leadimg"></div>
+      <div>
+        <div class="kicker">Essay · 18 min read</div>
+        <h1 class="serif">The web we keep rebuilding, and the one we keep losing</h1>
+        <p class="dek serif">Every framework generation promises to end the churn. Two decades of personal sites suggest the durable part was never the framework — it was the file you could still open.</p>
+        <div class="byline"><span class="av">MR</span><span><b>M. Rowe</b> · September 4, 2026</span>
+          <span style="margin-left:auto">♡ 412</span><span>💬 38</span></div>
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2);line-height:1.62">
+          <b style="color:#14130f">In this issue —</b> a field guide to static hosting that outlives its host, an interview with the maintainer of a 19-year-old link blog, and why the “view source” habit deserves a revival.</div>
+      </div>
+    </section>
+    <section class="grid">
+      <article class="card">
+        <div class="thumb" style="background:linear-gradient(150deg,#7a4a3a,#c2896a)"></div>
+        <div class="k">Interview</div>
+        <h3 class="serif">Nineteen years of a link blog, one flat file at a time</h3>
+        <p>Ellen Mahoney has published every weekday since 2007 without a database. We talked about backups, boredom, and the joy of no build step.</p>
+        <div class="meta">Sep 1 · 12 min</div>
+      </article>
+      <article class="card">
+        <div class="thumb" style="background:linear-gradient(150deg,#2f4f42,#6c9482)"></div>
+        <div class="k">Field guide</div>
+        <h3 class="serif">Hosting that outlives the company that sold it to you</h3>
+        <p>A practical ranking of the places a personal site can live, scored on the only metric that matters: what happens when nobody pays the bill.</p>
+        <div class="meta">Aug 28 · 9 min</div>
+      </article>
+      <article class="card">
+        <div class="thumb" style="background:linear-gradient(150deg,#3b3752,#7d76a8)"></div>
+        <div class="k">Notes</div>
+        <h3 class="serif">In praise of the ugly, useful personal homepage</h3>
+        <p>The sites that stayed interesting were never the polished ones. They were the ones that kept a changelog and admitted what was broken.</p>
+        <div class="meta">Aug 24 · 6 min</div>
+      </article>
+    </section>
+  </div>
+  <aside class="rail">
+    <h4>Most read this month</h4>
+    <div class="pop"><span class="num serif">01</span><span><b class="serif">Your framework is not your architecture</b><span>Aug 12 · 14 min</span></span></div>
+    <div class="pop"><span class="num serif">02</span><span><b class="serif">The quiet death of the RSS button</b><span>Aug 5 · 8 min</span></span></div>
+    <div class="pop"><span class="num serif">03</span><span><b class="serif">Writing documentation nobody has to search</b><span>Jul 30 · 11 min</span></span></div>
+    <div class="pop"><span class="num serif">04</span><span><b class="serif">A defence of the 90s desktop metaphor</b><span>Jul 22 · 16 min</span></span></div>
+    <div class="pop" style="border:0"><span class="num serif">05</span><span><b class="serif">Ship the changelog, not the roadmap</b><span>Jul 14 · 7 min</span></span></div>
+    <div class="news">
+      <b class="serif">The Saturday letter</b>
+      <p>One essay, three links, no tracking pixels. Sent weekly to 8,400 readers.</p>
+      <div class="field">you@example.com</div>
+      <div class="go">Subscribe — free</div>
+    </div>
+    <div class="tags">
+      <span class="tag">the web</span><span class="tag">tooling</span><span class="tag">archives</span>
+      <span class="tag">interviews</span><span class="tag">design</span><span class="tag">self-hosting</span>
+    </div>
+  </aside>
+</main>
+</body></html>
