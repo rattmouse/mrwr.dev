@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Cadence — Schedule</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#fff;color:#181b21;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;font-size:13px;
+ -webkit-font-smoothing:antialiased;display:grid;grid-template-columns:246px 1fr}
+:root{--line:#e6e9ef;--ink2:#5b6373;--ink3:#8f97a6;--acc:#1b5cab}
+/* side */
+.side{background:#f7f8fb;border-right:1px solid var(--line);padding:18px 16px;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:9px;font-weight:660;font-size:15px;letter-spacing:-.3px;margin-bottom:16px}
+.mark{width:25px;height:25px;border-radius:8px;background:var(--acc);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}
+.create{background:var(--acc);color:#fff;border-radius:9px;padding:9px;text-align:center;font-size:13.5px;font-weight:600;margin-bottom:18px}
+/* mini month */
+.mm{margin-bottom:18px}
+.mmh{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;font-size:13px;font-weight:600}
+.mmh span{color:var(--ink3);font-weight:400}
+.mgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.mgrid .dow{font-size:10px;color:var(--ink3);padding-bottom:4px}
+.mgrid .d{font-size:11.5px;padding:4px 0;border-radius:6px;color:#3d4351;position:relative}
+.mgrid .d.out{color:#c4c9d3}
+.mgrid .d.today{background:var(--acc);color:#fff;font-weight:650}
+.mgrid .d.wk{background:#e8effa}
+.mgrid .d.hasev:after{content:"";position:absolute;bottom:1px;left:50%;transform:translateX(-50%);width:3px;height:3px;border-radius:50%;background:#1b5cab}
+.mgrid .d.today.hasev:after{background:#fff}
+.slab{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin:6px 0 9px}
+.cal{display:flex;align-items:center;gap:9px;padding:5px 2px;font-size:13px;color:#3d4351}
+.cbox{width:15px;height:15px;border-radius:4px;flex:none}
+.up{margin-top:auto;border-top:1px solid var(--line);padding-top:12px}
+.ue{display:flex;gap:9px;margin-bottom:10px}
+.ue .t{font-size:11px;color:var(--ink3);width:46px;flex:none;padding-top:1px}
+.ue b{font-size:12.5px;font-weight:550;display:block}
+.ue span{font-size:11.5px;color:var(--ink3)}
+/* main */
+.main{display:flex;flex-direction:column;min-width:0}
+.top{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 20px}
+h1{font-size:17px;font-weight:650;letter-spacing:-.4px}
+.arrows{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.arrows span{padding:5px 10px;color:var(--ink2);border-right:1px solid var(--line)}
+.arrows span:last-child{border:0}
+.today{border:1px solid var(--line);border-radius:8px;padding:5px 12px;color:var(--ink2)}
+.seg{margin-left:auto;display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg span{padding:5px 13px;color:var(--ink2);border-right:1px solid var(--line);font-size:12.5px}
+.seg span:last-child{border:0}
+.seg span.on{background:#eef4fd;color:#1b5cab;font-weight:600}
+.avs{display:flex;margin-left:6px}
+.avs i{width:26px;height:26px;border-radius:50%;border:2px solid #fff;margin-left:-8px;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff;font-style:normal}
+.avs i:first-child{margin-left:0}
+/* week */
+.days{display:grid;grid-template-columns:56px repeat(7,1fr);border-bottom:1px solid var(--line)}
+.days .dh{padding:9px 0;text-align:center;border-left:1px solid var(--line)}
+.days .dh .n{font-size:10.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.06em}
+.days .dh .num{font-size:19px;font-weight:600;margin-top:2px;letter-spacing:-.5px}
+.days .dh.on .num{background:var(--acc);color:#fff;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;margin:2px auto 0;font-size:15px}
+.days .corner{}
+.gridw{flex:1;display:grid;grid-template-columns:56px repeat(7,1fr);position:relative;overflow:hidden}
+.hours{border-right:0}
+.hr{height:64px;border-bottom:1px solid #f1f3f7;font-size:10.5px;color:var(--ink3);text-align:right;padding:2px 7px 0}
+.colw{border-left:1px solid var(--line);position:relative}
+.colw .slot{height:64px;border-bottom:1px solid #f1f3f7}
+.colw.wknd{background:#fafbfd}
+.ev{position:absolute;left:3px;right:3px;border-radius:7px;padding:5px 7px;font-size:11.5px;line-height:1.35;overflow:hidden;border-left:3px solid}
+.ev b{display:block;font-weight:600;font-size:11.8px}
+.ev.mini{padding:6px 7px}
+.ev span{opacity:.8;font-size:10.8px}
+.blue{background:#e8effa;border-color:#2a78d6;color:#12365f}
+.green{background:#e6f5ef;border-color:#199e70;color:#0d4d38}
+.amber{background:#fdf3e2;border-color:#c98500;color:#6a4600}
+.violet{background:#eeebfa;border-color:#4a3aa7;color:#2c2168}
+.rose{background:#fdecf1;border-color:#d55181;color:#78203f}
+.gray{background:#f2f4f7;border-color:#8f97a6;color:#4a505c;border-style:dashed}
+.now{position:absolute;left:56px;right:0;height:0;border-top:2px solid #e34948;z-index:5}
+.now:before{content:"";position:absolute;left:-4px;top:-5px;width:8px;height:8px;border-radius:50%;background:#e34948}
+.now b{position:absolute;left:-54px;top:-9px;width:50px;text-align:center;background:#e34948;color:#fff;font-size:10px;padding:1px 4px;border-radius:4px;font-weight:600}
+</style></head><body>
+<aside class="side">
+  <div class="brand"><div class="mark">C</div>Cadence</div>
+  <div class="create">+ New event</div>
+  <div class="mm">
+    <div class="mmh">September 2026 <span>‹ ›</span></div>
+    <div class="mgrid">
+      <span class="dow">M</span><span class="dow">T</span><span class="dow">W</span><span class="dow">T</span><span class="dow">F</span><span class="dow">S</span><span class="dow">S</span>
+      <span class="d out">31</span><span class="d hasev">1</span><span class="d">2</span><span class="d hasev">3</span><span class="d">4</span><span class="d">5</span><span class="d">6</span>
+      <span class="d wk today hasev">7</span><span class="d wk hasev">8</span><span class="d wk hasev">9</span><span class="d wk hasev">10</span><span class="d wk hasev">11</span><span class="d wk">12</span><span class="d wk">13</span>
+      <span class="d hasev">14</span><span class="d">15</span><span class="d hasev">16</span><span class="d">17</span><span class="d hasev">18</span><span class="d">19</span><span class="d">20</span>
+      <span class="d">21</span><span class="d hasev">22</span><span class="d">23</span><span class="d">24</span><span class="d hasev">25</span><span class="d">26</span><span class="d">27</span>
+      <span class="d">28</span><span class="d">29</span><span class="d hasev">30</span><span class="d out">1</span><span class="d out">2</span><span class="d out">3</span><span class="d out">4</span>
+    </div>
+  </div>
+  <div class="slab">My calendars</div>
+  <div class="cal"><span class="cbox" style="background:#2a78d6"></span>Work</div>
+  <div class="cal"><span class="cbox" style="background:#199e70"></span>mrwr.dev</div>
+  <div class="cal"><span class="cbox" style="background:#c98500"></span>Focus blocks</div>
+  <div class="cal"><span class="cbox" style="background:#d55181"></span>Personal</div>
+  <div class="cal"><span class="cbox" style="background:#e6e9ef;border:1px solid #cdd3dd"></span><span style="color:#8f97a6">Holidays</span></div>
+  <div class="up">
+    <div class="slab" style="margin-top:0">Up next</div>
+    <div class="ue"><span class="t">14:30</span><span><b>Design review — v4.1</b><span>Meet · 5 guests</span></span></div>
+    <div class="ue"><span class="t">16:00</span><span><b>Deploy window</b><span>Focus · 1h</span></span></div>
+    <div class="ue" style="margin:0"><span class="t">Tue 09:00</span><span><b>Sprint planning</b><span>Meet · 6 guests</span></span></div>
+  </div>
+</aside>
+<div class="main">
+  <div class="top">
+    <h1>September 7 – 13, 2026</h1>
+    <div class="arrows"><span>‹</span><span>›</span></div><span class="today">Today</span>
+    <div class="avs"><i style="background:#2a78d6">M</i><i style="background:#eb6834">JD</i><i style="background:#199e70">KP</i><i style="background:#8f97a6">+2</i></div>
+    <div class="seg"><span>Day</span><span class="on">Week</span><span>Month</span><span>Agenda</span></div>
+  </div>
+  <div class="days">
+    <div class="corner"></div>
+    <div class="dh on"><div class="n">Mon</div><div class="num">7</div></div>
+    <div class="dh"><div class="n">Tue</div><div class="num">8</div></div>
+    <div class="dh"><div class="n">Wed</div><div class="num">9</div></div>
+    <div class="dh"><div class="n">Thu</div><div class="num">10</div></div>
+    <div class="dh"><div class="n">Fri</div><div class="num">11</div></div>
+    <div class="dh"><div class="n">Sat</div><div class="num" style="color:#8f97a6">12</div></div>
+    <div class="dh"><div class="n">Sun</div><div class="num" style="color:#8f97a6">13</div></div>
+  </div>
+  <div class="gridw">
+    <div class="hours">
+      <div class="hr">8 AM</div><div class="hr">9 AM</div><div class="hr">10 AM</div><div class="hr">11 AM</div>
+      <div class="hr">12 PM</div><div class="hr">1 PM</div><div class="hr">2 PM</div><div class="hr">3 PM</div><div class="hr">4 PM</div><div class="hr">5 PM</div><div class="hr">6 PM</div>
+    </div>
+    <!-- Mon -->
+    <div class="colw">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="ev blue mini" style="top:64px;height:30px"><b>Standup · 9:00</b></div>
+      <div class="ev amber" style="top:128px;height:126px"><b>Focus — link-prs fix</b><span>10:00 – 12:00</span></div>
+      <div class="ev green" style="top:352px;height:30px"><b>1:1 with KP · 1:30</b></div>
+      <div class="ev violet" style="top:416px;height:62px"><b>Design review — v4.1</b><span>2:30 – 3:30 · 5 guests</span></div>
+    </div>
+    <!-- Tue -->
+    <div class="colw">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="ev blue" style="top:64px;height:94px"><b>Sprint planning</b><span>9:00 – 10:30 · 6 guests</span></div>
+      <div class="ev gray" style="top:256px;height:62px"><b>Lunch</b><span>12:00 – 1:00</span></div>
+      <div class="ev green" style="top:384px;height:126px"><b>Pairing — window manager</b><span>2:00 – 4:00 · JD</span></div>
+      <div class="ev blue" style="top:544px;height:62px"><b>Retro</b><span>4:30 – 5:30 · 6 guests</span></div>
+    </div>
+    <!-- Wed -->
+    <div class="colw">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="ev amber" style="top:0;height:126px"><b>Deep work — search guard</b><span>8:00 – 10:00</span></div>
+      <div class="ev blue mini" style="top:160px;height:30px"><b>Standup · 10:30</b></div>
+      <div class="ev rose" style="top:352px;height:94px"><b>Dentist</b><span>1:30 – 3:00</span></div>
+      <div class="ev green" style="top:512px;height:62px"><b>Office hours</b><span>4:00 – 5:00</span></div>
+    </div>
+    <!-- Thu -->
+    <div class="colw">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="ev blue mini" style="top:64px;height:30px"><b>Standup · 9:00</b></div>
+      <div class="ev violet" style="top:96px;height:94px"><b>Issue triage</b><span>9:30 – 11:00 · 4 guests</span></div>
+      <div class="ev green" style="top:224px;height:62px"><b>Changelog review</b><span>11:30 – 12:30</span></div>
+      <div class="ev amber" style="top:416px;height:126px"><b>Focus — v4.1 polish</b><span>2:30 – 4:30</span></div>
+    </div>
+    <!-- Fri -->
+    <div class="colw">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="ev blue mini" style="top:64px;height:30px"><b>Standup · 9:00</b></div>
+      <div class="ev green" style="top:160px;height:94px"><b>Demo — sprint 12</b><span>10:30 – 12:00 · 9 guests</span></div>
+      <div class="ev rose" style="top:512px;height:62px"><b>Deploy window</b><span>4:00 – 5:00 · release 4.1</span></div>
+    </div>
+    <!-- Sat -->
+    <div class="colw wknd">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="ev gray" style="top:96px;height:126px"><b>Studio time</b><span>9:30 – 11:30</span></div>
+    </div>
+    <!-- Sun -->
+    <div class="colw wknd">
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+      <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+    </div>
+    <div class="now" style="top:391px"><b>2:07</b></div>
+  </div>
+</div>
+</body></html>

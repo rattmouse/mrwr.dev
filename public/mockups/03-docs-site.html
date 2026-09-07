@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Atlas — Documentation</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#fbfaf8;color:#191817;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;font-size:14px;
+ -webkit-font-smoothing:antialiased}
+.mono{font-family:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace}
+:root{--ink:#191817;--ink2:#57544e;--ink3:#8c887f;--line:#e6e3dc;--acc:#2a78d6;--code:#1c1f26}
+header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:22px;padding:0 26px;background:rgba(251,250,248,.9)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:-.3px;font-size:15.5px}
+.mark{width:24px;height:24px;border-radius:6px;background:var(--code);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}
+.ver{border:1px solid var(--line);border-radius:20px;padding:2px 9px;font-size:11.5px;color:var(--ink2);background:#fff}
+nav.top{display:flex;gap:20px;font-size:13.5px;color:var(--ink2)}
+nav.top a{text-decoration:none;color:inherit;padding-bottom:2px}
+nav.top a.on{color:var(--ink);font-weight:550;box-shadow:inset 0 -2px 0 var(--acc)}
+.sbox{margin-left:auto;width:262px;height:32px;border:1px solid var(--line);border-radius:8px;background:#fff;display:flex;align-items:center;padding:0 10px;gap:8px;color:var(--ink3);font-size:13px}
+.kbd{margin-left:auto;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px;color:var(--ink3)}
+.gh{width:32px;height:32px;border:1px solid var(--line);border-radius:8px;background:#fff;display:grid;place-items:center;font-size:13px;color:var(--ink2)}
+.wrap{display:grid;grid-template-columns:250px 1fr 216px;height:842px}
+/* sidebar */
+.side{border-right:1px solid var(--line);padding:20px 18px;overflow:hidden}
+.sgrp{font-size:11.5px;font-weight:650;letter-spacing:.02em;color:var(--ink);margin:20px 0 7px}
+.sgrp:first-child{margin-top:0}
+.side a{display:block;text-decoration:none;color:var(--ink2);font-size:13.5px;padding:4.5px 10px;border-radius:6px;margin-left:-10px}
+.side a.on{background:#eef4fd;color:#1b5cab;font-weight:550}
+.side a.sub{padding-left:22px;font-size:13px;color:var(--ink3)}
+/* article */
+article{padding:24px 46px;overflow:hidden}
+.crumbs{font-size:12.5px;color:var(--ink3);margin-bottom:14px}
+h1{font-size:31px;letter-spacing:-1px;font-weight:680;margin-bottom:9px;line-height:1.15}
+.lede{font-size:15.5px;color:var(--ink2);line-height:1.58;max-width:74ch;margin-bottom:16px}
+h2{font-size:19px;letter-spacing:-.3px;margin:20px 0 9px;font-weight:640}
+p{line-height:1.72;color:#2c2a27;max-width:66ch;margin-bottom:12px}
+code{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:12.5px;background:#f0eee8;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+.pre{background:var(--code);border-radius:10px;padding:0;overflow:hidden;margin:12px 0 14px;max-width:760px}
+.pre .bar{display:flex;align-items:center;gap:8px;padding:8px 13px;border-bottom:1px solid #2a2f3a}
+.pre .bar span{font-size:11.5px;color:#8b93a3}
+.pre .bar .cp{margin-left:auto;border:1px solid #2a2f3a;border-radius:5px;padding:1px 7px;color:#b7bdc9;font-size:11px}
+.pre pre{padding:12px 16px;font-size:12.5px;line-height:1.62;color:#dfe3ea;font-family:"SF Mono",ui-monospace,Menlo,monospace}
+.k{color:#c792ea}.s{color:#89ddaa}.c{color:#5f6879}.f{color:#82aaff}.n{color:#f7c66a}
+.note{border-left:3px solid var(--acc);background:#f2f7fe;border-radius:0 8px 8px 0;padding:10px 15px;max-width:720px;margin:12px 0}
+.note b{font-size:12.5px;color:#1b5cab;display:block;margin-bottom:3px}
+.note p{font-size:13.5px;color:#33507a;margin:0}
+table{border-collapse:collapse;font-size:13.5px;max-width:720px;margin:8px 0 4px;width:100%}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3);font-weight:600;padding:0 12px 8px 0;border-bottom:1px solid var(--line)}
+td{padding:9px 12px 9px 0;border-bottom:1px solid #f0eee8;color:#2c2a27;vertical-align:top}
+/* toc */
+.toc{padding:26px 20px;border-left:1px solid var(--line)}
+.toc b{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);display:block;margin-bottom:10px}
+.toc a{display:block;text-decoration:none;color:var(--ink2);font-size:12.8px;padding:4px 0 4px 11px;border-left:2px solid var(--line);line-height:1.4}
+.toc a.on{color:var(--acc);border-left-color:var(--acc)}
+.helpful{margin-top:24px;border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff}
+.helpful p{font-size:12.5px;color:var(--ink2);margin-bottom:9px}
+.btns{display:flex;gap:6px}
+.btns span{border:1px solid var(--line);border-radius:6px;padding:3px 11px;font-size:12px;color:var(--ink2)}
+</style></head><body>
+<header>
+  <div class="brand"><div class="mark">A</div>Atlas<span class="ver">v3.2</span></div>
+  <nav class="top"><a class="on">Docs</a><a>API</a><a>Guides</a><a>Changelog</a><a>Community</a></nav>
+  <div class="sbox">Search documentation<span class="kbd">⌘K</span></div>
+  <div class="gh">☾</div><div class="gh">★</div>
+</header>
+<div class="wrap">
+  <aside class="side">
+    <div class="sgrp">Getting started</div>
+    <a>Introduction</a><a>Installation</a><a>Quick start</a><a>Project structure</a>
+    <div class="sgrp">Core concepts</div>
+    <a>Routing</a><a class="on">Data fetching</a>
+    <a class="sub">Server components</a><a class="sub">Streaming</a><a class="sub">Revalidation</a>
+    <a>Caching</a><a>Rendering modes</a><a>Middleware</a>
+    <div class="sgrp">Deployment</div>
+    <a>Build output</a><a>Self-hosting</a><a>Edge runtime</a>
+    <div class="sgrp">Reference</div>
+    <a>CLI</a><a>Config file</a><a>Error codes</a>
+  </aside>
+  <article>
+    <div class="crumbs">Docs → Core concepts → <span style="color:#57544e">Data fetching</span></div>
+    <h1>Data fetching</h1>
+    <p class="lede">Fetch data on the server by default, stream it to the client as it resolves, and revalidate on a schedule or on demand — without writing an API layer in between.</p>
+    <h2>Fetching in a server component</h2>
+    <p>Server components run only on the server, so they can talk to your database or an internal service directly. The <code>fetch</code> call is memoized per request, which means calling it in two components does not fire two requests.</p>
+    <div class="pre">
+      <div class="bar"><span class="mono">app/projects/page.tsx</span><span class="cp">Copy</span></div>
+      <pre><span class="k">export default async function</span> <span class="f">Page</span>() {
+  <span class="k">const</span> res = <span class="k">await</span> <span class="f">fetch</span>(<span class="s">'https://api.atlas.dev/projects'</span>, {
+    next: { revalidate: <span class="n">3600</span>, tags: [<span class="s">'projects'</span>] }
+  })
+  <span class="k">const</span> projects = <span class="k">await</span> res.<span class="f">json</span>()
+
+  <span class="k">return</span> &lt;<span class="f">ProjectGrid</span> items={projects} /&gt;
+}</pre>
+    </div>
+    <div class="note"><b>Good to know</b><p>Requests made during a single render pass are deduplicated automatically. You do not need a client-side cache to avoid duplicate calls.</p></div>
+    <h2>Cache options</h2>
+    <p>Every request carries a cache directive. These are the four you will reach for most often:</p>
+    <table>
+      <tr><th style="width:172px">Option</th><th style="width:118px">Scope</th><th>Behaviour</th></tr>
+      <tr><td class="mono" style="font-size:12.5px">force-cache</td><td>Build</td><td>Cached indefinitely until the next deploy or an explicit purge.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">no-store</td><td>Request</td><td>Bypasses the cache entirely; the response is never reused.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">revalidate: n</td><td>Time</td><td>Serves the cached copy, refreshing in the background after <code>n</code> seconds.</td></tr>
+      <tr><td class="mono" style="font-size:12.5px">tags: [...]</td><td>On demand</td><td>Purged by calling <code>revalidateTag()</code> from a server action or webhook.</td></tr>
+    </table>
+  </article>
+  <aside class="toc">
+    <b>On this page</b>
+    <a>Overview</a>
+    <a class="on">Fetching in a server component</a>
+    <a>Cache options</a>
+    <a>Streaming with Suspense</a>
+    <a>Revalidating on demand</a>
+    <a>Error boundaries</a>
+    <a>Common pitfalls</a>
+    <div class="helpful"><p>Was this page helpful?</p><div class="btns"><span>Yes</span><span>No</span></div>
+      <p style="margin:10px 0 0;font-size:11.5px;color:#8c887f">Edit this page on GitHub</p></div>
+  </aside>
+</div>
+</body></html>

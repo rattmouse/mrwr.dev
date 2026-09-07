@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nine demos — mrwr.dev</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0c0e12;--card:#14171d;--line:#222731;--ink:#e9ecf2;--ink2:#98a1b2;--ink3:#69728a;--acc:#5b8ff5}
+body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+ -webkit-font-smoothing:antialiased;line-height:1.5}
+.wrap{max-width:1240px;margin:0 auto;padding:0 28px}
+header{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);font-weight:650;margin-bottom:14px}
+h1{font-size:clamp(30px,4.6vw,46px);line-height:1.08;letter-spacing:-1.4px;font-weight:600;max-width:20ch;margin-bottom:16px}
+.sub{font-size:16.5px;color:var(--ink2);max-width:62ch;line-height:1.62}
+.stats{display:flex;flex-wrap:wrap;gap:28px;margin-top:26px}
+.stat b{display:block;font-size:21px;font-weight:620;letter-spacing:-.4px}
+.stat span{font-size:12.5px;color:var(--ink3)}
+main{padding:38px 0 70px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(390px,1fr));gap:26px}
+figure{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:border-color .15s,transform .15s}
+figure:hover{border-color:#38455e;transform:translateY(-2px)}
+a{display:block;text-decoration:none}
+.shot{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top center;background:#0a0c10;border-bottom:1px solid var(--line);cursor:zoom-in}
+figcaption{padding:15px 17px 17px}
+.num{font-size:11px;color:var(--ink3);letter-spacing:.1em;font-variant-numeric:tabular-nums}
+h2{font-size:16.5px;font-weight:600;letter-spacing:-.3px;margin:5px 0 6px}
+h2 em{font-style:normal;color:var(--ink3);font-weight:400}
+figcaption p{font-size:13.5px;color:var(--ink2);line-height:1.58;margin-bottom:11px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:11px;color:#9fb0cc;background:#1b2029;border:1px solid #262d39;border-radius:20px;padding:2.5px 9px}
+footer{border-top:1px solid var(--line);padding:26px 0 60px;color:var(--ink3);font-size:13px}
+/* lightbox */
+#lb{position:fixed;inset:0;background:rgba(6,8,11,.94);display:none;align-items:center;justify-content:center;padding:28px;cursor:zoom-out;z-index:9}
+#lb.on{display:flex}
+#lb img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+#lb b{position:absolute;top:20px;left:24px;font-size:13px;font-weight:500;color:#98a1b2}
+@media(max-width:720px){.grid{grid-template-columns:1fr}header{padding:40px 0 28px}}
+</style></head><body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Demos · not client work</div>
+    <h1>Nine things Next.js and React build quickly.</h1>
+    <p class="sub"><b>None of these are real projects.</b> Client work stays private, so these nine interfaces exist instead — each one built from scratch in a few hours on the same stack as mrwr.dev: Next.js App Router, React 19, plain CSS, inline SVG for every chart and icon. No component library, no external assets. The data in them is invented. They are here to show range and speed, not a client list.</p>
+    <div class="stats">
+      <div class="stat"><b>9</b><span>demos, no client work</span></div>
+      <div class="stat"><b>1440 × 900</b><span>rendered at 2× for retina</span></div>
+      <div class="stat"><b>0</b><span>third-party UI dependencies</span></div>
+      <div class="stat"><b>Next.js 16 · React 19</b><span>same stack as production</span></div>
+    </div>
+  </header>
+  <main>
+    <div class="grid">
+      <figure><a href="01-analytics-dashboard.html"><img class="shot" src="01-analytics-dashboard.png" alt="Analytics dashboard mockup"></a>
+        <figcaption><div class="num">01</div><h2>Pulse <em>— analytics dashboard</em></h2>
+          <p>KPI tiles, a time-series area chart with a hover readout, source breakdown and a sortable page table. The dark surface and palette are colour-vision-safe.</p>
+          <div class="tags"><span class="tag">server components</span><span class="tag">inline SVG charts</span><span class="tag">CSS grid</span><span class="tag">dark UI</span></div></figcaption></figure>
+
+      <figure><a href="02-audio-workstation.html"><img class="shot" src="02-audio-workstation.png" alt="Live-coding audio workstation mockup"></a>
+        <figcaption><div class="num">02</div><h2>Waveform <em>— live-coding studio</em></h2>
+          <p>A Strudel-flavoured editor: pattern library, syntax-highlighted code pane, master waveform with a playhead, step lanes and a channel strip of knobs and faders.</p>
+          <div class="tags"><span class="tag">CodeMirror</span><span class="tag">Web Audio</span><span class="tag">canvas / SVG</span><span class="tag">client components</span></div></figcaption></figure>
+
+      <figure><a href="03-docs-site.html"><img class="shot" src="03-docs-site.png" alt="Documentation site mockup"></a>
+        <figcaption><div class="num">03</div><h2>Atlas <em>— documentation site</em></h2>
+          <p>Three-column docs layout: nested sidebar, prose column with code blocks and callouts, and an on-this-page rail. Content would come from MDX at build time.</p>
+          <div class="tags"><span class="tag">MDX</span><span class="tag">static generation</span><span class="tag">shiki highlighting</span><span class="tag">search</span></div></figcaption></figure>
+
+      <figure><a href="04-ai-chat.html"><img class="shot" src="04-ai-chat.png" alt="AI assistant chat interface mockup"></a>
+        <figcaption><div class="num">04</div><h2>Relay <em>— assistant interface</em></h2>
+          <p>Threaded conversation with tool-call cards, streamed code output, a context panel of attached files and token usage, and a composer with model and tool switches.</p>
+          <div class="tags"><span class="tag">streaming SSE</span><span class="tag">route handlers</span><span class="tag">optimistic UI</span><span class="tag">markdown</span></div></figcaption></figure>
+
+      <figure><a href="05-kanban-board.html"><img class="shot" src="05-kanban-board.png" alt="Kanban project board mockup"></a>
+        <figcaption><div class="num">05</div><h2>Lane <em>— project board</em></h2>
+          <p>Four-column board with labels, subtask progress, assignee avatars, a card mid-drag and a drop target. Naturally maps onto the GitHub issues the site already reads.</p>
+          <div class="tags"><span class="tag">drag &amp; drop</span><span class="tag">server actions</span><span class="tag">GitHub API</span><span class="tag">optimistic moves</span></div></figcaption></figure>
+
+      <figure><a href="06-storefront.html"><img class="shot" src="06-storefront.png" alt="E-commerce storefront mockup"></a>
+        <figcaption><div class="num">06</div><h2>Foundry <em>— storefront</em></h2>
+          <p>Editorial commerce: full-bleed hero, faceted filters with counts and a price range, and a product grid with badges, ratings and sale pricing.</p>
+          <div class="tags"><span class="tag">ISR</span><span class="tag">URL-state filters</span><span class="tag">image optimisation</span><span class="tag">cart routes</span></div></figcaption></figure>
+
+      <figure><a href="07-observability-console.html"><img class="shot" src="07-observability-console.png" alt="Live log and observability console mockup"></a>
+        <figcaption><div class="num">07</div><h2>Tailwatch <em>— live console</em></h2>
+          <p>Monospace log tail with a query bar, level colouring and highlighted matches, plus a trace waterfall and JSON payload inspector for the selected event.</p>
+          <div class="tags"><span class="tag">WebSocket tail</span><span class="tag">virtualised list</span><span class="tag">keyboard-first</span><span class="tag">query parser</span></div></figcaption></figure>
+
+      <figure><a href="08-editorial.html"><img class="shot" src="08-editorial.png" alt="Editorial magazine layout mockup"></a>
+        <figcaption><div class="num">08</div><h2>Longform <em>— editorial</em></h2>
+          <p>Magazine front page: serif lead story, article grid, a most-read rail and a newsletter block. The closest of the nine to a writing-forward personal site.</p>
+          <div class="tags"><span class="tag">MDX posts</span><span class="tag">RSS feed</span><span class="tag">static export</span><span class="tag">fluid type</span></div></figcaption></figure>
+
+      <figure><a href="09-scheduling.html"><img class="shot" src="09-scheduling.png" alt="Calendar and scheduling app mockup"></a>
+        <figcaption><div class="num">09</div><h2>Cadence <em>— scheduling</em></h2>
+          <p>Week grid with overlapping events, colour-coded calendars, a mini month with event markers, a live now-line and an up-next rail.</p>
+          <div class="tags"><span class="tag">date-fns</span><span class="tag">timezone-aware</span><span class="tag">CSS grid layout</span><span class="tag">ICS import</span></div></figcaption></figure>
+    </div>
+  </main>
+  <footer>Demos only — invented data, invented brands, no client work. Rendered September 2026 at 1440 × 900 · each screen is one self-contained HTML file, ready to port to React components. Back to <a href="/" style="color:#5b8ff5">mrwr.dev</a>.</footer>
+</div>
+<div id="lb"><b></b><img alt=""></div>
+<script>
+var lb=document.getElementById('lb'),lbi=lb.querySelector('img'),lbt=lb.querySelector('b');
+document.querySelectorAll('.shot').forEach(function(el){
+  el.addEventListener('click',function(){lbi.src=el.getAttribute('src');lbt.textContent=el.getAttribute('alt');lb.classList.add('on');});
+});
+lb.addEventListener('click',function(){lb.classList.remove('on');});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')lb.classList.remove('on');});
+</script>
+</body></html>

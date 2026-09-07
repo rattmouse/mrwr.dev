@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Pulse — Analytics</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1440px;height:900px;overflow:hidden;background:#0e1117;color:#e6e9ef;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+ font-size:13px;-webkit-font-smoothing:antialiased;display:grid;grid-template-columns:232px 1fr}
+:root{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--line:#1e242e;--card:#151a22;--muted:#8b93a3}
+/* sidebar */
+.side{background:#0b0e14;border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:9px;padding:0 8px 22px}
+.logo{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#3987e5,#7b5cf0);display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff}
+.brand b{font-size:14.5px;letter-spacing:-.2px}
+.navlbl{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#5c6577;padding:14px 8px 7px}
+.nav a{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:7px;color:#a8b0c0;text-decoration:none;font-size:13px;margin-bottom:1px}
+.nav a.on{background:#182234;color:#fff}
+.nav a.on .dot{background:var(--s1)}
+.dot{width:6px;height:6px;border-radius:50%;background:#39414f}
+.badge{margin-left:auto;background:#232b39;color:#9aa3b4;font-size:10.5px;padding:1px 6px;border-radius:20px}
+.upsell{margin-top:auto;background:#141a24;border:1px solid var(--line);border-radius:10px;padding:12px}
+.upsell p{color:var(--muted);font-size:11.5px;line-height:1.5;margin:5px 0 10px}
+.btnp{display:block;text-align:center;background:var(--s1);color:#fff;border-radius:6px;padding:6px;font-size:12px;font-weight:600}
+/* main */
+.main{display:flex;flex-direction:column;min-width:0}
+.top{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 24px}
+h1{font-size:16px;font-weight:600;letter-spacing:-.2px}
+.crumb{color:#5c6577;font-size:12px}
+.search{margin-left:auto;width:250px;height:31px;background:#141a24;border:1px solid var(--line);border-radius:7px;display:flex;align-items:center;padding:0 10px;color:#5c6577;font-size:12px;gap:7px}
+.kbd{margin-left:auto;border:1px solid #2a323f;border-radius:4px;padding:0 4px;font-size:10px}
+.av{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#d95926,#e0a03c);display:grid;place-items:center;font-size:11px;font-weight:700;color:#231000}
+.body{padding:20px 24px;overflow:hidden}
+.rowtop{display:flex;align-items:center;gap:8px;margin-bottom:16px}
+.chip{border:1px solid var(--line);background:#12171f;border-radius:7px;padding:5px 10px;font-size:12px;color:#a8b0c0}
+.chip.on{border-color:#2f4160}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg span{padding:5px 11px;font-size:12px;color:#8b93a3;border-right:1px solid var(--line)}
+.seg span:last-child{border:0}
+.seg span.on{background:#1c2534;color:#fff}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px 15px}
+.kpi .lbl{color:var(--muted);font-size:11.5px;display:flex;align-items:center;gap:6px}
+.kpi .val{font-size:26px;font-weight:650;letter-spacing:-.7px;margin:7px 0 5px;font-variant-numeric:tabular-nums}
+.delta{font-size:11.5px;display:flex;align-items:center;gap:5px;color:var(--muted)}
+.up{color:#37c08a;font-weight:600}.down{color:#e66767;font-weight:600}
+.grid2{display:grid;grid-template-columns:1.62fr 1fr;gap:14px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:15px 16px}
+.ch{display:flex;align-items:center;margin-bottom:3px}
+.ch h3{font-size:13.5px;font-weight:600}
+.ch .sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+.leg{margin-left:auto;display:flex;gap:13px;font-size:11.5px;color:#a8b0c0;align-items:center}
+.leg i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:5px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:0 0 8px}
+td{padding:8px 0;border-top:1px solid #191f28;font-variant-numeric:tabular-nums}
+td:last-child,th:last-child{text-align:right}
+.pill{font-size:11px;padding:2px 7px;border-radius:20px;background:#172a22;color:#37c08a}
+.pill.w{background:#2c2415;color:#e0a03c}
+.bar{height:6px;border-radius:3px;background:#1e2530;overflow:hidden;width:88px;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--s1)}
+</style></head><body>
+<aside class="side">
+  <div class="brand"><div class="logo">P</div><b>Pulse</b></div>
+  <div class="navlbl">Workspace</div>
+  <nav class="nav">
+    <a class="on"><span class="dot"></span>Overview</a>
+    <a><span class="dot"></span>Traffic</a>
+    <a><span class="dot"></span>Funnels</a>
+    <a><span class="dot"></span>Retention</a>
+    <a><span class="dot"></span>Events<span class="badge">12</span></a>
+  </nav>
+  <div class="navlbl">Manage</div>
+  <nav class="nav">
+    <a><span class="dot"></span>Sources</a>
+    <a><span class="dot"></span>Alerts<span class="badge">3</span></a>
+    <a><span class="dot"></span>Settings</a>
+  </nav>
+  <div class="upsell"><b style="font-size:12.5px">Retention beta</b><p>Cohort analysis is now available on your plan.</p><span class="btnp">Enable</span></div>
+</aside>
+<div class="main">
+  <div class="top"><h1>Overview</h1><span class="crumb">/ mrwr.dev production</span>
+    <div class="search">Search metrics<span class="kbd">⌘K</span></div><div class="av">M</div></div>
+  <div class="body">
+    <div class="rowtop">
+      <span class="chip">All devices ▾</span><span class="chip">Direct + Referral ▾</span>
+      <div class="seg" style="margin-left:auto"><span>24h</span><span class="on">7d</span><span>30d</span><span>90d</span></div>
+      <span class="chip">Export</span>
+    </div>
+    <div class="grid4">
+      <div class="kpi"><div class="lbl">Sessions</div><div class="val">48,192</div><div class="delta"><span class="up">▲ 12.4%</span> vs prior 7d</div></div>
+      <div class="kpi"><div class="lbl">Unique visitors</div><div class="val">21,740</div><div class="delta"><span class="up">▲ 8.1%</span> vs prior 7d</div></div>
+      <div class="kpi"><div class="lbl">Avg. session</div><div class="val">3m 12s</div><div class="delta"><span class="down">▼ 4.0%</span> vs prior 7d</div></div>
+      <div class="kpi"><div class="lbl">Bounce rate</div><div class="val">38.6%</div><div class="delta"><span class="up">▲ 1.9pp</span> vs prior 7d</div></div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <div class="ch"><div><h3>Sessions over time</h3><div class="sub">Hourly, last 7 days</div></div>
+          <div class="leg"><span><i style="background:#3987e5"></i>This week</span><span style="color:#6d7688"><i style="background:#39414f"></i>Prior week</span></div></div>
+        <svg width="676" height="190" viewBox="0 0 810 228" style="margin-top:8px">
+          <g stroke="#1b212b" stroke-width="1">
+            <line x1="34" y1="16" x2="806" y2="16"/><line x1="34" y1="64" x2="806" y2="64"/>
+            <line x1="34" y1="112" x2="806" y2="112"/><line x1="34" y1="160" x2="806" y2="160"/><line x1="34" y1="200" x2="806" y2="200"/></g>
+          <g fill="#6d7688" font-size="10.5" font-family="inherit">
+            <text x="0" y="20">12k</text><text x="0" y="68">9k</text><text x="0" y="116">6k</text><text x="0" y="164">3k</text><text x="0" y="204">0</text></g>
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3987e5" stop-opacity=".34"/><stop offset="1" stop-color="#3987e5" stop-opacity="0"/></linearGradient></defs>
+          <path d="M34 168 L144 150 L254 158 L364 120 L474 132 L584 74 L694 92 L806 52" fill="none" stroke="#39414f" stroke-width="2" stroke-dasharray="4 4"/>
+          <path d="M34 178 L144 156 L254 140 L364 148 L474 104 L584 112 L694 60 L806 74 L806 200 L34 200 Z" fill="url(#g1)"/>
+          <path d="M34 178 L144 156 L254 140 L364 148 L474 104 L584 112 L694 60 L806 74" fill="none" stroke="#3987e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="694" cy="60" r="4.5" fill="#3987e5" stroke="#151a22" stroke-width="2"/>
+          <g fill="#6d7688" font-size="10.5" font-family="inherit" text-anchor="middle">
+            <text x="34" y="220">Mon</text><text x="144" y="220">Tue</text><text x="254" y="220">Wed</text><text x="364" y="220">Thu</text>
+            <text x="474" y="220">Fri</text><text x="584" y="220">Sat</text><text x="694" y="220">Sun</text></g>
+          <g><rect x="620" y="14" width="150" height="52" rx="7" fill="#1c2431" stroke="#2c364a"/>
+            <text x="632" y="32" fill="#e6e9ef" font-size="11.5" font-family="inherit">Sun 14:00</text>
+            <text x="632" y="50" fill="#9aa3b4" font-size="11" font-family="inherit">Sessions</text>
+            <text x="758" y="50" fill="#fff" font-size="11.5" font-weight="600" text-anchor="end" font-family="inherit">10,412</text></g>
+        </svg>
+      </div>
+      <div class="card">
+        <div class="ch"><div><h3>Traffic by source</h3><div class="sub">Share of sessions</div></div></div>
+        <svg width="400" height="207" viewBox="0 0 440 228" style="margin-top:8px">
+          <g font-family="inherit" font-size="11.5" fill="#a8b0c0">
+          <text x="0" y="30">Direct</text><rect x="92" y="19" width="250" height="15" rx="4" fill="#1e2530"/><rect x="92" y="19" width="212" height="15" rx="4" fill="#3987e5"/><text x="356" y="30" fill="#e6e9ef">42%</text>
+          <text x="0" y="66">Search</text><rect x="92" y="55" width="250" height="15" rx="4" fill="#1e2530"/><rect x="92" y="55" width="141" height="15" rx="4" fill="#d95926"/><text x="356" y="66" fill="#e6e9ef">28%</text>
+          <text x="0" y="102">Referral</text><rect x="92" y="91" width="250" height="15" rx="4" fill="#1e2530"/><rect x="92" y="91" width="86" height="15" rx="4" fill="#199e70"/><text x="356" y="102" fill="#e6e9ef">17%</text>
+          <text x="0" y="138">Social</text><rect x="92" y="127" width="250" height="15" rx="4" fill="#1e2530"/><rect x="92" y="127" width="45" height="15" rx="4" fill="#c98500"/><text x="356" y="138" fill="#e6e9ef">9%</text>
+          <text x="0" y="174">Email</text><rect x="92" y="163" width="250" height="15" rx="4" fill="#1e2530"/><rect x="92" y="163" width="20" height="15" rx="4" fill="#d55181"/><text x="356" y="174" fill="#e6e9ef">4%</text>
+          </g>
+          <line x1="0" y1="196" x2="400" y2="196" stroke="#1e2530"/>
+          <text x="0" y="216" font-family="inherit" font-size="11.5" fill="#6d7688">Search share up 6pp since the sitemap fix</text>
+        </svg>
+      </div>
+    </div>
+    <div class="card" style="padding-bottom:6px">
+      <div class="ch"><div><h3>Top pages</h3></div><div class="leg" style="color:#6d7688">Last 7 days · 128 pages</div></div>
+      <table style="margin-top:10px">
+        <tr><th>Path</th><th>Sessions</th><th>Avg. time</th><th>Conv.</th><th>Trend</th><th>Status</th></tr>
+        <tr><td>/</td><td>18,204</td><td>2m 41s</td><td>6.2%</td><td><span class="bar"><i style="width:92%"></i></span></td><td><span class="pill">Healthy</span></td></tr>
+        <tr><td>/projects/strudel</td><td>7,918</td><td>5m 03s</td><td>9.8%</td><td><span class="bar"><i style="width:64%"></i></span></td><td><span class="pill">Healthy</span></td></tr>
+        <tr><td>/changelog</td><td>4,602</td><td>1m 55s</td><td>3.1%</td><td><span class="bar"><i style="width:41%"></i></span></td><td><span class="pill w">Watch</span></td></tr>
+        <tr><td>/about</td><td>3,371</td><td>1m 12s</td><td>2.4%</td><td><span class="bar"><i style="width:29%"></i></span></td><td><span class="pill">Healthy</span></td></tr>
+        <tr><td>/projects/oscilloscope</td><td>2,845</td><td>4m 18s</td><td>7.6%</td><td><span class="bar"><i style="width:24%"></i></span></td><td><span class="pill">Healthy</span></td></tr>
+        <tr><td>/issues</td><td>1,930</td><td>2m 07s</td><td>1.8%</td><td><span class="bar"><i style="width:16%"></i></span></td><td><span class="pill w">Watch</span></td></tr>
+        <tr><td>/projects/paint</td><td>1,412</td><td>3m 44s</td><td>5.9%</td><td><span class="bar"><i style="width:11%"></i></span></td><td><span class="pill">Healthy</span></td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+</body></html>
