@@ -32,7 +32,8 @@
         "Keys keeps a running message list you can Play back through the synth, Save as a .mid file, or export as CSV or JSON",
         "Open a .mid file in Keys to load its notes into the message list, then hit Play to hear it",
         "Keys now opens on any browser — no MIDI hardware or Web MIDI support needed, since the on-screen keyboard and .mid playback work on their own",
-        "Tidied Keys for phones — narrower window, a two-octave keyboard you can now slide across with one finger, and octave up/down buttons on the full keyboard when it's maximised on a small screen"
+        "Tidied Keys for phones — narrower window, a two-octave keyboard you can now slide across with one finger, and octave up/down buttons on the full keyboard when it's maximised on a small screen",
+        "Reworked Collections: the picture tiles now scatter across the whole desktop, you can drag them anywhere and they stay put, and picking one no longer reshuffles the others — the window just grew a little so the selected picture sits centred"
       ]
     },
     {
