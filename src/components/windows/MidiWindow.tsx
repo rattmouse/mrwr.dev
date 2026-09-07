@@ -81,6 +81,18 @@ const DECAY_MS = 600;
 // System real-time messages that would otherwise flood the log.
 const SKIP_STATUS = new Set<number>([0xf8, 0xfe]);
 
+// Byte columns the Bits panel shows. The newest byte is leftmost; columns not
+// yet reached by a message stay blank.
+const SPOTLIGHT_BYTES = 16;
+// Secret unlock: play these pitch classes in order (C, A, F, E — any octave) to
+// swap the scrolling message log for the Bits view, and again to swap back.
+const SPOTLIGHT_CODE = [0, 9, 5, 4];
+// Bits-panel accent per message type: note-on green, note-off red, everything
+// else the default navy.
+const SPOTLIGHT_ON = "#1d9e75";
+const SPOTLIGHT_OFF = "#a80000";
+const SPOTLIGHT_STATUS = "#000080";
+
 const SYSTEM_NAMES: Record<number, string> = {
   0xf0: "SysEx",
   0xf1: "MTC Quarter Frame",
@@ -233,6 +245,102 @@ function MeterBar({
       <span style={{ flex: "0 0 26px", textAlign: "right" }}>
         {hasValue ? Math.round(value) : "—"}
       </span>
+    </div>
+  );
+}
+
+// Draws a rolling window of the most recent MIDI bytes, newest on the left, each
+// as a column of 8 bits with the MSB on top. Bit 7 is pulled out tall and
+// tinted: set means a status byte, clear means data. A bar sits before every
+// byte that starts a new message — the only cue for a running-status message,
+// which carries no status byte of its own. A note-on message is tinted green, a
+// note-off red. Columns no message has reached yet stay blank.
+function BitSpotlight({
+  cells,
+  empty,
+  truncated,
+}: {
+  cells: { value: number; boundary: boolean; blank: boolean; accent: "on" | "off" | null }[];
+  empty: boolean;
+  truncated: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", gap: 2, alignItems: "stretch" }}>
+        {cells.map((cell, i) => {
+          const status = !cell.blank && (cell.value & 0x80) !== 0;
+          const mark =
+            cell.accent === "on"
+              ? SPOTLIGHT_ON
+              : cell.accent === "off"
+                ? SPOTLIGHT_OFF
+                : SPOTLIGHT_STATUS;
+          const tint =
+            cell.accent === "on"
+              ? "rgba(29, 158, 117, 0.14)"
+              : cell.accent === "off"
+                ? "rgba(168, 0, 0, 0.12)"
+                : undefined;
+          return (
+            <React.Fragment key={i}>
+              {cell.boundary && i > 0 && (
+                <div style={{ flex: "0 0 2px", alignSelf: "stretch", background: "#404040" }} />
+              )}
+              <div
+                style={{
+                  flex: "1 1 0",
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                  opacity: cell.blank ? 0.5 : 1,
+                  background: tint,
+                  borderRadius: 2,
+                }}
+              >
+                <div style={{ textAlign: "center", color: "#404040", minHeight: 13 }}>
+                  {cell.blank ? "" : cell.value.toString(16).toUpperCase().padStart(2, "0")}
+                </div>
+                {[7, 6, 5, 4, 3, 2, 1, 0].map((bit) => {
+                  const on = !cell.blank && ((cell.value >> bit) & 1) === 1;
+                  const top = bit === 7;
+                  return (
+                    <div
+                      key={bit}
+                      style={{
+                        height: top ? 14 : 8,
+                        marginBottom: top ? 2 : 0,
+                        border: "1px solid #808080",
+                        background: on ? (top ? mark : "#404040") : "#ffffff",
+                      }}
+                    />
+                  );
+                })}
+                <div
+                  style={{
+                    textAlign: "center",
+                    fontWeight: "bold",
+                    minHeight: 13,
+                    color: status ? mark : "#9a9a9a",
+                  }}
+                >
+                  {cell.blank ? "" : status ? "S" : "D"}
+                </div>
+                <div style={{ textAlign: "center", fontSize: 9, color: "#404040", minHeight: 11 }}>
+                  {cell.blank ? "" : cell.value}
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        })}
+        {truncated && (
+          <div style={{ alignSelf: "center", color: "#9a9a9a", fontSize: 9 }}>…</div>
+        )}
+      </div>
+      <div style={{ fontSize: 9, color: "#404040" }}>
+        {empty ? "waiting for bytes" : "recent bytes"} · newest on the left · top cell = bit 7 (1 =
+        status, 0 = data) · green note on / red note off · bar = message start
+      </div>
     </div>
   );
 }
@@ -395,6 +503,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [metersOpen, setMetersOpen] = useState(false);
+  // Swapped for the scrolling message log once the secret note code is played.
+  const [bitsView, setBitsView] = useState(false);
   const [waveform, setWaveformState] = useState<Waveform>("square");
   const [playing, setPlaying] = useState(false);
   const [playPos, setPlayPos] = useState(0);
@@ -438,6 +548,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const octaveShiftRef = useRef(0);
   const pressedCodesRef = useRef<Map<string, number>>(new Map());
   const keysWrapRef = useRef<HTMLDivElement | null>(null);
+  // Last few note-on pitch classes, for matching the secret Bits-view code.
+  const codeBufRef = useRef<number[]>([]);
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -578,6 +690,20 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         const next = [entry, ...prev];
         return next.length > MAX_ENTRIES ? next.slice(0, MAX_ENTRIES) : next;
       });
+
+      // Secret code: C A F E note-ons in a row toggle the Bits view.
+      if (parsed.type === "Note On" && parsed.note != null) {
+        const buf = codeBufRef.current;
+        buf.push(parsed.note % 12);
+        if (buf.length > SPOTLIGHT_CODE.length) buf.shift();
+        if (
+          buf.length === SPOTLIGHT_CODE.length &&
+          buf.every((pc, i) => pc === SPOTLIGHT_CODE[i])
+        ) {
+          setBitsView((v) => !v);
+          codeBufRef.current = [];
+        }
+      }
     },
     [applyMessage],
   );
@@ -966,6 +1092,29 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     [ensureSynth, loadSmf, play, stopPlayback],
   );
 
+  // The Bits panel window: the most recent raw bytes with the newest on the
+  // left, each tagged with whether it starts a message. entries is already
+  // newest-first, so walk it forwards and append each message's bytes (in wire
+  // order) until the window is full, then pad the right with blanks.
+  const spotlight = useMemo(() => {
+    type Cell = { value: number; boundary: boolean; blank: boolean; accent: "on" | "off" | null };
+    const cells: Cell[] = [];
+    let total = 0;
+    for (const entry of entries) {
+      total += entry.raw.length;
+      const accent: "on" | "off" | null =
+        entry.type === "Note On" ? "on" : entry.type === "Note Off" ? "off" : null;
+      for (let i = 0; i < entry.raw.length && cells.length < SPOTLIGHT_BYTES; i++) {
+        cells.push({ value: entry.raw[i], boundary: i === 0, blank: false, accent });
+      }
+    }
+    const truncated = total > SPOTLIGHT_BYTES;
+    while (cells.length < SPOTLIGHT_BYTES) {
+      cells.push({ value: 0, boundary: false, blank: true, accent: null });
+    }
+    return { cells, empty: entries.length === 0, truncated };
+  }, [entries]);
+
   const octaveLabel = octaveShift === 0 ? "" : ` · keys ${octaveShift > 0 ? "+" : ""}${octaveShift} oct`;
 
   return (
@@ -1099,18 +1248,42 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         </div>
       </div>
 
-      <ScrollView style={{ flex: "1 1 auto", minHeight: 0, width: "100%" }}>
-        {entries.length === 0 ? (
-          <div style={{ opacity: 0.6 }}>Waiting for messages…</div>
-        ) : (
-          entries.map((entry) => (
-            <div key={entry.id} style={{ whiteSpace: "pre" }}>
-              {entry.clock}  {entry.source.slice(0, 8).padEnd(8)}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
-              <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>
-            </div>
-          ))
-        )}
-      </ScrollView>
+      {(!bitsView || maximized) && (
+        <ScrollView style={{ flex: "1 1 auto", minHeight: 0, width: "100%" }}>
+          {entries.length === 0 ? (
+            <div style={{ opacity: 0.6 }}>Waiting for messages…</div>
+          ) : (
+            entries.map((entry) => (
+              <div key={entry.id} style={{ whiteSpace: "pre" }}>
+                {entry.clock}  {entry.source.slice(0, 8).padEnd(8)}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
+                <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>
+              </div>
+            ))
+          )}
+        </ScrollView>
+      )}
+
+      {/* Bits view: swapped in for the log in a normal window; a strip below it
+          when maximised, where there's room for everything. */}
+      {bitsView && (
+        <div
+          style={{
+            flex: maximized ? "0 0 auto" : "1 1 auto",
+            minHeight: 0,
+            minWidth: 0,
+            overflow: "auto",
+            padding: "4px 4px 3px",
+            border: "2px solid",
+            borderColor: "#808080 #ffffff #ffffff #808080",
+          }}
+        >
+          <BitSpotlight
+            cells={spotlight.cells}
+            empty={spotlight.empty}
+            truncated={spotlight.truncated}
+          />
+        </div>
+      )}
 
       <div style={{ flex: "0 0 auto", opacity: 0.6 }}>
         {entries.length} message{entries.length === 1 ? "" : "s"}
