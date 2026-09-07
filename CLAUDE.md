@@ -16,6 +16,14 @@ Orientation notes for working in this repo.
   before every build. It pulls the prod search-log archive over ssh; a failure
   is non-fatal (ships an empty history). `server.js` flags malicious queries via
   `search-guard.js` (repo root); `deploy.sh` ships that file with `server.js`.
+- `search-sessions.js` (repo root, also shipped by `deploy.sh`) holds the
+  session-grouping heuristics shared by `refresh-search-history.mjs` and
+  `server.js`. At runtime `server.js` buffers keystroke records per browser
+  session and, once one goes quiet, POSTs a summary to whatever
+  `SEARCH_NOTIFY_KIND` (`telegram` | `ntfy` | `webhook`) points at. Config +
+  secrets live in prod's gitignored `shared/notify.env` (`EnvironmentFile` in
+  the systemd unit); unset ⇒ notifier is a no-op. In-memory only — a restart
+  drops sessions mid-flight, but the NDJSON archive still has every record.
 
 ## Every PR updates the changelog
 

@@ -11,6 +11,10 @@ Environment=NODE_ENV=production
 # Durable search-log archive, kept outside __APP_DIR__/current so it survives
 # release swaps and pruning (issue #55).
 Environment=SEARCH_LOG_FILE=__APP_DIR__/shared/search-log.ndjson
+# Optional search-session notifier config (SEARCH_NOTIFY_KIND=telegram|ntfy|
+# webhook plus its secrets). Lives in shared/ so it survives release swaps and
+# is never committed; the leading "-" makes it optional.
+EnvironmentFile=-__APP_DIR__/shared/notify.env
 User=root
 StandardOutput=journal
 StandardError=journal

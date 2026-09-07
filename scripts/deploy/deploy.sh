@@ -101,8 +101,10 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -r "$REPO_ROOT/out/." "$STAGE_DIR/"
 cp "$REPO_ROOT/server.js" "$STAGE_DIR/server.js"
-# server.js require()s this at startup to flag hostile search queries.
+# server.js require()s these at startup: search-guard.js flags hostile queries,
+# search-sessions.js groups live keystrokes into sessions for the notifier.
 cp "$REPO_ROOT/search-guard.js" "$STAGE_DIR/search-guard.js"
+cp "$REPO_ROOT/search-sessions.js" "$STAGE_DIR/search-sessions.js"
 
 # The only third-party module server.js loads is "express" (plus Node
 # builtins and the zero-dependency ./search-guard.js copied just above) —
