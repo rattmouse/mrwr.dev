@@ -9,7 +9,7 @@
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [29, 53, 55, 66, 67, 70, 81],
+      "issues": [29, 53, 55, 66, 67, 70, 81, 85],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
         "Ship a minimal production package.json and track the lockfile",
@@ -25,7 +25,8 @@
         "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens",
         "Stopped the Issues window from wrapping long lines — they run on and scroll sideways now, like Notepad with word wrap off",
         "Added Paint: a blank white sheet you scribble on with a pencil — pick a colour, change the brush size, and Clear to start over",
-        "Tidied the Start menu's Programs list into App, Tools, and Toys groups, with Welcome left on its own"
+        "Tidied the Start menu's Programs list into App, Tools, and Toys groups, with Welcome left on its own",
+        "Kept the Start menu's submenus on screen in narrow browser windows — one that would run off the right edge now opens to the left instead"
       ]
     },
     {
