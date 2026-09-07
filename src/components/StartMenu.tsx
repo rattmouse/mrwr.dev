@@ -216,16 +216,8 @@ export default function StartMenu({
   searchHistory?: SearchHistorySession[];
 }) {
   const [open, setOpen] = useState(false);
-  const [midiUnavailable, setMidiUnavailable] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const { shutdown } = usePower();
-
-  // Keys needs Web MIDI, which no iOS browser (and Firefox mobile) provides.
-  useEffect(() => {
-    setMidiUnavailable(
-      typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function",
-    );
-  }, []);
 
   const pick = (id: WindowId) => {
     openWindow(id);
@@ -280,7 +272,7 @@ export default function StartMenu({
             submenu: [
               { label: "Collections", icon: "../w98_collections_cards.ico", size: "sm", onClick: () => pick("collections") },
               { label: "Sounds", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
-              { label: "Keys", icon: "../w98_music.ico", size: "sm", onClick: () => pick("midi"), disabled: midiUnavailable },
+              { label: "Keys", icon: "../w98_music.ico", size: "sm", onClick: () => pick("midi") },
             ],
           },
         ],
