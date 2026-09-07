@@ -26,6 +26,7 @@ export type MidiWindowHandle = {
 };
 
 type MidiWindowProps = {
+  maximized?: boolean;
   onMetersOpenChange?: (open: boolean) => void;
   onKeysOpenChange?: (open: boolean) => void;
   onWaveformChange?: (waveform: Waveform) => void;
@@ -98,8 +99,11 @@ const SYSTEM_NAMES: Record<number, string> = {
 // black key to their immediate right.
 const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
 const BLACK_AFTER = new Set([0, 2, 5, 7, 9]);
-const KEYBOARD_LOW = 48; // C3
-const KEYBOARD_HIGH = 77; // F5
+// Compact range for the normal window; full 88-key piano when maximised.
+const RANGE_NORMAL = { low: 48, high: 77 }; // C3–F5
+const RANGE_FULL = { low: 21, high: 108 }; // A0–C8
+const KEY_HEIGHT_NORMAL = 84;
+const KEY_HEIGHT_FULL = 132;
 
 // Computer-keyboard mapping: physical key code -> semitones above the base note.
 const KEY_SEMITONES: Record<string, number> = {
@@ -232,9 +236,9 @@ function MeterBar({
 
 type KeyCell = { note: number; leftPct: number; widthPct: number };
 
-function buildKeyboard(): { whites: KeyCell[]; blacks: KeyCell[] } {
+function buildKeyboard(low: number, high: number): { whites: KeyCell[]; blacks: KeyCell[] } {
   const whiteNotes: number[] = [];
-  for (let n = KEYBOARD_LOW; n <= KEYBOARD_HIGH; n++) {
+  for (let n = low; n <= high; n++) {
     if (WHITE_PCS.has(n % 12)) whiteNotes.push(n);
   }
   const count = whiteNotes.length;
@@ -247,7 +251,7 @@ function buildKeyboard(): { whites: KeyCell[]; blacks: KeyCell[] } {
   const blackWidth = whiteWidth * 0.62;
   const blacks: KeyCell[] = [];
   whiteNotes.forEach((note, i) => {
-    if (BLACK_AFTER.has(note % 12) && note + 1 <= KEYBOARD_HIGH) {
+    if (BLACK_AFTER.has(note % 12) && note + 1 <= high) {
       blacks.push({
         note: note + 1,
         leftPct: (i + 1) * whiteWidth - blackWidth / 2,
@@ -258,19 +262,24 @@ function buildKeyboard(): { whites: KeyCell[]; blacks: KeyCell[] } {
   return { whites, blacks };
 }
 
-const KEYBOARD_LAYOUT = buildKeyboard();
+const KEYBOARD_NORMAL = buildKeyboard(RANGE_NORMAL.low, RANGE_NORMAL.high);
+const KEYBOARD_FULL = buildKeyboard(RANGE_FULL.low, RANGE_FULL.high);
 
 function PlayableKeyboard({
   held,
   disabled,
+  full,
   onNoteOn,
   onNoteOff,
 }: {
   held: number[];
   disabled: boolean;
+  full: boolean;
   onNoteOn: (note: number) => void;
   onNoteOff: (note: number) => void;
 }) {
+  const layout = full ? KEYBOARD_FULL : KEYBOARD_NORMAL;
+  const height = full ? KEY_HEIGHT_FULL : KEY_HEIGHT_NORMAL;
   const activeRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -313,14 +322,14 @@ function PlayableKeyboard({
       style={{
         position: "relative",
         width: "100%",
-        height: 84,
+        height,
         userSelect: "none",
         touchAction: "none",
         opacity: disabled ? 0.4 : 1,
         pointerEvents: disabled ? "none" : "auto",
       }}
     >
-      {KEYBOARD_LAYOUT.whites.map(({ note, leftPct, widthPct }) => (
+      {layout.whites.map(({ note, leftPct, widthPct }) => (
         <div
           key={note}
           {...cellProps(note)}
@@ -336,7 +345,7 @@ function PlayableKeyboard({
           }}
         />
       ))}
-      {KEYBOARD_LAYOUT.blacks.map(({ note, leftPct, widthPct }) => (
+      {layout.blacks.map(({ note, leftPct, widthPct }) => (
         <div
           key={note}
           {...cellProps(note)}
@@ -359,6 +368,7 @@ function PlayableKeyboard({
 
 const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWindow(
   {
+    maximized = false,
     onMetersOpenChange,
     onKeysOpenChange,
     onWaveformChange,
@@ -984,6 +994,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           <PlayableKeyboard
             held={held}
             disabled={playing}
+            full={maximized}
             onNoteOn={keyboardNoteOn}
             onNoteOff={keyboardNoteOff}
           />

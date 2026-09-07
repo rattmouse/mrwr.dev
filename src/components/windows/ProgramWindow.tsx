@@ -110,7 +110,7 @@ export default function ProgramWindow({
   const [midiSaveAsTop, setMidiSaveAsTop] = useState(0);
   const [midiEditOpen, setMidiEditOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
-  const [midiKeysOpen, setMidiKeysOpen] = useState(false);
+  const [midiKeysOpen, setMidiKeysOpen] = useState(true);
   const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
   const [midiPlaying, setMidiPlaying] = useState(false);
   const [midiHasMessages, setMidiHasMessages] = useState(false);
@@ -582,11 +582,14 @@ export default function ProgramWindow({
                 </MenuListItem>
                 <MenuListItem
                   size="sm"
+                  disabled={!midiHasMessages}
                   onMouseEnter={(event) => {
+                    if (!midiHasMessages) return;
                     setMidiSaveAsTop(getSubmenuTopForRow(event.currentTarget));
                     setMidiSaveAsOpen(true);
                   }}
                   onClick={(event) => {
+                    if (!midiHasMessages) return;
                     setMidiSaveAsTop(getSubmenuTopForRow(event.currentTarget));
                     setMidiSaveAsOpen((prev) => !prev);
                   }}
@@ -897,6 +900,7 @@ export default function ProgramWindow({
       {id === "midi" && (
         <MidiWindow
           ref={midiRef}
+          maximized={layout === "maximized"}
           onMetersOpenChange={setMidiMetersOpen}
           onKeysOpenChange={setMidiKeysOpen}
           onWaveformChange={setMidiWaveform}
