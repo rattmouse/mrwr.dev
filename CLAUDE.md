@@ -21,9 +21,12 @@ Orientation notes for working in this repo.
   `server.js`. At runtime `server.js` buffers keystroke records per browser
   session and, once one goes quiet, POSTs a summary to whatever
   `SEARCH_NOTIFY_KIND` (`telegram` | `ntfy` | `webhook`) points at. Config +
-  secrets live in prod's gitignored `shared/notify.env` (`EnvironmentFile` in
-  the systemd unit); unset ⇒ notifier is a no-op. In-memory only — a restart
-  drops sessions mid-flight, but the NDJSON archive still has every record.
+  secrets live in prod's `/etc/mrwr.dev/notify.env` (`EnvironmentFile` in the
+  systemd unit) — under `/etc`, not `$PROD_BASE/shared/`, because a file in
+  `/root` is SELinux-labelled `admin_home_t` which PID 1 can't read; `deploy.sh`
+  makes the dir, you drop the (uncommitted) file in by hand. Unset ⇒ notifier
+  is a no-op. In-memory only — a restart drops sessions mid-flight, but the
+  NDJSON archive still has every record.
 
 ## Every PR updates the changelog
 
