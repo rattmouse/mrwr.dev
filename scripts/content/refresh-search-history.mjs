@@ -15,6 +15,8 @@
 // Session grouping mirrors scripts/content/search_to_issue.py exactly (same
 // idle gap, same "typing reset" heuristic, same minimum headline length) so the
 // dropdown and the issue-triage tool carve the same log into the same sessions.
+// The JS half of those rules lives in ../../search-sessions.js, shared with
+// server.js's live notifier.
 //
 // Never fatal: any failure prints a warning and writes `[]` so a build still
 // succeeds (with an empty history) rather than breaking.
@@ -30,12 +32,14 @@ const REPO_ROOT = resolve(SCRIPT_DIR, "../..");
 const OUT_PATH = resolve(REPO_ROOT, "src/data/search-history.json");
 
 const { detectMaliciousSearch, defang } = require(resolve(REPO_ROOT, "search-guard.js"));
+const { DEFAULT_IDLE_GAP_S, MIN_HEADLINE_LEN, isTypingReset, headlineOf } = require(
+  resolve(REPO_ROOT, "search-sessions.js")
+);
 
 // --- session-grouping knobs (keep in lockstep with search_to_issue.py) -------
-const DEFAULT_IDLE_GAP_S = 180; // silence this long ends a session
-const RESET_MIN_GAP_S = 4; // a short, low-overlap entry this long after the
-//                            previous one starts a fresh session
-const MIN_HEADLINE_LEN = 3; // sessions with a headline this short are noise
+// DEFAULT_IDLE_GAP_S / MIN_HEADLINE_LEN and the isTypingReset / headlineOf
+// heuristics come from search-sessions.js so the live notifier and this
+// build-time pass carve the log identically.
 const DEFAULT_MAX_SESSIONS = 250; // newest N kept in the shipped file
 
 function warn(msg) {
@@ -116,31 +120,6 @@ function loadRecords(path, since) {
 }
 
 // --- grouping (ported from search_to_issue.py) -----------------------------
-function commonPrefixLen(a, b) {
-  const n = Math.min(a.length, b.length);
-  let i = 0;
-  while (i < n && a[i] === b[i]) i += 1;
-  return i;
-}
-
-function isTypingReset(prev, cur) {
-  let gapS = 0;
-  if (Number.isFinite(prev.atMs) && Number.isFinite(cur.atMs)) {
-    gapS = (cur.atMs - prev.atMs) / 1000;
-  }
-  return (
-    gapS > RESET_MIN_GAP_S &&
-    commonPrefixLen(prev.query, cur.query) <= 2 &&
-    cur.query.length < Math.max(4, prev.query.length * 0.5)
-  );
-}
-
-function headlineOf(records) {
-  let longest = "";
-  for (const rec of records) if (rec.query.length > longest.length) longest = rec.query;
-  return longest.trim();
-}
-
 function group(records, idleGapS) {
   const sessions = [];
   let cur = [];
