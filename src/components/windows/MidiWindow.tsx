@@ -5,10 +5,11 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import { ScrollView } from "react95";
+import { Button, ScrollView } from "react95";
 import { MidiSynth, type Waveform } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
 
@@ -99,9 +100,13 @@ const SYSTEM_NAMES: Record<number, string> = {
 // black key to their immediate right.
 const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
 const BLACK_AFTER = new Set([0, 2, 5, 7, 9]);
-// Compact range for the normal window; full 88-key piano when maximised.
-const RANGE_NORMAL = { low: 48, high: 77 }; // C3–F5
+// Two octaves in the normal window; the full 88-key piano when maximised — or a
+// scrollable window of it, with octave buttons, when the screen is too narrow.
+const RANGE_NORMAL = { low: 48, high: 72 }; // C3–C5
 const RANGE_FULL = { low: 21, high: 108 }; // A0–C8
+const FULL_WHITE_COUNT = 52;
+// Below this the full keyboard's keys are too small to hit — window it instead.
+const MIN_WHITE_PX = 22;
 const KEY_HEIGHT_NORMAL = 84;
 const KEY_HEIGHT_FULL = 132;
 
@@ -266,20 +271,20 @@ const KEYBOARD_NORMAL = buildKeyboard(RANGE_NORMAL.low, RANGE_NORMAL.high);
 const KEYBOARD_FULL = buildKeyboard(RANGE_FULL.low, RANGE_FULL.high);
 
 function PlayableKeyboard({
+  layout,
+  height,
   held,
   disabled,
-  full,
   onNoteOn,
   onNoteOff,
 }: {
+  layout: { whites: KeyCell[]; blacks: KeyCell[] };
+  height: number;
   held: number[];
   disabled: boolean;
-  full: boolean;
   onNoteOn: (note: number) => void;
   onNoteOff: (note: number) => void;
 }) {
-  const layout = full ? KEYBOARD_FULL : KEYBOARD_NORMAL;
-  const height = full ? KEY_HEIGHT_FULL : KEY_HEIGHT_NORMAL;
   const activeRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -304,21 +309,33 @@ function PlayableKeyboard({
     onNoteOn(note);
   };
 
-  const cellProps = (note: number) =>
-    disabled
-      ? {}
-      : {
-          onPointerDown: (e: React.PointerEvent) => {
-            e.preventDefault();
-            press(note);
-          },
-          onPointerEnter: (e: React.PointerEvent) => {
-            if (e.buttons === 1) press(note);
-          },
-        };
+  // Hit-test by point rather than per-key pointerenter: touch drags keep their
+  // pointer captured on the first key, so pointerenter never fires on the keys
+  // the finger slides over. elementFromPoint is geometric and works for both.
+  const noteAt = (x: number, y: number): number | null => {
+    const el = document.elementFromPoint(x, y);
+    const raw = el?.getAttribute?.("data-note");
+    return raw ? Number(raw) : null;
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (disabled) return;
+    e.preventDefault();
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+    const note = noteAt(e.clientX, e.clientY);
+    if (note != null) press(note);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (disabled || (e.buttons !== 1 && activeRef.current == null)) return;
+    const note = noteAt(e.clientX, e.clientY);
+    if (note != null) press(note);
+  };
 
   return (
     <div
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
       style={{
         position: "relative",
         width: "100%",
@@ -332,7 +349,7 @@ function PlayableKeyboard({
       {layout.whites.map(({ note, leftPct, widthPct }) => (
         <div
           key={note}
-          {...cellProps(note)}
+          data-note={note}
           style={{
             position: "absolute",
             left: `${leftPct}%`,
@@ -348,7 +365,7 @@ function PlayableKeyboard({
       {layout.blacks.map(({ note, leftPct, widthPct }) => (
         <div
           key={note}
-          {...cellProps(note)}
+          data-note={note}
           style={{
             position: "absolute",
             left: `${leftPct}%`,
@@ -388,6 +405,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [playTotal, setPlayTotal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [octaveShift, setOctaveShift] = useState(0);
+  // Maximised-window keyboard: measured panel width + the lowest note of the
+  // windowed view (only used when the full 88 keys don't fit).
+  const [keysWidth, setKeysWidth] = useState(0);
+  const [rangeLow, setRangeLow] = useState(48); // C3
   const [meters, setMeters] = useState<Meters>(() => ({
     channels: new Array(16).fill(0),
     velocity: 0,
@@ -420,6 +441,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const playIntervalRef = useRef<number | null>(null);
   const octaveShiftRef = useRef(0);
   const pressedCodesRef = useRef<Map<string, number>>(new Map());
+  const keysWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -430,6 +452,64 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   useEffect(() => {
     playingRef.current = playing;
   }, [playing]);
+
+  // Track the keyboard panel's width so the maximised view can decide whether
+  // the full 88 keys fit or it needs to window them.
+  useEffect(() => {
+    const el = keysWrapRef.current;
+    if (!el || !keysOpen) return;
+    const measure = () => setKeysWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [keysOpen, maximized]);
+
+  // Which keys the on-screen keyboard shows, and how tall.
+  const kb = useMemo(() => {
+    if (!maximized) {
+      return {
+        layout: KEYBOARD_NORMAL,
+        height: KEY_HEIGHT_NORMAL,
+        windowed: false,
+        lowNote: RANGE_NORMAL.low,
+        highNote: RANGE_NORMAL.high,
+        octavesVisible: 2,
+      };
+    }
+    const fitsFull = keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX;
+    if (fitsFull) {
+      return {
+        layout: KEYBOARD_FULL,
+        height: KEY_HEIGHT_FULL,
+        windowed: false,
+        lowNote: RANGE_FULL.low,
+        highNote: RANGE_FULL.high,
+        octavesVisible: 7,
+      };
+    }
+    const octavesVisible = Math.max(2, Math.min(7, Math.floor(keysWidth / (7 * MIN_WHITE_PX))));
+    const span = octavesVisible * 12;
+    const low = Math.max(RANGE_FULL.low, Math.min(RANGE_FULL.high - span, rangeLow));
+    return {
+      layout: buildKeyboard(low, low + span),
+      height: KEY_HEIGHT_FULL,
+      windowed: true,
+      lowNote: low,
+      highNote: low + span,
+      octavesVisible,
+    };
+  }, [maximized, keysWidth, rangeLow]);
+
+  const shiftOctave = useCallback(
+    (dir: 1 | -1) => {
+      setRangeLow((l) => {
+        const span = kb.octavesVisible * 12;
+        return Math.max(RANGE_FULL.low, Math.min(RANGE_FULL.high - span, l + dir * 12));
+      });
+    },
+    [kb.octavesVisible],
+  );
 
   const ensureSynth = useCallback(() => {
     if (!synthRef.current) {
@@ -912,9 +992,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     >
       <div style={{ flex: "0 0 auto" }}>
         {status === "checking" && <div>Requesting MIDI access…</div>}
-        {status === "unsupported" && (
-          <div>Web MIDI is not supported in this browser. Try Chrome or Firefox.</div>
-        )}
+        {status === "unsupported" && <div>Web MIDI is not supported in this browser.</div>}
         {status === "needsGesture" && (
           <div>MIDI needs your permission — reopen this window to allow it.</div>
         )}
@@ -984,6 +1062,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
       {keysOpen && (
         <div
+          ref={keysWrapRef}
           style={{
             flex: "0 0 auto",
             padding: "4px 4px 3px",
@@ -991,10 +1070,41 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             borderColor: "#808080 #ffffff #ffffff #808080",
           }}
         >
+          {kb.windowed && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 3,
+                fontSize: 10,
+                color: "#404040",
+              }}
+            >
+              <Button
+                size="sm"
+                disabled={kb.lowNote <= RANGE_FULL.low}
+                onClick={() => shiftOctave(-1)}
+              >
+                ◀ oct
+              </Button>
+              <span style={{ flex: "1 1 auto", textAlign: "center" }}>
+                {noteName(kb.lowNote)} – {noteName(kb.highNote)}
+              </span>
+              <Button
+                size="sm"
+                disabled={kb.highNote >= RANGE_FULL.high}
+                onClick={() => shiftOctave(1)}
+              >
+                oct ▶
+              </Button>
+            </div>
+          )}
           <PlayableKeyboard
+            layout={kb.layout}
+            height={kb.height}
             held={held}
             disabled={playing}
-            full={maximized}
             onNoteOn={keyboardNoteOn}
             onNoteOff={keyboardNoteOff}
           />

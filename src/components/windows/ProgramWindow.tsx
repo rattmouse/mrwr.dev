@@ -154,7 +154,7 @@ export default function ProgramWindow({
             : id === "paint" ? 320
               : 300;
   const normalWidth =
-    id === "changes" ? 320 : id === "paint" ? 360 : id === "midi" ? 448 : undefined;
+    id === "changes" ? 320 : id === "paint" ? 360 : id === "midi" ? 360 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;

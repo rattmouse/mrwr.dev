@@ -166,6 +166,7 @@ export default function DesktopWindow({
             padding: "1px 1px",
             marginBottom: 0,
             gap: 2,
+            flexWrap: "wrap",
             position: "relative",
             zIndex: 2,
             transform: `translate(${toolbarJitterX}px, ${toolbarJitterY}px)`,
