@@ -30,7 +30,8 @@
         "Kept the Start menu's submenus on screen in narrow browser windows — one that would run off the right edge now opens to the left instead",
         "Keys makes sound now — a built-in synth plays incoming notes and an on-screen keyboard you click, tap, or play with your computer keys, with a square/saw/triangle/sine waveform picker",
         "Keys keeps a running message list you can Play back through the synth, Save as a .mid file, or export as CSV or JSON",
-        "Open a .mid file in Keys to load its notes into the message list, then hit Play to hear it"
+        "Open a .mid file in Keys to load its notes into the message list, then hit Play to hear it",
+        "Keys now opens on any browser — no MIDI hardware or Web MIDI support needed, since the on-screen keyboard and .mid playback work on their own"
       ]
     },
     {
