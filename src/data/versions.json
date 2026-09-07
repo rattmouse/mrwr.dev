@@ -24,7 +24,8 @@
         "Switched the Collections category picker from tabs to toggle buttons that match the Sounds and Keys toolbars",
         "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens",
         "Stopped the Issues window from wrapping long lines — they run on and scroll sideways now, like Notepad with word wrap off",
-        "Added Paint: a blank white sheet you scribble on with a pencil — pick a colour, change the brush size, and Clear to start over"
+        "Added Paint: a blank white sheet you scribble on with a pencil — pick a colour, change the brush size, and Clear to start over",
+        "Tidied the Start menu's Programs list into App, Tools, and Toys groups, with Welcome left on its own"
       ]
     },
     {
