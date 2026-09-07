@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import MockupList from "@/components/projects/MockupList";
@@ -46,6 +47,13 @@ const PAINTINGS_PICKLIST = "/collections/paintings.json";
 const SONGS_PICKLIST = "/collections/songs.json";
 const MAX_PICKED = 72;
 const FEED_PAGES = 4;
+// Pointer travel (px) before a press on a tile counts as a drag rather than a tap.
+const DRAG_THRESHOLD = 4;
+// Height of the desktop taskbar; desktop-scattered tiles stay below it.
+const TASKBAR_H = 50;
+// The desktop tile portal floats above windows (Z.WINDOW) but below the taskbar
+// and Start menu.
+const DESKTOP_TILE_Z = 500;
 
 function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
   const next = [...input];
@@ -191,50 +199,39 @@ function extractBlueskyPosts(payload: unknown): BlueskyPost[] {
   return posts;
 }
 
-function buildScatterPositions(count: number, width: number, height: number, iconSize: number): AlbumTilePosition[] {
+type AvoidRect = { x: number; y: number; w: number; h: number };
+
+function buildScatterPositions(
+  count: number,
+  width: number,
+  height: number,
+  iconSize: number,
+  opts?: { avoid?: AvoidRect[]; insetTop?: number }
+): AlbumTilePosition[] {
+  const avoid = opts?.avoid ?? [];
   const minX = 6;
-  const minY = 6;
+  const minY = 6 + (opts?.insetTop ?? 0);
   const maxX = Math.max(minX, width - iconSize - 6);
   const maxY = Math.max(minY, height - iconSize - 6);
   const rand = (min: number, max: number) => min + Math.random() * Math.max(0, max - min);
+  // Keep tiles clear of any avoid rect (the centre frame, or the window itself).
+  const hitsAvoid = (x: number, y: number) =>
+    avoid.some(
+      (r) =>
+        x - 4 < r.x + r.w &&
+        x + iconSize + 4 > r.x &&
+        y - 4 < r.y + r.h &&
+        y + iconSize + 4 > r.y
+    );
   return Array.from({ length: count }, () => {
-    return {
-      x: rand(minX, maxX),
-      y: rand(minY, maxY),
-      rot: rand(-8, 8),
-    };
-  });
-}
-
-function getFallbackScatterPosition(
-  sceneWidth: number,
-  sceneHeight: number,
-  iconSize: number,
-  excludeCenter = true
-): { x: number; y: number } {
-  const minX = 6;
-  const minY = 6;
-  const maxX = Math.max(minX, sceneWidth - iconSize - 6);
-  const maxY = Math.max(minY, sceneHeight - iconSize - 6);
-  const centerX = Math.max(1, sceneWidth) / 2;
-  const centerY = Math.max(1, sceneHeight) / 2;
-  const minDist = Math.max(iconSize * 1.1, 54);
-
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const x = minX + Math.random() * Math.max(0, maxX - minX);
-    const y = minY + Math.random() * Math.max(0, maxY - minY);
-    if (!excludeCenter) return { x, y };
-    const tileCenterX = x + iconSize / 2;
-    const tileCenterY = y + iconSize / 2;
-    if (Math.hypot(tileCenterX - centerX, tileCenterY - centerY) >= minDist) {
-      return { x, y };
+    let x = rand(minX, maxX);
+    let y = rand(minY, maxY);
+    for (let attempt = 0; attempt < 24 && hitsAvoid(x, y); attempt += 1) {
+      x = rand(minX, maxX);
+      y = rand(minY, maxY);
     }
-  }
-
-  return {
-    x: minX + Math.random() * Math.max(0, maxX - minX),
-    y: minY + Math.random() * Math.max(0, maxY - minY),
-  };
+    return { x, y, rot: rand(-8, 8) };
+  });
 }
 
 // Size a box of the given aspect ratio so its longest edge is `size`. Undefined
@@ -269,18 +266,32 @@ export default function DocumentWindow({
   const { w: frameWidth, h: frameHeight } = fitBox(albumSize, album.aspect);
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
   const iconSize = layout === "maximized" ? 58 : 42;
-  const { w: activeTileWidth, h: activeTileHeight } = fitBox(iconSize, album.aspect);
-  const shouldCenterSelection = layout === "normal";
+  // In the normal (small) window the tiles are flung across the whole desktop
+  // via a portal that floats above the window chrome; maximized keeps them
+  // inside the window scene.
+  const scatterToDesktop = id === "collections" && layout === "normal";
   const albumsSceneRef = useRef<HTMLDivElement | null>(null);
+  const collectionsRootRef = useRef<HTMLDivElement | null>(null);
   const [albumsSceneSize, setAlbumsSceneSize] = useState({ width: 0, height: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
   const [albumTilePositions, setAlbumTilePositions] = useState<AlbumTilePosition[]>([]);
-  const albumTilePositionsRef = useRef<AlbumTilePosition[]>([]);
-  const albumTileHomePositionsRef = useRef<AlbumTilePosition[]>([]);
-  const albumTileVelocityRef = useRef<number[]>([]);
-  const albumTileSizesRef = useRef<{ w: number; h: number }[]>([]);
-  const previousActiveAlbumRef = useRef<number>(0);
   const draggingAlbumIndexRef = useRef<number | null>(null);
   const draggingOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const draggedRef = useRef(false);
+
+  useEffect(() => {
+    setPortalHost(document.body);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   useEffect(() => {
     if (id !== "collections") return;
@@ -412,14 +423,6 @@ export default function DocumentWindow({
   }, [id, category]);
 
   useEffect(() => {
-    albumTilePositionsRef.current = albumTilePositions;
-  }, [albumTilePositions]);
-
-  useEffect(() => {
-    albumTileSizesRef.current = albums.map((entry) => fitBox(iconSize, entry.aspect));
-  }, [albums, iconSize]);
-
-  useEffect(() => {
     if (id !== "collections") return;
     const node = albumsSceneRef.current;
     if (!node) return;
@@ -437,267 +440,229 @@ export default function DocumentWindow({
     return () => window.removeEventListener("resize", update);
   }, [id]);
 
-  const centerTilePosition = useMemo(
-    () => ({
-      x: Math.max(0, Math.round((albumsSceneSize.width - activeTileWidth) / 2)),
-      y: Math.max(0, Math.round((albumsSceneSize.height - activeTileHeight) / 2)),
-    }),
-    [albumsSceneSize.height, albumsSceneSize.width, activeTileWidth, activeTileHeight]
-  );
+  // The centre picture frame's footprint, read without a dependency so a change
+  // of the active picture's shape does not re-trigger a full re-scatter.
+  const frameSizeRef = useRef({ w: frameWidth, h: frameHeight });
+  useEffect(() => {
+    frameSizeRef.current = { w: frameWidth, h: frameHeight };
+  }, [frameWidth, frameHeight]);
 
+  // Where the tiles live, in the coordinate space of their container. Desktop
+  // mode: a fixed portal pinned to the viewport origin. Window mode: the scene
+  // div inside the maximized window.
+  const getScatterField = () => {
+    if (scatterToDesktop) {
+      return {
+        originLeft: 0,
+        originTop: 0,
+        width: viewportSize.width,
+        height: viewportSize.height,
+        insetTop: TASKBAR_H,
+      };
+    }
+    const rect = albumsSceneRef.current?.getBoundingClientRect();
+    return {
+      originLeft: rect?.left ?? 0,
+      originTop: rect?.top ?? 0,
+      width: albumsSceneSize.width,
+      height: albumsSceneSize.height,
+      insetTop: 0,
+    };
+  };
+
+  // Scatter the tiles. Runs when the tile set, the container size, or the layout
+  // changes — never on a plain selection.
   useEffect(() => {
     if (id !== "collections" || albumsLoading || albums.length === 0) return;
-    const width = Math.max(1, albumsSceneSize.width);
-    const height = Math.max(1, albumsSceneSize.height);
-    const scattered = buildScatterPositions(albums.length, width, height, iconSize);
+    const field = getScatterField();
+    const width = Math.max(1, field.width);
+    const height = Math.max(1, field.height);
+
+    const avoid: { x: number; y: number; w: number; h: number }[] = [];
+    if (scatterToDesktop) {
+      // Keep every tile clear of the collections window itself.
+      const r = collectionsRootRef.current?.getBoundingClientRect();
+      if (r) avoid.push({ x: r.left - 28, y: r.top - 52, w: r.width + 56, h: r.height + 76 });
+    } else {
+      // Keep tiles off the centre frame, but never so wide there is nowhere left.
+      const frame = frameSizeRef.current;
+      const avoidW = Math.min(frame.w + 16, Math.max(0, width - iconSize * 2 - 24));
+      const avoidH = Math.min(frame.h + 16, Math.max(0, height - iconSize - 16));
+      avoid.push({ x: (width - avoidW) / 2, y: (height - avoidH) / 2, w: avoidW, h: avoidH });
+    }
+
+    const scattered = buildScatterPositions(albums.length, width, height, iconSize, {
+      avoid,
+      insetTop: field.insetTop,
+    });
+
     let nearest = 0;
     let nearestDist = Number.POSITIVE_INFINITY;
-    const sceneCenterX = width / 2;
-    const sceneCenterY = height / 2;
+    const centerX = width / 2;
+    const centerY = height / 2;
     scattered.forEach((pos, index) => {
-      const iconCenterX = pos.x + iconSize / 2;
-      const iconCenterY = pos.y + iconSize / 2;
-      const dist = Math.hypot(iconCenterX - sceneCenterX, iconCenterY - sceneCenterY);
+      const dist = Math.hypot(pos.x + iconSize / 2 - centerX, pos.y + iconSize / 2 - centerY);
       if (dist < nearestDist) {
         nearestDist = dist;
         nearest = index;
       }
     });
+
     setActiveAlbum(nearest);
-    const positioned = scattered.map((pos, index) =>
-      shouldCenterSelection && index === nearest
-        ? {
-            ...pos,
-            x: centerTilePosition.x,
-            y: centerTilePosition.y,
-            rot: 0,
-          }
-        : pos
-    );
-    albumTileHomePositionsRef.current = scattered;
-    albumTileVelocityRef.current = Array.from({ length: scattered.length }, () => 0);
-    previousActiveAlbumRef.current = nearest;
-    setAlbumTilePositions(positioned);
-  }, [albums, albumsLoading, albumsSceneSize.height, albumsSceneSize.width, centerTilePosition.x, centerTilePosition.y, iconSize, id, shouldCenterSelection]);
+    setAlbumTilePositions(scattered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    albums,
+    albumsLoading,
+    id,
+    iconSize,
+    scatterToDesktop,
+    albumsSceneSize.width,
+    albumsSceneSize.height,
+    viewportSize.width,
+    viewportSize.height,
+  ]);
 
-  useEffect(() => {
-    if (id !== "collections" || albumTilePositions.length === 0 || activeAlbum < 0 || activeAlbum >= albumTilePositions.length) return;
-    if (draggingAlbumIndexRef.current === activeAlbum) return;
-    setAlbumTilePositions((prev) => {
-      const prevActive = previousActiveAlbumRef.current;
-      return prev.map((pos, index) => {
-        if (index === activeAlbum) {
-          if (!shouldCenterSelection) return pos;
-          return {
-            ...pos,
-            x: centerTilePosition.x,
-            y: centerTilePosition.y,
-            rot: 0,
-          };
-        }
-        if (index === prevActive && prevActive !== activeAlbum) {
-          const home = albumTileHomePositionsRef.current[index];
-          if (home) {
-            return {
-              ...pos,
-              x: home.x,
-              y: home.y,
-              rot: home.rot,
-            };
-          }
-        }
-        return pos;
-      });
-    });
-    previousActiveAlbumRef.current = activeAlbum;
-  }, [activeAlbum, albumTilePositions.length, centerTilePosition.x, centerTilePosition.y, id, shouldCenterSelection]);
-
-  useEffect(() => {
-    if (id !== "collections" || layout !== "normal" || albumsLoading || albumTilePositions.length === 0) return;
-
-    let raf = 0;
-    const floorY = (tileH: number) => Math.max(6, albumsSceneSize.height - tileH - 6);
-    const GRAVITY = 0.42;
-    const BOUNCE = 0.24;
-    const STOP_EPS = 0.08;
-
-    const step = () => {
-      if (draggingAlbumIndexRef.current !== null) {
-        raf = window.requestAnimationFrame(step);
-        return;
-      }
-
-      let changed = false;
-      setAlbumTilePositions((prev) => {
-        const next = prev.map((pos, index) => {
-          const floor = floorY(albumTileSizesRef.current[index]?.h ?? iconSize);
-          let vy = albumTileVelocityRef.current[index] ?? 0;
-          let y = pos.y;
-
-          if (y < floor || Math.abs(vy) > STOP_EPS) {
-            vy += GRAVITY;
-            y += vy;
-            if (y >= floor) {
-              y = floor;
-              vy = -vy * BOUNCE;
-              if (Math.abs(vy) < STOP_EPS) vy = 0;
-            }
-            changed = changed || Math.abs(y - pos.y) > 0.01;
-          } else if (y !== floor) {
-            y = floor;
-            vy = 0;
-            changed = true;
-          }
-
-          albumTileVelocityRef.current[index] = vy;
-          const updated = y === pos.y ? pos : { ...pos, y };
-          const currentHome = albumTileHomePositionsRef.current[index] ?? updated;
-          albumTileHomePositionsRef.current[index] = { ...currentHome, x: updated.x, y: updated.y, rot: updated.rot };
-          return updated;
-        });
-        return changed ? next : prev;
-      });
-
-      raf = window.requestAnimationFrame(step);
-    };
-
-    raf = window.requestAnimationFrame(step);
-    return () => window.cancelAnimationFrame(raf);
-  }, [albumTilePositions.length, albumsLoading, albumsSceneSize.height, iconSize, id, layout]);
-
-  const clampTilePosition = (x: number, y: number) => {
+  const clampTilePosition = (x: number, y: number, tileW: number, tileH: number) => {
+    const field = getScatterField();
     const minX = 6;
-    const minY = 6;
-    const maxX = Math.max(minX, albumsSceneSize.width - iconSize - 6);
-    const maxY = Math.max(minY, albumsSceneSize.height - iconSize - 6);
+    const minY = 6 + field.insetTop;
+    const maxX = Math.max(minX, field.width - tileW - 6);
+    const maxY = Math.max(minY, field.height - tileH - 6);
     return {
       x: Math.max(minX, Math.min(maxX, x)),
       y: Math.max(minY, Math.min(maxY, y)),
     };
   };
 
-  const isPointerOverSceneBackground = (clientX: number, clientY: number) => {
-    const scene = albumsSceneRef.current;
-    if (!scene) return false;
-    const hit = document.elementFromPoint(clientX, clientY);
-    if (!hit || !scene.contains(hit)) return false;
-    const onTile = (hit as HTMLElement).closest("[data-collection-album-tile='true']");
-    return !onTile;
-  };
-
-  const finishAlbumDrag = (index: number, pointerTarget: EventTarget & Element, pointerId: number) => {
+  const endDragBookkeeping = (pointerTarget: EventTarget & Element, pointerId: number) => {
     draggingAlbumIndexRef.current = null;
     draggingOffsetRef.current = null;
+    dragStartRef.current = null;
+    draggedRef.current = false;
     try {
       (pointerTarget as Element).releasePointerCapture(pointerId);
     } catch {
       // noop
     }
-    const finalPos = albumTilePositionsRef.current[index];
-    if (finalPos && index !== activeAlbum) {
-      const currentHome = albumTileHomePositionsRef.current[index] ?? { ...finalPos };
-      albumTileHomePositionsRef.current[index] = {
-        ...currentHome,
-        x: finalPos.x,
-        y: finalPos.y,
-      };
-    }
-    if (!shouldCenterSelection) return;
-    setAlbumTilePositions((prev) =>
-      prev.map((pos, tileIndex) =>
-        tileIndex === index
-          ? {
-              ...pos,
-              x: centerTilePosition.x,
-              y: centerTilePosition.y,
-              rot: 0,
-            }
-          : pos
-      )
-    );
   };
 
   const onAlbumTilePointerDown = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    const sceneRect = albumsSceneRef.current?.getBoundingClientRect();
-    if (!sceneRect) return;
     const pos = albumTilePositions[index];
     if (!pos) return;
-    const prevActive = activeAlbum;
+    const field = getScatterField();
 
-    if (shouldCenterSelection && prevActive !== index) {
-      // Resolve the deactivated tile's next spot up front (it may involve
-      // Math.random) so the setAlbumTilePositions updater below stays pure.
-      const prevHome = albumTileHomePositionsRef.current[prevActive];
-      const prevFallback = prevHome ? null : getFallbackScatterPosition(albumsSceneSize.width, albumsSceneSize.height, iconSize, true);
-      setAlbumTilePositions((prev) =>
-        prev.map((tilePos, tileIndex) => {
-          if (tileIndex !== prevActive) return tilePos;
-          if (prevHome) {
-            return {
-              ...tilePos,
-              x: prevHome.x,
-              y: prevHome.y,
-              rot: prevHome.rot,
-            };
-          }
-          return {
-            ...tilePos,
-            x: prevFallback!.x,
-            y: prevFallback!.y,
-            rot: tilePos.rot || 0,
-          };
-        })
-      );
-    }
-    previousActiveAlbumRef.current = index;
     setActiveAlbum(index);
 
     draggingAlbumIndexRef.current = index;
+    draggedRef.current = false;
+    dragStartRef.current = { x: event.clientX, y: event.clientY };
     draggingOffsetRef.current = {
-      x: event.clientX - sceneRect.left - pos.x,
-      y: event.clientY - sceneRect.top - pos.y,
+      x: event.clientX - field.originLeft - pos.x,
+      y: event.clientY - field.originTop - pos.y,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // noop
+    }
   };
 
   const onAlbumTilePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const draggingIndex = draggingAlbumIndexRef.current;
     const offset = draggingOffsetRef.current;
-    const sceneRect = albumsSceneRef.current?.getBoundingClientRect();
-    if (draggingIndex === null || !offset || !sceneRect) return;
-    const next = clampTilePosition(
-      event.clientX - sceneRect.left - offset.x,
-      event.clientY - sceneRect.top - offset.y
-    );
-    setAlbumTilePositions((prev) =>
-      {
-        const nextPositions = prev.map((pos, index) =>
-        index === draggingIndex
-          ? {
-              ...pos,
-              x: next.x,
-              y: next.y,
-            }
-          : pos
-        );
-        return nextPositions;
-      }
-    );
-    if (draggingIndex !== activeAlbum) {
-      const currentHome = albumTileHomePositionsRef.current[draggingIndex] ?? { x: next.x, y: next.y, rot: 0 };
-      albumTileHomePositionsRef.current[draggingIndex] = { ...currentHome, x: next.x, y: next.y };
+    const start = dragStartRef.current;
+    if (draggingIndex === null || !offset || !start) return;
+
+    if (!draggedRef.current) {
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < DRAG_THRESHOLD) return;
+      draggedRef.current = true;
     }
 
-    if (isPointerOverSceneBackground(event.clientX, event.clientY)) {
-      finishAlbumDrag(draggingIndex, event.currentTarget, event.pointerId);
-    }
+    const field = getScatterField();
+    const box = fitBox(iconSize, albums[draggingIndex]?.aspect);
+    const next = clampTilePosition(
+      event.clientX - field.originLeft - offset.x,
+      event.clientY - field.originTop - offset.y,
+      box.w,
+      box.h
+    );
+    setAlbumTilePositions((prev) =>
+      prev.map((pos, index) => (index === draggingIndex ? { ...pos, x: next.x, y: next.y } : pos))
+    );
   };
 
   const onAlbumTilePointerUp = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
-    const draggingIndex = draggingAlbumIndexRef.current;
-    if (draggingIndex === null || draggingIndex !== index) return;
-    finishAlbumDrag(index, event.currentTarget, event.pointerId);
+    if (draggingAlbumIndexRef.current !== index) return;
+    endDragBookkeeping(event.currentTarget, event.pointerId);
+  };
+
+  const onAlbumTilePointerCancel = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
+    if (draggingAlbumIndexRef.current !== index) return;
+    endDragBookkeeping(event.currentTarget, event.pointerId);
+  };
+
+  const renderAlbumTile = (entry: AlbumCover, index: number) => {
+    const miniImage = getSizedCover(entry.image, "low");
+    const isActive = index === activeAlbum;
+    const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
+    const tileBox = fitBox(iconSize, entry.aspect);
+    const isDraggingThis = draggingAlbumIndexRef.current === index;
+    return (
+      <div
+        key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
+        data-collection-album-tile="true"
+        onPointerDown={(event) => onAlbumTilePointerDown(index, event)}
+        onPointerMove={onAlbumTilePointerMove}
+        onPointerUp={(event) => onAlbumTilePointerUp(index, event)}
+        onPointerCancel={(event) => onAlbumTilePointerCancel(index, event)}
+        style={{
+          position: "absolute",
+          left: pos.x,
+          top: pos.y,
+          width: tileBox.w,
+          height: tileBox.h,
+          borderTop: "1px solid #fff",
+          borderLeft: "1px solid #fff",
+          borderRight: "1px solid #808080",
+          borderBottom: "1px solid #808080",
+          boxShadow: "1px 1px 0 #00000055",
+          background: miniImage ? "#111" : "#5a5a5a",
+          overflow: "hidden",
+          opacity: isActive ? 1 : 0.8,
+          outline: isActive ? "1px solid #0b5ad4" : "none",
+          transform: `rotate(${pos.rot}deg)`,
+          zIndex: isActive ? 3 : 2,
+          cursor: isDraggingThis ? "grabbing" : "grab",
+          touchAction: "none",
+          userSelect: "none",
+          pointerEvents: "auto",
+          // Track the pointer 1:1 while dragging; ease back into place otherwise.
+          transition:
+            isDraggingThis && draggedRef.current
+              ? "none"
+              : "left 180ms ease-out, top 180ms ease-out, transform 180ms ease-out",
+        }}
+        aria-label={entry.title}
+      >
+        {miniImage && (
+          <img
+            src={miniImage}
+            alt=""
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+              // Tile box already matches the picture when we know its aspect, so
+              // cover fills it exactly; fall back to contain when it is unknown.
+              objectFit: entry.aspect ? "cover" : "contain",
+              imageRendering: "pixelated",
+            }}
+          />
+        )}
+      </div>
+    );
   };
 
   return (
@@ -705,7 +670,7 @@ export default function DocumentWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
-      normalHeight={id === "collections" ? 312 : id === "projects" ? 360 : 200}
+      normalHeight={id === "collections" ? 356 : id === "projects" ? 360 : 200}
       normalWidth={id === "collections" ? 340 : id === "projects" ? 340 : undefined}
       onClose={onClose}
       onMinimize={onMinimize}
@@ -716,6 +681,7 @@ export default function DocumentWindow({
 
       {id === "collections" && (
         <div
+          ref={collectionsRootRef}
           style={{
             flex: "1 1 auto",
             minHeight: 0,
@@ -757,6 +723,7 @@ export default function DocumentWindow({
                 minHeight: layout === "maximized" ? 280 : 176,
                 position: "relative",
                 overflow: "hidden",
+                touchAction: "none",
               }}
             >
               <div
@@ -803,63 +770,26 @@ export default function DocumentWindow({
                 )}
               </div>
 
-              {!albumsLoading &&
-                albums.map((entry, index) => {
-                  const miniImage = getSizedCover(entry.image, "low");
-                  const isActive = index === activeAlbum;
-                  const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
-                  const tileBox = fitBox(iconSize, entry.aspect);
-                  return (
-                    <div
-                      key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
-                      data-collection-album-tile="true"
-                      onPointerDown={(event) => onAlbumTilePointerDown(index, event)}
-                      onPointerMove={onAlbumTilePointerMove}
-                      onPointerUp={(event) => onAlbumTilePointerUp(index, event)}
-                      style={{
-                        position: "absolute",
-                        left: pos.x,
-                        top: pos.y,
-                        width: tileBox.w,
-                        height: tileBox.h,
-                        borderTop: "1px solid #fff",
-                        borderLeft: "1px solid #fff",
-                        borderRight: "1px solid #808080",
-                        borderBottom: "1px solid #808080",
-                        boxShadow: "1px 1px 0 #00000055",
-                        background: miniImage ? "#111" : "#5a5a5a",
-                        overflow: "hidden",
-                        opacity: isActive ? 1 : 0.8,
-                        outline: isActive ? "1px solid #0b5ad4" : "none",
-                        transform: `rotate(${pos.rot}deg)`,
-                        zIndex: isActive ? 3 : 2,
-                        cursor: draggingAlbumIndexRef.current === index ? "grabbing" : "grab",
-                        touchAction: "none",
-                        userSelect: "none",
-                      }}
-                      aria-label={entry.title}
-                    >
-                      {miniImage && (
-                        <img
-                          src={miniImage}
-                          alt=""
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            display: "block",
-                            // Tile box already matches the picture when we know its
-                            // aspect, so cover fills it exactly; fall back to
-                            // contain when the aspect is unknown.
-                            objectFit: entry.aspect ? "cover" : "contain",
-                            imageRendering: "pixelated",
-                          }}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
+              {!albumsLoading && !scatterToDesktop && albums.map(renderAlbumTile)}
             </div>
           </GroupBox>
+
+          {scatterToDesktop &&
+            !albumsLoading &&
+            portalHost &&
+            createPortal(
+              <div
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  zIndex: DESKTOP_TILE_Z,
+                  pointerEvents: "none",
+                }}
+              >
+                {albums.map(renderAlbumTile)}
+              </div>,
+              portalHost
+            )}
           <div style={{ textAlign: "center", minHeight: 30 }}>
             <div style={{ fontWeight: 700 }}>{album.title}</div>
             <div>{album.artist}</div>
