@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar } from "react95";
 import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
@@ -38,6 +38,70 @@ type MenuLevelProps = {
   onLeafClick: (item: MenuLeafItem) => void;
   depth?: number;
 };
+
+/**
+ * A nested submenu that keeps itself on screen: it opens to the right of its
+ * parent item by default, but flips to the left when that would run past the
+ * right edge of the window, and nudges up when it would run past the bottom.
+ */
+function Submenu({
+  items,
+  onLeafClick,
+  depth = 0,
+  onMouseEnter,
+}: MenuLevelProps & { onMouseEnter?: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<{
+    side: "left" | "right";
+    shiftY: number;
+  }>({ side: "right", shiftY: 0 });
+
+  useLayoutEffect(() => {
+    function place() {
+      const el = ref.current;
+      const parent = el?.parentElement;
+      if (!el || !parent) return;
+
+      const margin = 8;
+      const rect = el.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+
+      // Flip to the left only if the submenu overflows the right edge and it
+      // actually fits on the left; otherwise leave it where it is.
+      const overflowsRight = rect.right > window.innerWidth - margin;
+      const fitsLeft = parentRect.left - rect.width >= margin;
+      const side: "left" | "right" = overflowsRight && fitsLeft ? "left" : "right";
+
+      // Pull the menu up if its bottom is past the viewport, but never above
+      // the top edge.
+      const overflowY = rect.bottom - (window.innerHeight - margin);
+      const shiftY = overflowY > 0 ? -Math.min(overflowY, rect.top - margin) : 0;
+
+      setPlacement((prev) =>
+        prev.side === side && prev.shiftY === shiftY ? prev : { side, shiftY },
+      );
+    }
+
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [items, depth]);
+
+  return (
+    <div
+      ref={ref}
+      onMouseEnter={onMouseEnter}
+      style={{
+        position: "absolute",
+        top: placement.shiftY,
+        ...(placement.side === "left" ? { right: "100%" } : { left: "100%" }),
+        zIndex: Z.START_SUBMENU,
+      }}
+    >
+      <MenuLevel items={items} onLeafClick={onLeafClick} depth={depth} />
+    </div>
+  );
+}
 
 
 
@@ -129,21 +193,12 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
             </MenuListItem>
 
             {itemHasSubmenu && openSubmenu === idx && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: "100%",
-                  top: 0,
-                  zIndex: Z.START_SUBMENU,
-                }}
+              <Submenu
+                items={item.submenu}
+                onLeafClick={onLeafClick}
+                depth={depth + 1}
                 onMouseEnter={() => setOpenSubmenu(idx)}
-              >
-                <MenuLevel
-                  items={item.submenu}
-                  onLeafClick={onLeafClick}
-                  depth={depth + 1}
-                />
-              </div>
+              />
             )}
           </div>
         );
