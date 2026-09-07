@@ -13,12 +13,9 @@ import { MidiSynth, type Waveform } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
 
 export type MidiWindowHandle = {
-  clear: () => void;
-  toggleHex: () => void;
+  newSession: () => void;
   toggleMeters: () => void;
   toggleKeys: () => void;
-  scan: () => void;
-  toggleSound: () => void;
   setWaveform: (waveform: Waveform) => void;
   startRecording: () => void;
   stopRecording: () => void;
@@ -31,10 +28,8 @@ export type MidiWindowHandle = {
 };
 
 type MidiWindowProps = {
-  onHexOpenChange?: (open: boolean) => void;
   onMetersOpenChange?: (open: boolean) => void;
   onKeysOpenChange?: (open: boolean) => void;
-  onSoundChange?: (on: boolean) => void;
   onWaveformChange?: (waveform: Waveform) => void;
   onRecordingChange?: (recording: boolean) => void;
   onPlayingChange?: (playing: boolean) => void;
@@ -366,10 +361,8 @@ function PlayableKeyboard({
 
 const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWindow(
   {
-    onHexOpenChange,
     onMetersOpenChange,
     onKeysOpenChange,
-    onSoundChange,
     onWaveformChange,
     onRecordingChange,
     onPlayingChange,
@@ -380,10 +373,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [status, setStatus] = useState<MidiStatus>("checking");
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [hexOpen, setHexOpen] = useState(false);
   const [metersOpen, setMetersOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(true);
-  const [soundOn, setSoundOn] = useState(false);
   const [waveform, setWaveformState] = useState<Waveform>("square");
   const [recording, setRecording] = useState(false);
   const [recCount, setRecCount] = useState(0);
@@ -418,7 +409,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const heldRef = useRef<Map<number, number>>(new Map());
 
   const synthRef = useRef<MidiSynth | null>(null);
-  const soundOnRef = useRef(false);
   const recordingRef = useRef(false);
   const recordBufRef = useRef<{ atMs: number; data: number[] }[]>([]);
   const recordStartRef = useRef(0);
@@ -428,7 +418,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const playIntervalRef = useRef<number | null>(null);
   const octaveShiftRef = useRef(0);
   const pressedCodesRef = useRef<Map<string, number>>(new Map());
-  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -458,7 +447,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setRecCount(recordBufRef.current.length);
       }
 
-      if (soundOnRef.current && parsed.note != null) {
+      if (parsed.note != null) {
         const synth = ensureSynth();
         if (parsed.type === "Note On") synth.noteOn(parsed.note, parsed.velocity ?? 96);
         else if (parsed.type === "Note Off") synth.noteOff(parsed.note);
@@ -509,13 +498,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     [pushEntry],
   );
 
-  const ensureSound = useCallback(() => {
-    const synth = ensureSynth();
-    synth.resume();
-    if (!soundOnRef.current) {
-      soundOnRef.current = true;
-      setSoundOn(true);
-    }
+  // The synth is always on, but its AudioContext still needs a user gesture to
+  // start — resume it on the first key press / file open / playback.
+  const ensureAudio = useCallback(() => {
+    ensureSynth().resume();
   }, [ensureSynth]);
 
   // Play a note from the on-screen or computer keyboard: routed through
@@ -523,11 +509,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const handleKeyNote = useCallback(
     (note: number, on: boolean) => {
       if (note < 0 || note > 127) return;
-      ensureSound();
+      ensureAudio();
       if (startedAt.current === 0) startedAt.current = performance.now();
       pushEntry("keys", Uint8Array.from(on ? [0x90, note, 96] : [0x80, note, 0]));
     },
-    [ensureSound, pushEntry],
+    [ensureAudio, pushEntry],
   );
 
   const keyboardNoteOn = useCallback((note: number) => handleKeyNote(note, true), [handleKeyNote]);
@@ -551,7 +537,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     const file = loadedFileRef.current;
     if (!file || file.events.length === 0) return;
     stopPlayback();
-    ensureSound();
+    ensureAudio();
     if (startedAt.current === 0) startedAt.current = performance.now();
     const startPerf = performance.now();
     const events = file.events.slice(0, MAX_PLAYBACK_EVENTS);
@@ -567,7 +553,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       setPlayPos(performance.now() - startPerf);
     }, 100);
     setPlaying(true);
-  }, [ensureSound, pushEntry, stopPlayback]);
+  }, [ensureAudio, pushEntry, stopPlayback]);
 
   const loadSmf = useCallback(
     (bytes: Uint8Array, name: string) => {
@@ -641,45 +627,41 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     accessRef.current = null;
   }, [syncDevices]);
 
-  const connect = useCallback(
-    (userInitiated = false) => {
-      if (typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function") {
-        setStatus("unsupported");
-        return;
-      }
+  // Runs once on mount (i.e. every time the window is opened).
+  const connect = useCallback(() => {
+    if (typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function") {
+      setStatus("unsupported");
+      return;
+    }
 
-      const epoch = ++epochRef.current;
-      setStatus("checking");
-      if (startedAt.current === 0) startedAt.current = performance.now();
+    const epoch = ++epochRef.current;
+    setStatus("checking");
+    if (startedAt.current === 0) startedAt.current = performance.now();
 
-      // A Scan click should force a fresh request even if one is already pending.
-      if (userInitiated) pendingRef.current = null;
-      if (!pendingRef.current) {
-        pendingRef.current = navigator.requestMIDIAccess({ sysex: false });
-      }
-      const req = pendingRef.current;
+    if (!pendingRef.current) {
+      pendingRef.current = navigator.requestMIDIAccess({ sysex: false });
+    }
+    const req = pendingRef.current;
 
-      req
-        .then((granted) => {
-          if (epoch !== epochRef.current) return;
-          detachAccess();
-          accessRef.current = granted;
-          setStatus("ready");
-          granted.addEventListener("statechange", syncDevices);
-          syncDevices();
-        })
-        .catch(() => {
-          if (epoch !== epochRef.current) return;
-          // Firefox only shows the MIDI prompt on a user gesture; a gesture-less
-          // attempt rejects. Distinguish that from a real block.
-          setStatus(userInitiated ? "denied" : "needsGesture");
-        })
-        .finally(() => {
-          if (pendingRef.current === req) pendingRef.current = null;
-        });
-    },
-    [detachAccess, syncDevices],
-  );
+    req
+      .then((granted) => {
+        if (epoch !== epochRef.current) return;
+        detachAccess();
+        accessRef.current = granted;
+        setStatus("ready");
+        granted.addEventListener("statechange", syncDevices);
+        syncDevices();
+      })
+      .catch(() => {
+        if (epoch !== epochRef.current) return;
+        // Firefox only shows the MIDI prompt on a user gesture; a gesture-less
+        // attempt rejects. Distinguish that from a real block.
+        setStatus("needsGesture");
+      })
+      .finally(() => {
+        if (pendingRef.current === req) pendingRef.current = null;
+      });
+  }, [detachAccess, syncDevices]);
 
   useEffect(() => {
     let cancelled = false;
@@ -691,8 +673,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       }
 
       // If the permission is already decided, honour it without firing a
-      // gesture-less request (which Firefox penalises). Otherwise try once;
-      // on failure we fall back to asking the user to press Scan.
+      // gesture-less request (which Firefox penalises). Otherwise scan.
       let permission: PermissionState | null = null;
       try {
         const result = await navigator.permissions?.query({ name: "midi" as PermissionName });
@@ -706,7 +687,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setStatus("denied");
         return;
       }
-      connect(false);
+      connect();
     };
 
     bootstrap();
@@ -759,7 +740,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       );
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!soundOnRef.current || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
       if (event.code === "KeyZ") {
         if (!event.repeat) {
@@ -805,20 +786,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, []);
 
   useEffect(() => {
-    onHexOpenChange?.(hexOpen);
-  }, [hexOpen, onHexOpenChange]);
-
-  useEffect(() => {
     onMetersOpenChange?.(metersOpen);
   }, [metersOpen, onMetersOpenChange]);
 
   useEffect(() => {
     onKeysOpenChange?.(keysOpen);
   }, [keysOpen, onKeysOpenChange]);
-
-  useEffect(() => {
-    onSoundChange?.(soundOn);
-  }, [soundOn, onSoundChange]);
 
   useEffect(() => {
     onWaveformChange?.(waveform);
@@ -835,7 +808,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   useImperativeHandle(
     ref,
     () => ({
-      clear: () => {
+      newSession: () => {
         stopPlayback();
         recordingRef.current = false;
         setRecording(false);
@@ -846,18 +819,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setHeld([]);
         setEntries([]);
         setLoadError(null);
+        setLoadedFile(null);
+        loadedFileRef.current = null;
+        onLoadedFileChange?.(null);
       },
-      toggleHex: () => setHexOpen((v) => !v),
       toggleMeters: () => setMetersOpen((v) => !v),
       toggleKeys: () => setKeysOpen((v) => !v),
-      scan: () => connect(true),
-      toggleSound: () => {
-        const next = !soundOnRef.current;
-        soundOnRef.current = next;
-        setSoundOn(next);
-        if (next) ensureSynth().resume();
-        else synthRef.current?.allNotesOff();
-      },
       setWaveform: (next: Waveform) => {
         setWaveformState(next);
         ensureSynth().setWaveform(next);
@@ -910,15 +877,13 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         return `${header}\n${body}`;
       },
     }),
-    [connect, ensureSynth, loadSmf, play, stopPlayback],
+    [ensureSynth, loadSmf, onLoadedFileChange, play, stopPlayback],
   );
 
   const octaveLabel = octaveShift === 0 ? "" : ` · keys ${octaveShift > 0 ? "+" : ""}${octaveShift} oct`;
 
   return (
     <div
-      ref={rootRef}
-      tabIndex={0}
       style={{
         flex: "1 1 auto",
         minHeight: 0,
@@ -928,7 +893,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         gap: 4,
         fontFamily: "monospace",
         fontSize: 11,
-        outline: "none",
       }}
     >
       <div style={{ flex: "0 0 auto" }}>
@@ -936,10 +900,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {status === "unsupported" && (
           <div>Web MIDI is not supported in this browser. Try Chrome or Firefox.</div>
         )}
-        {status === "needsGesture" && <div>MIDI needs your permission. Press Scan to connect.</div>}
-        {status === "denied" && (
-          <div>MIDI access is blocked. Allow it in your browser settings, then press Scan.</div>
+        {status === "needsGesture" && (
+          <div>MIDI needs your permission — reopen this window to allow it.</div>
         )}
+        {status === "denied" && <div>MIDI access is blocked. Allow it in your browser settings.</div>}
         {status === "ready" && devices.length === 0 && (
           <div>No MIDI inputs detected — play the on-screen keyboard or open a .mid file.</div>
         )}
@@ -1026,7 +990,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           entries.map((entry) => (
             <div key={entry.id} style={{ whiteSpace: "pre" }}>
               {entry.clock}  {entry.source.slice(0, 8).padEnd(8)}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
-              {hexOpen && <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>}
+              <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>
             </div>
           ))
         )}
@@ -1036,7 +1000,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {entries.length} message{entries.length === 1 ? "" : "s"}
         {entries.length >= MAX_ENTRIES ? " (capped)" : ""}
         {"  ·  "}
-        {soundOn ? `sound ${waveform}` : "sound off"}
+        {`wave ${waveform}`}
         {recording ? `  ·  ● rec ${recCount}` : ""}
         {playing && loadedFile
           ? `  ·  ▶ ${formatTransport(playPos)} / ${formatTransport(loadedFile.durationMs)}`

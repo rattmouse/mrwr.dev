@@ -93,7 +93,7 @@ export default function ProgramWindow({
   const paintRef = useRef<PaintWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
-  const midiWaveMenuRef = useRef<HTMLDivElement | null>(null);
+  const midiEditMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
@@ -106,11 +106,11 @@ export default function ProgramWindow({
   const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
   const [midiFileOpen, setMidiFileOpen] = useState(false);
-  const [midiWaveOpen, setMidiWaveOpen] = useState(false);
-  const [midiHexOpen, setMidiHexOpen] = useState(false);
+  const [midiSaveAsOpen, setMidiSaveAsOpen] = useState(false);
+  const [midiSaveAsTop, setMidiSaveAsTop] = useState(0);
+  const [midiEditOpen, setMidiEditOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
   const [midiKeysOpen, setMidiKeysOpen] = useState(false);
-  const [midiSoundOn, setMidiSoundOn] = useState(false);
   const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
   const [midiRecording, setMidiRecording] = useState(false);
   const [midiCanSave, setMidiCanSave] = useState(false);
@@ -230,7 +230,8 @@ export default function ProgramWindow({
   useEffect(() => {
     if (id !== "midi") {
       setMidiFileOpen(false);
-      setMidiWaveOpen(false);
+      setMidiSaveAsOpen(false);
+      setMidiEditOpen(false);
       return;
     }
     const handleMouseDown = (event: MouseEvent) => {
@@ -238,9 +239,10 @@ export default function ProgramWindow({
       if (!(target instanceof Node)) return;
       if (!(midiFileMenuRef.current?.contains(target) ?? false)) {
         setMidiFileOpen(false);
+        setMidiSaveAsOpen(false);
       }
-      if (!(midiWaveMenuRef.current?.contains(target) ?? false)) {
-        setMidiWaveOpen(false);
+      if (!(midiEditMenuRef.current?.contains(target) ?? false)) {
+        setMidiEditOpen(false);
       }
     };
     document.addEventListener("mousedown", handleMouseDown);
@@ -520,6 +522,7 @@ export default function ProgramWindow({
             onClick={() =>
               setMidiFileOpen((prev) => {
                 const next = !prev;
+                setMidiSaveAsOpen(false);
                 if (next) setMidiCanSave(!!midiRef.current?.hasRecording());
                 return next;
               })
@@ -536,53 +539,36 @@ export default function ProgramWindow({
                 zIndex: 1000,
                 width: "max-content",
               }}
-              onMouseLeave={() => setMidiFileOpen(false)}
+              onMouseLeave={() => {
+                setMidiSaveAsOpen(false);
+                setMidiFileOpen(false);
+              }}
             >
               <MenuList style={{ marginTop: 0 }}>
                 <MenuListItem
                   size="sm"
+                  onMouseEnter={() => setMidiSaveAsOpen(false)}
                   onClick={() => {
-                    midiRef.current?.scan();
+                    midiRef.current?.newSession();
                     setMidiFileOpen(false);
                   }}
                 >
-                  Scan
+                  New
                 </MenuListItem>
                 <MenuListItem
                   size="sm"
-                  onClick={() => {
-                    midiRef.current?.clear();
-                    setMidiFileOpen(false);
-                  }}
-                >
-                  Clear
-                </MenuListItem>
-                <MenuListItem
-                  size="sm"
-                  onClick={() => {
-                    if (midiRecording) {
-                      midiRef.current?.stopRecording();
-                    } else {
-                      midiRef.current?.startRecording();
-                      setMidiCanSave(true);
-                    }
-                    setMidiFileOpen(false);
-                  }}
-                >
-                  {midiRecording ? "Stop recording" : "Record"}
-                </MenuListItem>
-                <MenuListItem
-                  size="sm"
+                  onMouseEnter={() => setMidiSaveAsOpen(false)}
                   onClick={() => {
                     midiFileInputRef.current?.click();
                     setMidiFileOpen(false);
                   }}
                 >
-                  Open MIDI file…
+                  Open&hellip;
                 </MenuListItem>
                 <MenuListItem
                   size="sm"
                   disabled={!midiCanSave}
+                  onMouseEnter={() => setMidiSaveAsOpen(false)}
                   onClick={() => {
                     const data = midiRef.current?.exportMid();
                     if (data) {
@@ -595,53 +581,89 @@ export default function ProgramWindow({
                     setMidiFileOpen(false);
                   }}
                 >
-                  Save recording (.mid)
+                  Save
                 </MenuListItem>
                 <MenuListItem
                   size="sm"
-                  onClick={() => {
-                    const text = midiRef.current?.exportLog("csv");
-                    if (text != null) downloadBlob(text, "keys-log.csv", "text/csv");
-                    setMidiFileOpen(false);
+                  onMouseEnter={(event) => {
+                    setMidiSaveAsTop(getSubmenuTopForRow(event.currentTarget));
+                    setMidiSaveAsOpen(true);
+                  }}
+                  onClick={(event) => {
+                    setMidiSaveAsTop(getSubmenuTopForRow(event.currentTarget));
+                    setMidiSaveAsOpen((prev) => !prev);
                   }}
                 >
-                  Export log (CSV)
-                </MenuListItem>
-                <MenuListItem
-                  size="sm"
-                  onClick={() => {
-                    const text = midiRef.current?.exportLog("json");
-                    if (text != null)
-                      downloadBlob(text, "keys-log.json", "application/json");
-                    setMidiFileOpen(false);
-                  }}
-                >
-                  Export log (JSON)
+                  <span style={{ flex: "1 1 auto" }}>Save as&hellip;</span>
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 12,
+                      marginLeft: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flex: "0 0 12px",
+                    }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" role="presentation">
+                      <path d="M2 1l4 3-4 3z" fill="currentColor" />
+                    </svg>
+                  </span>
                 </MenuListItem>
               </MenuList>
+              {midiSaveAsOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "calc(100% - 2px)",
+                    top: midiSaveAsTop,
+                    zIndex: 1001,
+                    minWidth: 140,
+                  }}
+                >
+                  <MenuList style={{ marginTop: 0 }}>
+                    <MenuListItem
+                      size="sm"
+                      onClick={() => {
+                        const text = midiRef.current?.exportLog("csv");
+                        if (text != null) downloadBlob(text, "keys-log.csv", "text/csv");
+                        setMidiSaveAsOpen(false);
+                        setMidiFileOpen(false);
+                      }}
+                    >
+                      Log as CSV
+                    </MenuListItem>
+                    <MenuListItem
+                      size="sm"
+                      onClick={() => {
+                        const text = midiRef.current?.exportLog("json");
+                        if (text != null)
+                          downloadBlob(text, "keys-log.json", "application/json");
+                        setMidiSaveAsOpen(false);
+                        setMidiFileOpen(false);
+                      }}
+                    >
+                      Log as JSON
+                    </MenuListItem>
+                  </MenuList>
+                </div>
+              )}
             </div>
           )}
         </div>
-        <Button
-          size="sm"
-          style={{ fontWeight: "bold" }}
-          title="Play notes through the built-in synth"
-          active={midiSoundOn}
-          onClick={() => midiRef.current?.toggleSound()}
-        >
-          Sound
-        </Button>
-        <div ref={midiWaveMenuRef} style={{ position: "relative", display: "inline-block" }}>
+        <div ref={midiEditMenuRef} style={{ position: "relative", display: "inline-block" }}>
           <Button
             variant="menu"
             size="sm"
-            active={midiWaveOpen}
-            title="Synth waveform"
-            onClick={() => setMidiWaveOpen((prev) => !prev)}
+            active={midiEditOpen}
+            aria-label="Edit"
+            title="Edit"
+            onClick={() => setMidiEditOpen((prev) => !prev)}
           >
-            Wave
+            Edit
           </Button>
-          {midiWaveOpen && (
+          {midiEditOpen && (
             <div
               style={{
                 position: "absolute",
@@ -650,7 +672,7 @@ export default function ProgramWindow({
                 zIndex: 1000,
                 width: "max-content",
               }}
-              onMouseLeave={() => setMidiWaveOpen(false)}
+              onMouseLeave={() => setMidiEditOpen(false)}
             >
               <MenuList style={{ marginTop: 0 }}>
                 {MIDI_WAVEFORMS.map((wave) => (
@@ -659,7 +681,7 @@ export default function ProgramWindow({
                     size="sm"
                     onClick={() => {
                       midiRef.current?.setWaveform(wave);
-                      setMidiWaveOpen(false);
+                      setMidiEditOpen(false);
                     }}
                   >
                     {wave === midiWaveform ? "• " : "  "}
@@ -673,11 +695,18 @@ export default function ProgramWindow({
         <Button
           size="sm"
           style={{ fontWeight: "bold" }}
-          title="Raw bytes"
-          active={midiHexOpen}
-          onClick={() => midiRef.current?.toggleHex()}
+          title="Record incoming and played notes"
+          active={midiRecording}
+          onClick={() => {
+            if (midiRecording) {
+              midiRef.current?.stopRecording();
+            } else {
+              midiRef.current?.startRecording();
+              setMidiCanSave(true);
+            }
+          }}
         >
-          Hex
+          {midiRecording ? "■ Rec" : "● Rec"}
         </Button>
         <Button
           size="sm"
@@ -888,10 +917,8 @@ export default function ProgramWindow({
       {id === "midi" && (
         <MidiWindow
           ref={midiRef}
-          onHexOpenChange={setMidiHexOpen}
           onMetersOpenChange={setMidiMetersOpen}
           onKeysOpenChange={setMidiKeysOpen}
-          onSoundChange={setMidiSoundOn}
           onWaveformChange={setMidiWaveform}
           onRecordingChange={setMidiRecording}
           onPlayingChange={setMidiPlaying}
