@@ -110,7 +110,6 @@ export default function ProgramWindow({
   const [midiSaveAsTop, setMidiSaveAsTop] = useState(0);
   const [midiEditOpen, setMidiEditOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
-  const [midiKeysOpen, setMidiKeysOpen] = useState(true);
   const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
   const [midiPlaying, setMidiPlaying] = useState(false);
   const [midiHasMessages, setMidiHasMessages] = useState(false);
@@ -722,15 +721,6 @@ export default function ProgramWindow({
         >
           Meters
         </Button>
-        <Button
-          size="sm"
-          style={{ fontWeight: "bold" }}
-          title="On-screen keyboard"
-          active={midiKeysOpen}
-          onClick={() => midiRef.current?.toggleKeys()}
-        >
-          Keys
-        </Button>
         <input
           ref={midiFileInputRef}
           type="file"
@@ -902,7 +892,6 @@ export default function ProgramWindow({
           ref={midiRef}
           maximized={layout === "maximized"}
           onMetersOpenChange={setMidiMetersOpen}
-          onKeysOpenChange={setMidiKeysOpen}
           onWaveformChange={setMidiWaveform}
           onPlayingChange={setMidiPlaying}
           onHasMessagesChange={setMidiHasMessages}

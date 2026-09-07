@@ -16,7 +16,6 @@ import { decodeSmf, encodeSmf } from "@/lib/smf";
 export type MidiWindowHandle = {
   newSession: () => void;
   toggleMeters: () => void;
-  toggleKeys: () => void;
   setWaveform: (waveform: Waveform) => void;
   loadSmf: (bytes: Uint8Array, name: string) => void;
   play: () => void;
@@ -29,7 +28,6 @@ export type MidiWindowHandle = {
 type MidiWindowProps = {
   maximized?: boolean;
   onMetersOpenChange?: (open: boolean) => void;
-  onKeysOpenChange?: (open: boolean) => void;
   onWaveformChange?: (waveform: Waveform) => void;
   onPlayingChange?: (playing: boolean) => void;
   onHasMessagesChange?: (hasMessages: boolean) => void;
@@ -387,7 +385,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   {
     maximized = false,
     onMetersOpenChange,
-    onKeysOpenChange,
     onWaveformChange,
     onPlayingChange,
     onHasMessagesChange,
@@ -398,7 +395,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [metersOpen, setMetersOpen] = useState(false);
-  const [keysOpen, setKeysOpen] = useState(true);
   const [waveform, setWaveformState] = useState<Waveform>("square");
   const [playing, setPlaying] = useState(false);
   const [playPos, setPlayPos] = useState(0);
@@ -457,13 +453,13 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // the full 88 keys fit or it needs to window them.
   useEffect(() => {
     const el = keysWrapRef.current;
-    if (!el || !keysOpen) return;
+    if (!el) return;
     const measure = () => setKeysWidth(el.clientWidth);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [keysOpen, maximized]);
+  }, [maximized]);
 
   // Which keys the on-screen keyboard shows, and how tall.
   const kb = useMemo(() => {
@@ -899,10 +895,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, [metersOpen, onMetersOpenChange]);
 
   useEffect(() => {
-    onKeysOpenChange?.(keysOpen);
-  }, [keysOpen, onKeysOpenChange]);
-
-  useEffect(() => {
     onWaveformChange?.(waveform);
   }, [waveform, onWaveformChange]);
 
@@ -927,7 +919,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setLoadError(null);
       },
       toggleMeters: () => setMetersOpen((v) => !v),
-      toggleKeys: () => setKeysOpen((v) => !v),
       setWaveform: (next: Waveform) => {
         setWaveformState(next);
         ensureSynth().setWaveform(next);
@@ -992,14 +983,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     >
       <div style={{ flex: "0 0 auto" }}>
         {status === "checking" && <div>Requesting MIDI access…</div>}
-        {status === "unsupported" && <div>Web MIDI is not supported in this browser.</div>}
-        {status === "needsGesture" && (
-          <div>MIDI needs your permission — reopen this window to allow it.</div>
-        )}
-        {status === "denied" && <div>MIDI access is blocked. Allow it in your browser settings.</div>}
-        {status === "ready" && devices.length === 0 && (
-          <div>No MIDI inputs detected — play the on-screen keyboard or open a .mid file.</div>
-        )}
+        {status === "unsupported" && <div>Web MIDI isn&apos;t supported here.</div>}
+        {status === "needsGesture" && <div>Reopen this window to allow MIDI access.</div>}
+        {status === "denied" && <div>MIDI is blocked — check browser settings.</div>}
+        {status === "ready" && devices.length === 0 && <div>No MIDI inputs detected.</div>}
         {status === "ready" && devices.length > 0 && (
           <div>
             <div style={{ fontWeight: "bold" }}>Inputs</div>
@@ -1060,16 +1047,15 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         </div>
       )}
 
-      {keysOpen && (
-        <div
-          ref={keysWrapRef}
-          style={{
-            flex: "0 0 auto",
-            padding: "4px 4px 3px",
-            border: "2px solid",
-            borderColor: "#808080 #ffffff #ffffff #808080",
-          }}
-        >
+      <div
+        ref={keysWrapRef}
+        style={{
+          flex: "0 0 auto",
+          padding: "4px 4px 3px",
+          border: "2px solid",
+          borderColor: "#808080 #ffffff #ffffff #808080",
+        }}
+      >
           {kb.windowed && (
             <div
               style={{
@@ -1108,11 +1094,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onNoteOn={keyboardNoteOn}
             onNoteOff={keyboardNoteOff}
           />
-          <div style={{ marginTop: 3, fontSize: 9, color: "#404040" }}>
-            click, or type A–K (W E T Y U for sharps){octaveShift !== 0 ? ` · ${octaveShift > 0 ? "+" : ""}${octaveShift} oct` : ""} · Z / X shifts octave
-          </div>
+        <div style={{ marginTop: 3, fontSize: 9, color: "#404040" }}>
+          click, or type A–K (W E T Y U for sharps){octaveShift !== 0 ? ` · ${octaveShift > 0 ? "+" : ""}${octaveShift} oct` : ""} · Z / X shifts octave
         </div>
-      )}
+      </div>
 
       <ScrollView style={{ flex: "1 1 auto", minHeight: 0, width: "100%" }}>
         {entries.length === 0 ? (
