@@ -9,6 +9,8 @@ import React, {
   useState,
 } from "react";
 import { ScrollView } from "react95";
+import { MidiSynth, type Waveform } from "@/lib/midiSynth";
+import { decodeSmf, encodeSmf } from "@/lib/smf";
 
 export type MidiWindowHandle = {
   clear: () => void;
@@ -16,12 +18,27 @@ export type MidiWindowHandle = {
   toggleMeters: () => void;
   toggleKeys: () => void;
   scan: () => void;
+  toggleSound: () => void;
+  setWaveform: (waveform: Waveform) => void;
+  startRecording: () => void;
+  stopRecording: () => void;
+  loadSmf: (bytes: Uint8Array, name: string) => void;
+  play: () => void;
+  stop: () => void;
+  hasRecording: () => boolean;
+  exportMid: () => Uint8Array | null;
+  exportLog: (fmt: "csv" | "json") => string;
 };
 
 type MidiWindowProps = {
   onHexOpenChange?: (open: boolean) => void;
   onMetersOpenChange?: (open: boolean) => void;
   onKeysOpenChange?: (open: boolean) => void;
+  onSoundChange?: (on: boolean) => void;
+  onWaveformChange?: (waveform: Waveform) => void;
+  onRecordingChange?: (recording: boolean) => void;
+  onPlayingChange?: (playing: boolean) => void;
+  onLoadedFileChange?: (name: string | null) => void;
 };
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
@@ -61,12 +78,20 @@ type Meters = {
   ccValue: number;
 };
 
+type LoadedFile = {
+  name: string;
+  events: { atMs: number; data: Uint8Array }[];
+  durationMs: number;
+};
+
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const MAX_ENTRIES = 250;
 // Raw bytes past this are trimmed with an ellipsis (keeps SysEx from bloating rows).
 const MAX_HEX_BYTES = 8;
 // How long a channel-activity cell takes to fade back to idle, in ms.
 const DECAY_MS = 600;
+// Guard against a huge imported file scheduling an unreasonable pile of timers.
+const MAX_PLAYBACK_EVENTS = 6000;
 // System real-time messages that would otherwise flood the log.
 const SKIP_STATUS = new Set<number>([0xf8, 0xfe]);
 
@@ -83,6 +108,34 @@ const SYSTEM_NAMES: Record<number, string> = {
   0xff: "Reset",
 };
 
+// On-screen keyboard: pitch classes with a white key, and the ones that have a
+// black key to their immediate right.
+const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
+const BLACK_AFTER = new Set([0, 2, 5, 7, 9]);
+const KEYBOARD_LOW = 48; // C3
+const KEYBOARD_HIGH = 77; // F5
+
+// Computer-keyboard mapping: physical key code -> semitones above the base note.
+const KEY_SEMITONES: Record<string, number> = {
+  KeyA: 0,
+  KeyW: 1,
+  KeyS: 2,
+  KeyE: 3,
+  KeyD: 4,
+  KeyF: 5,
+  KeyT: 6,
+  KeyG: 7,
+  KeyY: 8,
+  KeyH: 9,
+  KeyU: 10,
+  KeyJ: 11,
+  KeyK: 12,
+  KeyO: 13,
+  KeyL: 14,
+  KeyP: 15,
+};
+const KEY_BASE_NOTE = 60; // C4
+
 function noteName(note: number): string {
   return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
 }
@@ -93,6 +146,13 @@ function formatClock(ms: number): string {
   const s = Math.floor((total % 60000) / 1000);
   const millis = Math.floor(total % 1000);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
+
+function formatTransport(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function formatBytes(data: Uint8Array): string {
@@ -184,48 +244,137 @@ function MeterBar({
   );
 }
 
-// Pitch classes of the white keys, left to right, and the black keys with the
-// x offset (in a 140-wide viewBox) they sit at.
-const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
-const BLACK_KEYS = [
-  { pc: 1, x: 14 },
-  { pc: 3, x: 34 },
-  { pc: 6, x: 74 },
-  { pc: 8, x: 94 },
-  { pc: 10, x: 114 },
-];
+type KeyCell = { note: number; leftPct: number; widthPct: number };
 
-function Keyboard({ held }: { held: number[] }) {
+function buildKeyboard(): { whites: KeyCell[]; blacks: KeyCell[] } {
+  const whiteNotes: number[] = [];
+  for (let n = KEYBOARD_LOW; n <= KEYBOARD_HIGH; n++) {
+    if (WHITE_PCS.has(n % 12)) whiteNotes.push(n);
+  }
+  const count = whiteNotes.length;
+  const whiteWidth = 100 / count;
+  const whites: KeyCell[] = whiteNotes.map((note, i) => ({
+    note,
+    leftPct: i * whiteWidth,
+    widthPct: whiteWidth,
+  }));
+  const blackWidth = whiteWidth * 0.62;
+  const blacks: KeyCell[] = [];
+  whiteNotes.forEach((note, i) => {
+    if (BLACK_AFTER.has(note % 12) && note + 1 <= KEYBOARD_HIGH) {
+      blacks.push({
+        note: note + 1,
+        leftPct: (i + 1) * whiteWidth - blackWidth / 2,
+        widthPct: blackWidth,
+      });
+    }
+  });
+  return { whites, blacks };
+}
+
+const KEYBOARD_LAYOUT = buildKeyboard();
+
+function PlayableKeyboard({
+  held,
+  onNoteOn,
+  onNoteOff,
+}: {
+  held: number[];
+  onNoteOn: (note: number) => void;
+  onNoteOff: (note: number) => void;
+}) {
+  const activeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const release = () => {
+      if (activeRef.current != null) {
+        onNoteOff(activeRef.current);
+        activeRef.current = null;
+      }
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+    };
+  }, [onNoteOff]);
+
+  const press = (note: number) => {
+    if (activeRef.current === note) return;
+    if (activeRef.current != null) onNoteOff(activeRef.current);
+    activeRef.current = note;
+    onNoteOn(note);
+  };
+
+  const cellProps = (note: number) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault();
+      press(note);
+    },
+    onPointerEnter: (e: React.PointerEvent) => {
+      if (e.buttons === 1) press(note);
+    },
+  });
+
   return (
-    <svg viewBox="0 0 140 48" width="140" height="48" style={{ display: "block" }}>
-      {WHITE_PCS.map((pc, i) => (
-        <rect
-          key={pc}
-          x={i * 20}
-          y={0}
-          width={20}
-          height={48}
-          fill={held[pc] > 0 ? "#1d9e75" : "#ffffff"}
-          stroke="#404040"
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: 84,
+        userSelect: "none",
+        touchAction: "none",
+      }}
+    >
+      {KEYBOARD_LAYOUT.whites.map(({ note, leftPct, widthPct }) => (
+        <div
+          key={note}
+          {...cellProps(note)}
+          style={{
+            position: "absolute",
+            left: `${leftPct}%`,
+            width: `${widthPct}%`,
+            top: 0,
+            height: "100%",
+            boxSizing: "border-box",
+            border: "1px solid #404040",
+            background: held.includes(note) ? "#1d9e75" : "#fafafa",
+          }}
         />
       ))}
-      {BLACK_KEYS.map(({ pc, x }) => (
-        <rect
-          key={pc}
-          x={x}
-          y={0}
-          width={12}
-          height={28}
-          fill={held[pc] > 0 ? "#0f6e56" : "#202020"}
-          stroke="#404040"
+      {KEYBOARD_LAYOUT.blacks.map(({ note, leftPct, widthPct }) => (
+        <div
+          key={note}
+          {...cellProps(note)}
+          style={{
+            position: "absolute",
+            left: `${leftPct}%`,
+            width: `${widthPct}%`,
+            top: 0,
+            height: "62%",
+            boxSizing: "border-box",
+            border: "1px solid #404040",
+            background: held.includes(note) ? "#0f6e56" : "#202020",
+            zIndex: 2,
+          }}
         />
       ))}
-    </svg>
+    </div>
   );
 }
 
 const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWindow(
-  { onHexOpenChange, onMetersOpenChange, onKeysOpenChange },
+  {
+    onHexOpenChange,
+    onMetersOpenChange,
+    onKeysOpenChange,
+    onSoundChange,
+    onWaveformChange,
+    onRecordingChange,
+    onPlayingChange,
+    onLoadedFileChange,
+  },
   ref,
 ) {
   const [status, setStatus] = useState<MidiStatus>("checking");
@@ -233,14 +382,23 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [hexOpen, setHexOpen] = useState(false);
   const [metersOpen, setMetersOpen] = useState(false);
-  const [keysOpen, setKeysOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(true);
+  const [soundOn, setSoundOn] = useState(false);
+  const [waveform, setWaveformState] = useState<Waveform>("square");
+  const [recording, setRecording] = useState(false);
+  const [recCount, setRecCount] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [playPos, setPlayPos] = useState(0);
+  const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [octaveShift, setOctaveShift] = useState(0);
   const [meters, setMeters] = useState<Meters>(() => ({
     channels: new Array(16).fill(0),
     velocity: 0,
     cc: null,
     ccValue: 0,
   }));
-  const [held, setHeld] = useState<number[]>(() => new Array(12).fill(0));
+  const [held, setHeld] = useState<number[]>([]);
 
   const nextId = useRef(0);
   const startedAt = useRef(0);
@@ -256,43 +414,91 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     cc: null,
     ccValue: 0,
   });
-  // Held-note count per pitch class (0-11), across every octave and channel.
-  const heldRef = useRef<number[]>(new Array(12).fill(0));
+  // Held-note count keyed by MIDI note number, across every source and channel.
+  const heldRef = useRef<Map<number, number>>(new Map());
 
-  const pushEntry = useCallback((source: string, data: Uint8Array) => {
-    const parsed = describe(data);
-    if (!parsed) return;
+  const synthRef = useRef<MidiSynth | null>(null);
+  const soundOnRef = useRef(false);
+  const recordingRef = useRef(false);
+  const recordBufRef = useRef<{ atMs: number; data: number[] }[]>([]);
+  const recordStartRef = useRef(0);
+  const entriesRef = useRef<LogEntry[]>([]);
+  const loadedFileRef = useRef<LoadedFile | null>(null);
+  const playTimeoutsRef = useRef<number[]>([]);
+  const playIntervalRef = useRef<number | null>(null);
+  const octaveShiftRef = useRef(0);
+  const pressedCodesRef = useRef<Map<string, number>>(new Map());
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
-    const m = metersRef.current;
-    if (parsed.channel != null) m.channels[parsed.channel - 1] = 1;
-    if (parsed.velocity != null) m.velocity = parsed.velocity;
-    if (parsed.cc != null) {
-      m.cc = parsed.cc;
-      m.ccValue = parsed.ccValue ?? 0;
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
+  useEffect(() => {
+    octaveShiftRef.current = octaveShift;
+  }, [octaveShift]);
+
+  const ensureSynth = useCallback(() => {
+    if (!synthRef.current) {
+      synthRef.current = new MidiSynth();
+      synthRef.current.setWaveform(waveform);
     }
-    if (parsed.note != null) {
-      const pc = parsed.note % 12;
-      if (parsed.type === "Note On") heldRef.current[pc] += 1;
-      else if (parsed.type === "Note Off") {
-        heldRef.current[pc] = Math.max(0, heldRef.current[pc] - 1);
+    return synthRef.current;
+  }, [waveform]);
+
+  const pushEntry = useCallback(
+    (source: string, data: Uint8Array) => {
+      const parsed = describe(data);
+      if (!parsed) return;
+
+      if (recordingRef.current) {
+        recordBufRef.current.push({
+          atMs: performance.now() - recordStartRef.current,
+          data: Array.from(data),
+        });
+        setRecCount(recordBufRef.current.length);
       }
-      setHeld(heldRef.current.slice());
-    }
 
-    const entry: LogEntry = {
-      id: nextId.current++,
-      clock: formatClock(performance.now() - startedAt.current),
-      source,
-      channel: parsed.channel,
-      type: parsed.type,
-      detail: parsed.detail,
-      bytes: formatBytes(data),
-    };
-    setEntries((prev) => {
-      const next = [entry, ...prev];
-      return next.length > MAX_ENTRIES ? next.slice(0, MAX_ENTRIES) : next;
-    });
-  }, []);
+      if (soundOnRef.current && parsed.note != null) {
+        const synth = ensureSynth();
+        if (parsed.type === "Note On") synth.noteOn(parsed.note, parsed.velocity ?? 96);
+        else if (parsed.type === "Note Off") synth.noteOff(parsed.note);
+      }
+
+      const m = metersRef.current;
+      if (parsed.channel != null) m.channels[parsed.channel - 1] = 1;
+      if (parsed.velocity != null) m.velocity = parsed.velocity;
+      if (parsed.cc != null) {
+        m.cc = parsed.cc;
+        m.ccValue = parsed.ccValue ?? 0;
+      }
+      if (parsed.note != null) {
+        const counts = heldRef.current;
+        if (parsed.type === "Note On") {
+          counts.set(parsed.note, (counts.get(parsed.note) ?? 0) + 1);
+        } else if (parsed.type === "Note Off") {
+          const next = (counts.get(parsed.note) ?? 0) - 1;
+          if (next <= 0) counts.delete(parsed.note);
+          else counts.set(parsed.note, next);
+        }
+        setHeld(Array.from(counts.keys()));
+      }
+
+      const entry: LogEntry = {
+        id: nextId.current++,
+        clock: formatClock(performance.now() - startedAt.current),
+        source,
+        channel: parsed.channel,
+        type: parsed.type,
+        detail: parsed.detail,
+        bytes: formatBytes(data),
+      };
+      setEntries((prev) => {
+        const next = [entry, ...prev];
+        return next.length > MAX_ENTRIES ? next.slice(0, MAX_ENTRIES) : next;
+      });
+    },
+    [ensureSynth],
+  );
 
   const handleMessage = useCallback(
     (event: MIDIMessageEvent) => {
@@ -301,6 +507,100 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       pushEntry(target?.name ?? "input", event.data);
     },
     [pushEntry],
+  );
+
+  const ensureSound = useCallback(() => {
+    const synth = ensureSynth();
+    synth.resume();
+    if (!soundOnRef.current) {
+      soundOnRef.current = true;
+      setSoundOn(true);
+    }
+  }, [ensureSynth]);
+
+  // Play a note from the on-screen or computer keyboard: routed through
+  // pushEntry so the log, meters, held highlight, synth, and recording all react.
+  const handleKeyNote = useCallback(
+    (note: number, on: boolean) => {
+      if (note < 0 || note > 127) return;
+      ensureSound();
+      if (startedAt.current === 0) startedAt.current = performance.now();
+      pushEntry("keys", Uint8Array.from(on ? [0x90, note, 96] : [0x80, note, 0]));
+    },
+    [ensureSound, pushEntry],
+  );
+
+  const keyboardNoteOn = useCallback((note: number) => handleKeyNote(note, true), [handleKeyNote]);
+  const keyboardNoteOff = useCallback((note: number) => handleKeyNote(note, false), [handleKeyNote]);
+
+  const stopPlayback = useCallback(() => {
+    playTimeoutsRef.current.forEach((id) => window.clearTimeout(id));
+    playTimeoutsRef.current = [];
+    if (playIntervalRef.current != null) {
+      window.clearInterval(playIntervalRef.current);
+      playIntervalRef.current = null;
+    }
+    synthRef.current?.allNotesOff();
+    heldRef.current.clear();
+    setHeld([]);
+    setPlaying(false);
+    setPlayPos(0);
+  }, []);
+
+  const play = useCallback(() => {
+    const file = loadedFileRef.current;
+    if (!file || file.events.length === 0) return;
+    stopPlayback();
+    ensureSound();
+    if (startedAt.current === 0) startedAt.current = performance.now();
+    const startPerf = performance.now();
+    const events = file.events.slice(0, MAX_PLAYBACK_EVENTS);
+    for (const ev of events) {
+      playTimeoutsRef.current.push(
+        window.setTimeout(() => pushEntry("file", ev.data), ev.atMs),
+      );
+    }
+    playTimeoutsRef.current.push(
+      window.setTimeout(() => stopPlayback(), file.durationMs + 400),
+    );
+    playIntervalRef.current = window.setInterval(() => {
+      setPlayPos(performance.now() - startPerf);
+    }, 100);
+    setPlaying(true);
+  }, [ensureSound, pushEntry, stopPlayback]);
+
+  const loadSmf = useCallback(
+    (bytes: Uint8Array, name: string) => {
+      stopPlayback();
+      let decoded;
+      try {
+        decoded = decodeSmf(bytes);
+      } catch (err) {
+        setLoadError((err as Error).message || "Could not read that MIDI file");
+        setLoadedFile(null);
+        loadedFileRef.current = null;
+        onLoadedFileChange?.(null);
+        return;
+      }
+      if (decoded.events.length === 0) {
+        setLoadError("That file has no playable notes");
+        setLoadedFile(null);
+        loadedFileRef.current = null;
+        onLoadedFileChange?.(null);
+        return;
+      }
+      setLoadError(null);
+      const file: LoadedFile = {
+        name,
+        events: decoded.events,
+        durationMs: decoded.durationMs,
+      };
+      loadedFileRef.current = file;
+      setLoadedFile(file);
+      onLoadedFileChange?.(name);
+      requestAnimationFrame(() => play());
+    },
+    [onLoadedFileChange, play, stopPlayback],
   );
 
   const syncDevices = useCallback(() => {
@@ -417,9 +717,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     };
   }, [connect, detachAccess]);
 
-  // Decay the channel-activity cells and publish a throttled snapshot for the meters.
+  // Decay the channel-activity cells and publish a throttled snapshot for the
+  // meters. Runs whenever the panel is open — the on-screen keyboard and file
+  // playback feed it too, not just hardware input.
   useEffect(() => {
-    if (status !== "ready" || !metersOpen) return;
+    if (!metersOpen) return;
     let raf = 0;
     let last = performance.now();
     let lastPublish = 0;
@@ -443,7 +745,64 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [status, metersOpen]);
+  }, [metersOpen]);
+
+  // Computer-keyboard playing. Live whenever the synth is on (the on-screen
+  // keyboard and the Sound button both switch it on); a typing target — the
+  // search box, Notepad — always wins so letters go there instead.
+  useEffect(() => {
+    const isTypingTarget = (el: EventTarget | null) => {
+      const node = el as HTMLElement | null;
+      return (
+        !!node &&
+        (/^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName) || node.isContentEditable)
+      );
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!soundOnRef.current || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+      if (event.code === "KeyZ") {
+        if (!event.repeat) {
+          octaveShiftRef.current = Math.max(-3, octaveShiftRef.current - 1);
+          setOctaveShift(octaveShiftRef.current);
+        }
+        return;
+      }
+      if (event.code === "KeyX") {
+        if (!event.repeat) {
+          octaveShiftRef.current = Math.min(3, octaveShiftRef.current + 1);
+          setOctaveShift(octaveShiftRef.current);
+        }
+        return;
+      }
+      const semi = KEY_SEMITONES[event.code];
+      if (semi == null || event.repeat || pressedCodesRef.current.has(event.code)) return;
+      const note = KEY_BASE_NOTE + octaveShiftRef.current * 12 + semi;
+      pressedCodesRef.current.set(event.code, note);
+      event.preventDefault();
+      handleKeyNote(note, true);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      const note = pressedCodesRef.current.get(event.code);
+      if (note == null) return;
+      pressedCodesRef.current.delete(event.code);
+      handleKeyNote(note, false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [handleKeyNote]);
+
+  useEffect(() => {
+    return () => {
+      playTimeoutsRef.current.forEach((id) => window.clearTimeout(id));
+      if (playIntervalRef.current != null) window.clearInterval(playIntervalRef.current);
+      synthRef.current?.dispose();
+    };
+  }, []);
 
   useEffect(() => {
     onHexOpenChange?.(hexOpen);
@@ -457,24 +816,109 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     onKeysOpenChange?.(keysOpen);
   }, [keysOpen, onKeysOpenChange]);
 
+  useEffect(() => {
+    onSoundChange?.(soundOn);
+  }, [soundOn, onSoundChange]);
+
+  useEffect(() => {
+    onWaveformChange?.(waveform);
+  }, [waveform, onWaveformChange]);
+
+  useEffect(() => {
+    onRecordingChange?.(recording);
+  }, [recording, onRecordingChange]);
+
+  useEffect(() => {
+    onPlayingChange?.(playing);
+  }, [playing, onPlayingChange]);
+
   useImperativeHandle(
     ref,
     () => ({
       clear: () => {
+        stopPlayback();
+        recordingRef.current = false;
+        setRecording(false);
+        recordBufRef.current = [];
+        setRecCount(0);
+        synthRef.current?.allNotesOff();
+        heldRef.current.clear();
+        setHeld([]);
         setEntries([]);
-        heldRef.current = new Array(12).fill(0);
-        setHeld(heldRef.current.slice());
+        setLoadError(null);
       },
       toggleHex: () => setHexOpen((v) => !v),
       toggleMeters: () => setMetersOpen((v) => !v),
       toggleKeys: () => setKeysOpen((v) => !v),
       scan: () => connect(true),
+      toggleSound: () => {
+        const next = !soundOnRef.current;
+        soundOnRef.current = next;
+        setSoundOn(next);
+        if (next) ensureSynth().resume();
+        else synthRef.current?.allNotesOff();
+      },
+      setWaveform: (next: Waveform) => {
+        setWaveformState(next);
+        ensureSynth().setWaveform(next);
+      },
+      startRecording: () => {
+        recordBufRef.current = [];
+        setRecCount(0);
+        recordStartRef.current = performance.now();
+        if (startedAt.current === 0) startedAt.current = recordStartRef.current;
+        recordingRef.current = true;
+        setRecording(true);
+      },
+      stopRecording: () => {
+        recordingRef.current = false;
+        setRecording(false);
+      },
+      hasRecording: () => recordBufRef.current.length > 0,
+      loadSmf,
+      play,
+      stop: stopPlayback,
+      exportMid: () =>
+        recordBufRef.current.length > 0
+          ? encodeSmf(recordBufRef.current, { name: "Keys recording" })
+          : null,
+      exportLog: (fmt: "csv" | "json") => {
+        const rows = entriesRef.current;
+        if (fmt === "json") {
+          return JSON.stringify(
+            rows.map((r) => ({
+              clock: r.clock,
+              source: r.source,
+              channel: r.channel,
+              type: r.type,
+              detail: r.detail,
+              bytes: r.bytes,
+            })),
+            null,
+            2,
+          );
+        }
+        const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+        const header = "clock,source,channel,type,detail,bytes";
+        const body = rows
+          .map((r) =>
+            [r.clock, r.source, r.channel ?? "", r.type, r.detail, r.bytes]
+              .map((v) => esc(String(v)))
+              .join(","),
+          )
+          .join("\n");
+        return `${header}\n${body}`;
+      },
     }),
-    [connect],
+    [connect, ensureSynth, loadSmf, play, stopPlayback],
   );
+
+  const octaveLabel = octaveShift === 0 ? "" : ` · keys ${octaveShift > 0 ? "+" : ""}${octaveShift} oct`;
 
   return (
     <div
+      ref={rootRef}
+      tabIndex={0}
       style={{
         flex: "1 1 auto",
         minHeight: 0,
@@ -484,6 +928,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         gap: 4,
         fontFamily: "monospace",
         fontSize: 11,
+        outline: "none",
       }}
     >
       <div style={{ flex: "0 0 auto" }}>
@@ -495,7 +940,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {status === "denied" && (
           <div>MIDI access is blocked. Allow it in your browser settings, then press Scan.</div>
         )}
-        {status === "ready" && devices.length === 0 && <div>No MIDI inputs detected. Plug one in.</div>}
+        {status === "ready" && devices.length === 0 && (
+          <div>No MIDI inputs detected — play the on-screen keyboard or open a .mid file.</div>
+        )}
         {status === "ready" && devices.length > 0 && (
           <div>
             <div style={{ fontWeight: "bold" }}>Inputs</div>
@@ -507,6 +954,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             ))}
           </div>
         )}
+        {loadError && <div style={{ color: "#a80000" }}>{loadError}</div>}
       </div>
 
       {metersOpen && (
@@ -559,12 +1007,15 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         <div
           style={{
             flex: "0 0 auto",
-            padding: "3px 4px",
+            padding: "4px 4px 3px",
             border: "2px solid",
             borderColor: "#808080 #ffffff #ffffff #808080",
           }}
         >
-          <Keyboard held={held} />
+          <PlayableKeyboard held={held} onNoteOn={keyboardNoteOn} onNoteOff={keyboardNoteOff} />
+          <div style={{ marginTop: 3, fontSize: 9, color: "#404040" }}>
+            click, or type A–K (W E T Y U for sharps){octaveShift !== 0 ? ` · ${octaveShift > 0 ? "+" : ""}${octaveShift} oct` : ""} · Z / X shifts octave
+          </div>
         </div>
       )}
 
@@ -574,7 +1025,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         ) : (
           entries.map((entry) => (
             <div key={entry.id} style={{ whiteSpace: "pre" }}>
-              {entry.clock}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
+              {entry.clock}  {entry.source.slice(0, 8).padEnd(8)}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
               {hexOpen && <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>}
             </div>
           ))
@@ -585,7 +1036,14 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {entries.length} message{entries.length === 1 ? "" : "s"}
         {entries.length >= MAX_ENTRIES ? " (capped)" : ""}
         {"  ·  "}
-        {hexOpen ? "hex on" : "hex off"}
+        {soundOn ? `sound ${waveform}` : "sound off"}
+        {recording ? `  ·  ● rec ${recCount}` : ""}
+        {playing && loadedFile
+          ? `  ·  ▶ ${formatTransport(playPos)} / ${formatTransport(loadedFile.durationMs)}`
+          : loadedFile
+            ? `  ·  ${loadedFile.name}`
+            : ""}
+        {octaveLabel}
       </div>
     </div>
   );

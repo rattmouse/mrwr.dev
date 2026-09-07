@@ -15,6 +15,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
+import type { Waveform } from "@/lib/midiSynth";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import strudelSongs from "@/data/strudelSongs.json";
@@ -38,6 +39,24 @@ const PAINT_COLORS = [
   "#7f007f",
 ] as const;
 const PAINT_SIZES = [2, 6, 14] as const;
+
+const MIDI_WAVEFORMS: readonly Waveform[] = ["square", "sawtooth", "triangle", "sine"];
+
+// Hand the browser a Blob to save. First (and only) file download in the app —
+// nothing here touches the network.
+function downloadBlob(data: string | Uint8Array, filename: string, mime: string) {
+  const part: BlobPart =
+    typeof data === "string" ? data : (data.slice().buffer as ArrayBuffer);
+  const blob = new Blob([part], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 type ProgramWindowProps = {
   id: ProgramWindowId;
@@ -74,6 +93,8 @@ export default function ProgramWindow({
   const paintRef = useRef<PaintWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
+  const midiWaveMenuRef = useRef<HTMLDivElement | null>(null);
+  const midiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
   const [musicJitter, setMusicJitter] = useState({ x: 0, y: 0 });
@@ -85,9 +106,16 @@ export default function ProgramWindow({
   const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
   const [midiFileOpen, setMidiFileOpen] = useState(false);
+  const [midiWaveOpen, setMidiWaveOpen] = useState(false);
   const [midiHexOpen, setMidiHexOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
   const [midiKeysOpen, setMidiKeysOpen] = useState(false);
+  const [midiSoundOn, setMidiSoundOn] = useState(false);
+  const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
+  const [midiRecording, setMidiRecording] = useState(false);
+  const [midiCanSave, setMidiCanSave] = useState(false);
+  const [midiPlaying, setMidiPlaying] = useState(false);
+  const [midiLoadedFile, setMidiLoadedFile] = useState<string | null>(null);
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
   const [paintBrush, setPaintBrush] = useState<number>(6);
 
@@ -124,10 +152,11 @@ export default function ProgramWindow({
     id === "welcome" ? 160
       : id === "changes" ? 360
         : id === "music" ? 220
-          : id === "midi" ? 404
+          : id === "midi" ? 470
             : id === "paint" ? 320
               : 300;
-  const normalWidth = id === "changes" ? 320 : id === "paint" ? 360 : undefined;
+  const normalWidth =
+    id === "changes" ? 320 : id === "paint" ? 360 : id === "midi" ? 448 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -201,6 +230,7 @@ export default function ProgramWindow({
   useEffect(() => {
     if (id !== "midi") {
       setMidiFileOpen(false);
+      setMidiWaveOpen(false);
       return;
     }
     const handleMouseDown = (event: MouseEvent) => {
@@ -208,6 +238,9 @@ export default function ProgramWindow({
       if (!(target instanceof Node)) return;
       if (!(midiFileMenuRef.current?.contains(target) ?? false)) {
         setMidiFileOpen(false);
+      }
+      if (!(midiWaveMenuRef.current?.contains(target) ?? false)) {
+        setMidiWaveOpen(false);
       }
     };
     document.addEventListener("mousedown", handleMouseDown);
@@ -484,7 +517,13 @@ export default function ProgramWindow({
             active={midiFileOpen}
             aria-label="File"
             title="File"
-            onClick={() => setMidiFileOpen((prev) => !prev)}
+            onClick={() =>
+              setMidiFileOpen((prev) => {
+                const next = !prev;
+                if (next) setMidiCanSave(!!midiRef.current?.hasRecording());
+                return next;
+              })
+            }
           >
             File
           </Button>
@@ -518,6 +557,115 @@ export default function ProgramWindow({
                 >
                   Clear
                 </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    if (midiRecording) {
+                      midiRef.current?.stopRecording();
+                    } else {
+                      midiRef.current?.startRecording();
+                      setMidiCanSave(true);
+                    }
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  {midiRecording ? "Stop recording" : "Record"}
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    midiFileInputRef.current?.click();
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Open MIDI file…
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  disabled={!midiCanSave}
+                  onClick={() => {
+                    const data = midiRef.current?.exportMid();
+                    if (data) {
+                      const stamp = new Date()
+                        .toISOString()
+                        .replace(/[:T]/g, "-")
+                        .slice(0, 19);
+                      downloadBlob(data, `keys-${stamp}.mid`, "audio/midi");
+                    }
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Save recording (.mid)
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    const text = midiRef.current?.exportLog("csv");
+                    if (text != null) downloadBlob(text, "keys-log.csv", "text/csv");
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Export log (CSV)
+                </MenuListItem>
+                <MenuListItem
+                  size="sm"
+                  onClick={() => {
+                    const text = midiRef.current?.exportLog("json");
+                    if (text != null)
+                      downloadBlob(text, "keys-log.json", "application/json");
+                    setMidiFileOpen(false);
+                  }}
+                >
+                  Export log (JSON)
+                </MenuListItem>
+              </MenuList>
+            </div>
+          )}
+        </div>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Play notes through the built-in synth"
+          active={midiSoundOn}
+          onClick={() => midiRef.current?.toggleSound()}
+        >
+          Sound
+        </Button>
+        <div ref={midiWaveMenuRef} style={{ position: "relative", display: "inline-block" }}>
+          <Button
+            variant="menu"
+            size="sm"
+            active={midiWaveOpen}
+            title="Synth waveform"
+            onClick={() => setMidiWaveOpen((prev) => !prev)}
+          >
+            Wave
+          </Button>
+          {midiWaveOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% - 2px)",
+                left: 0,
+                zIndex: 1000,
+                width: "max-content",
+              }}
+              onMouseLeave={() => setMidiWaveOpen(false)}
+            >
+              <MenuList style={{ marginTop: 0 }}>
+                {MIDI_WAVEFORMS.map((wave) => (
+                  <MenuListItem
+                    key={wave}
+                    size="sm"
+                    onClick={() => {
+                      midiRef.current?.setWaveform(wave);
+                      setMidiWaveOpen(false);
+                    }}
+                  >
+                    {wave === midiWaveform ? "• " : "  "}
+                    {wave}
+                  </MenuListItem>
+                ))}
               </MenuList>
             </div>
           )}
@@ -543,12 +691,47 @@ export default function ProgramWindow({
         <Button
           size="sm"
           style={{ fontWeight: "bold" }}
-          title="One-octave keyboard"
+          title="On-screen keyboard"
           active={midiKeysOpen}
           onClick={() => midiRef.current?.toggleKeys()}
         >
           Keys
         </Button>
+        {midiLoadedFile && (
+          <>
+            <Button
+              size="sm"
+              style={{ fontWeight: "bold" }}
+              title={`Play ${midiLoadedFile}`}
+              active={midiPlaying}
+              onClick={() => midiRef.current?.play()}
+            >
+              ▶
+            </Button>
+            <Button
+              size="sm"
+              style={{ fontWeight: "bold" }}
+              title="Stop playback"
+              active={!midiPlaying}
+              onClick={() => midiRef.current?.stop()}
+            >
+              ■
+            </Button>
+          </>
+        )}
+        <input
+          ref={midiFileInputRef}
+          type="file"
+          accept=".mid,.midi,audio/midi,audio/x-midi"
+          hidden
+          onChange={async (event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            const buf = new Uint8Array(await file.arrayBuffer());
+            midiRef.current?.loadSmf(buf, file.name);
+          }}
+        />
       </>
     ) : id === "paint" ? (
       <>
@@ -708,6 +891,11 @@ export default function ProgramWindow({
           onHexOpenChange={setMidiHexOpen}
           onMetersOpenChange={setMidiMetersOpen}
           onKeysOpenChange={setMidiKeysOpen}
+          onSoundChange={setMidiSoundOn}
+          onWaveformChange={setMidiWaveform}
+          onRecordingChange={setMidiRecording}
+          onPlayingChange={setMidiPlaying}
+          onLoadedFileChange={setMidiLoadedFile}
         />
       )}
 
