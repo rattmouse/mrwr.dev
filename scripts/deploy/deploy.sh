@@ -156,6 +156,11 @@ fi
 cd "$RELEASE_DIR"
 timeout 300 npm install --omit=dev
 
+# Home for the optional notifier env file (see the unit's EnvironmentFile).
+# Just the dir — the operator drops notify.env in by hand, it holds secrets
+# and is never shipped. Under /etc so SELinux lets PID 1 read it.
+mkdir -p /etc/mrwr.dev
+
 cp "$RELEASE_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null

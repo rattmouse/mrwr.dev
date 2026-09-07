@@ -12,9 +12,11 @@ Environment=NODE_ENV=production
 # release swaps and pruning (issue #55).
 Environment=SEARCH_LOG_FILE=__APP_DIR__/shared/search-log.ndjson
 # Optional search-session notifier config (SEARCH_NOTIFY_KIND=telegram|ntfy|
-# webhook plus its secrets). Lives in shared/ so it survives release swaps and
-# is never committed; the leading "-" makes it optional.
-EnvironmentFile=-__APP_DIR__/shared/notify.env
+# webhook plus its secrets). Under /etc so SELinux labels it something PID 1
+# may read (a file under __APP_DIR__/ i.e. /root inherits admin_home_t, which
+# init_t cannot read — the "-" then hides the failure and the notifier stays
+# silently unconfigured). Never committed; the leading "-" makes it optional.
+EnvironmentFile=-/etc/mrwr.dev/notify.env
 User=root
 StandardOutput=journal
 StandardError=journal
