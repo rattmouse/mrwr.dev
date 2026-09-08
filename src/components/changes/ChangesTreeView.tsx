@@ -82,6 +82,11 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
 
       {shown.map((entry) => {
         const era = ERA_META[entry.era];
+        const hasStats =
+          entry.stats.commits > 0 ||
+          entry.stats.files > 0 ||
+          entry.stats.insertions > 0 ||
+          entry.stats.deletions > 0;
         return (
           <div
             key={entry.version}
@@ -108,7 +113,9 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
 
             {entry.summary && <div style={{ fontSize: 12, marginTop: 3 }}>{entry.summary}</div>}
 
-            <div style={{ fontSize: 10, color: "#333", marginTop: 3 }}>{formatStats(entry.stats)}</div>
+            {hasStats && (
+              <div style={{ fontSize: 10, color: "#333", marginTop: 3 }}>{formatStats(entry.stats)}</div>
+            )}
 
             {entry.changes.length > 0 && (
               <ul style={{ margin: "5px 0 0", paddingLeft: 16, fontSize: 11, lineHeight: 1.4 }}>
