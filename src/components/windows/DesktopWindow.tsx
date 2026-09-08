@@ -175,7 +175,11 @@ export default function DesktopWindow({
             boxShadow: frameShadow,
           };
 
-  const showResizeGrip = !isMax && !isDocked && !controlsDisabled;
+  // The grip lives in its own corner gutter so it never lands on a scrollbar or
+  // content edge. The gutter tracks the layout only (not controlsDisabled) so
+  // toggling the title-bar controls doesn't reflow the window body.
+  const hasResizeGutter = !isMax && !isDocked;
+  const showResizeGrip = hasResizeGutter && !controlsDisabled;
 
   return (
     <Window style={style}>
@@ -256,6 +260,7 @@ export default function DesktopWindow({
             display: "flex",
             flexDirection: "column",
             padding: 6,
+            paddingBottom: hasResizeGutter ? 15 : 6,
             gap: 2,
             position: "relative",
             zIndex: 1,
@@ -273,15 +278,15 @@ export default function DesktopWindow({
           title="Resize"
           style={{
             position: "absolute",
-            right: 2,
-            bottom: 2,
-            width: 15,
-            height: 15,
+            right: 3,
+            bottom: 3,
+            width: 13,
+            height: 13,
             zIndex: 4,
             cursor: "nwse-resize",
             touchAction: "none",
             backgroundImage:
-              "linear-gradient(135deg, transparent 0 5px, rgba(0,0,0,0.4) 5px 7px, transparent 7px 9px, rgba(0,0,0,0.4) 9px 11px, transparent 11px 13px, rgba(0,0,0,0.4) 13px 15px, transparent 15px)",
+              "linear-gradient(135deg, transparent 0 4px, rgba(255,255,255,0.85) 4px 5px, rgba(0,0,0,0.35) 5px 6px, transparent 6px 7px, rgba(255,255,255,0.85) 7px 8px, rgba(0,0,0,0.35) 8px 9px, transparent 9px 10px, rgba(255,255,255,0.85) 10px 11px, rgba(0,0,0,0.35) 11px 12px, transparent 12px)",
           }}
         />
       )}
