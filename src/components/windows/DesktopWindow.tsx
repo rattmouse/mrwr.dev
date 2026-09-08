@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button, Toolbar, Window, WindowContent, WindowHeader } from "react95";
 import { Z } from "@/constants/zIndex";
 import { Layout } from "@/components/windows/windowTypes";
@@ -55,6 +55,61 @@ export default function DesktopWindow({
 
   const TASKBAR_H = 50;
   const GAP = 8;
+  const MIN_W = 220;
+  const MIN_H = 130;
+
+  // In the normal layout the window is centred with a transform. The first drag
+  // of the resize grip freezes it to an explicit top-left + size so the corner
+  // pulls naturally; this override is cleared whenever the layout changes or a
+  // different window takes over the frame, so sizes never persist.
+  const [resizeBox, setResizeBox] = useState<
+    { left: number; top: number; width: number; height: number } | null
+  >(null);
+  const gripRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setResizeBox(null);
+  }, [layout, title, normalWidth, normalHeight]);
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isMax || isDocked || controlsDisabled) return;
+    const frame = gripRef.current?.parentElement;
+    if (!frame) return;
+    e.preventDefault();
+
+    const rect = frame.getBoundingClientRect();
+    const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    const startX = e.clientX;
+    const startY = e.clientY;
+    setResizeBox(base);
+
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "nwse-resize";
+
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+    const onMove = (ev: PointerEvent) => {
+      const maxW = Math.max(MIN_W, window.innerWidth - base.left - GAP);
+      const maxH = Math.max(MIN_H, window.innerHeight - base.top - GAP);
+      setResizeBox({
+        ...base,
+        width: clamp(base.width + (ev.clientX - startX), MIN_W, maxW),
+        height: clamp(base.height + (ev.clientY - startY), MIN_H, maxH),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
 
   const NORMAL_W = normalWidth;
   const DOCK_W = 200;
@@ -95,18 +150,36 @@ export default function DesktopWindow({
           flexDirection: "column",
           boxShadow: frameShadow,
         }
-      : {
-          position: "absolute",
-          left: normalLeft,
-          top: normalTop,
-          transform: `translate(calc(-50% + ${jitterX}px), calc(-50% + ${jitterY}px))`,
-          width: NORMAL_W,
-          height: normalHeight,
-          zIndex: Z.WINDOW,
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: frameShadow,
-        };
+      : resizeBox
+        ? {
+            position: "absolute",
+            left: resizeBox.left,
+            top: resizeBox.top,
+            width: resizeBox.width,
+            height: resizeBox.height,
+            zIndex: Z.WINDOW,
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: frameShadow,
+          }
+        : {
+            position: "absolute",
+            left: normalLeft,
+            top: normalTop,
+            transform: `translate(calc(-50% + ${jitterX}px), calc(-50% + ${jitterY}px))`,
+            width: NORMAL_W,
+            height: normalHeight,
+            zIndex: Z.WINDOW,
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: frameShadow,
+          };
+
+  // The grip lives in its own corner gutter so it never lands on a scrollbar or
+  // content edge. The gutter tracks the layout only (not controlsDisabled) so
+  // toggling the title-bar controls doesn't reflow the window body.
+  const hasResizeGutter = !isMax && !isDocked;
+  const showResizeGrip = hasResizeGutter && !controlsDisabled;
 
   return (
     <Window style={style}>
@@ -187,6 +260,7 @@ export default function DesktopWindow({
             display: "flex",
             flexDirection: "column",
             padding: 6,
+            paddingBottom: hasResizeGutter ? 15 : 6,
             gap: 2,
             position: "relative",
             zIndex: 1,
@@ -194,6 +268,27 @@ export default function DesktopWindow({
         >
           {children}
         </WindowContent>
+      )}
+
+      {showResizeGrip && (
+        <div
+          ref={gripRef}
+          onPointerDown={startResize}
+          aria-hidden
+          title="Resize"
+          style={{
+            position: "absolute",
+            right: 3,
+            bottom: 3,
+            width: 13,
+            height: 13,
+            zIndex: 4,
+            cursor: "nwse-resize",
+            touchAction: "none",
+            backgroundImage:
+              "linear-gradient(135deg, transparent 0 4px, rgba(255,255,255,0.85) 4px 5px, rgba(0,0,0,0.35) 5px 6px, transparent 6px 7px, rgba(255,255,255,0.85) 7px 8px, rgba(0,0,0,0.35) 8px 9px, transparent 9px 10px, rgba(255,255,255,0.85) 10px 11px, rgba(0,0,0,0.35) 11px 12px, transparent 12px)",
+          }}
+        />
       )}
     </Window>
   );
