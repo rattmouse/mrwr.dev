@@ -9,7 +9,7 @@
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [29, 53, 55, 66, 67, 70, 81, 85],
+      "issues": [3, 29, 53, 55, 66, 67, 70, 81, 85],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
         "Projects now shows nine interface demos \u2014 marked as demos, not client work \u2014 with the full set at /mockups/",
@@ -34,7 +34,8 @@
         "Keys now opens on any browser — no MIDI hardware or Web MIDI support needed, since the on-screen keyboard and .mid playback work on their own",
         "Tidied Keys for phones — narrower window, a two-octave keyboard you can now slide across with one finger, and octave up/down buttons on the full keyboard when it's maximised on a small screen",
         "Reworked Collections: the picture tiles now scatter across the whole desktop, you can drag them anywhere and they stay put, and picking one no longer reshuffles the others — the window just grew a little so the selected picture sits centred",
-        "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread"
+        "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread",
+        "Windows have a working resize grip in the bottom-right corner now — drag it to size a window, and it stays put where you left it"
       ]
     },
     {
