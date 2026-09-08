@@ -3,39 +3,80 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "4.4",
+      "era": "claude",
+      "name": "Search & windows",
+      "date": "2026-09-08",
+      "summary": "Notes that nudge, windows that resize.",
+      "issues": [3, 53, 55, 95],
+      "changes": [
+        "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread",
+        "Windows have a working resize grip in the bottom-right corner now — drag it to size a window, and it stays put where you left it",
+        "Split the version history into minor releases, so each card here is a short, readable list instead of one long dump"
+      ]
+    },
+    {
+      "version": "4.3",
+      "era": "claude",
+      "name": "Desktop shell",
+      "date": "2026-09-06",
+      "summary": "Start menu, Paint, and a tidier desktop.",
+      "issues": [29, 66, 70, 81, 85],
+      "changes": [
+        "Renamed the REPL program to Sounds in the Start menu",
+        "Swapped the LinkedIn social link for Bluesky",
+        "Tidied the Start menu's Programs list into App, Tools, and Toys groups, with Welcome left on its own",
+        "Kept the Start menu's submenus on screen in narrow browser windows — one that would run off the right edge now opens to the left instead",
+        "Stopped the Issues window from wrapping long lines — they run on and scroll sideways now, like Notepad with word wrap off",
+        "Added Paint: a blank white sheet you scribble on with a pencil — pick a colour, change the brush size, and Clear to start over",
+        "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens"
+      ]
+    },
+    {
+      "version": "4.2",
+      "era": "claude",
+      "name": "Collections & Projects",
+      "date": "2026-09-06",
+      "summary": "Pictures get room to breathe.",
+      "issues": [67],
+      "changes": [
+        "Projects now shows nine interface demos — marked as demos, not client work — with the full set at /mockups/",
+        "Gave Collections its own Albums, Paintings, and Songs tabs, with paintings and songs drawn from picked Bluesky posts",
+        "Switched the Collections category picker from tabs to toggle buttons that match the Sounds and Keys toolbars",
+        "Reworked Collections: the picture tiles now scatter across the whole desktop, you can drag them anywhere and they stay put, and picking one no longer reshuffles the others — the window just grew a little so the selected picture sits centred"
+      ]
+    },
+    {
+      "version": "4.1",
+      "era": "claude",
+      "name": "Keys",
+      "date": "2026-09-06",
+      "summary": "A MIDI monitor grows into a synth.",
+      "issues": [],
+      "changes": [
+        "Added the Keys program: lists connected MIDI inputs and logs their messages live",
+        "Expanded the Keys monitor with activity meters, a one-octave keyboard, raw message bytes, and a Scan button to grant MIDI access",
+        "Keys makes sound now — a built-in synth plays incoming notes and an on-screen keyboard you click, tap, or play with your computer keys, with a square/saw/triangle/sine waveform picker",
+        "Keys keeps a running message list you can Play back through the synth, Save as a .mid file, or export as CSV or JSON",
+        "Open a .mid file in Keys to load its notes into the message list, then hit Play to hear it",
+        "Keys now opens on any browser — no MIDI hardware or Web MIDI support needed, since the on-screen keyboard and .mid playback work on their own",
+        "Tidied Keys for phones — narrower window, a two-octave keyboard you can now slide across with one finger, and octave up/down buttons on the full keyboard when it's maximised on a small screen"
+      ]
+    },
+    {
       "version": "4.0",
       "era": "claude",
       "name": "Claude cleanup",
       "date": "2026-09-05",
       "summary": "Cleanup and deploy plumbing, no new toys.",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
-      "issues": [3, 29, 53, 55, 66, 67, 70, 81, 85],
+      "issues": [],
       "changes": [
         "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
-        "Projects now shows nine interface demos \u2014 marked as demos, not client work \u2014 with the full set at /mockups/",
         "Ship a minimal production package.json and track the lockfile",
         "Refresh the issues list from GitHub as a deploy step",
         "Cleared out ESLint errors and dead image assets",
-        "Added a Claude credit and tidied the README headings",
-        "Renamed the REPL program to Sounds in the Start menu",
-        "Swapped the LinkedIn social link for Bluesky",
-        "Added the Keys program: lists connected MIDI inputs and logs their messages live",
-        "Gave Collections its own Albums, Paintings, and Songs tabs, with paintings and songs drawn from picked Bluesky posts",
-        "Expanded the Keys monitor with activity meters, a one-octave keyboard, raw message bytes, and a Scan button to grant MIDI access",
-        "Switched the Collections category picker from tabs to toggle buttons that match the Sounds and Keys toolbars",
-        "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens",
-        "Stopped the Issues window from wrapping long lines — they run on and scroll sideways now, like Notepad with word wrap off",
-        "Added Paint: a blank white sheet you scribble on with a pencil — pick a colour, change the brush size, and Clear to start over",
-        "Tidied the Start menu's Programs list into App, Tools, and Toys groups, with Welcome left on its own",
-        "Kept the Start menu's submenus on screen in narrow browser windows — one that would run off the right edge now opens to the left instead",
-        "Keys makes sound now — a built-in synth plays incoming notes and an on-screen keyboard you click, tap, or play with your computer keys, with a square/saw/triangle/sine waveform picker",
-        "Keys keeps a running message list you can Play back through the synth, Save as a .mid file, or export as CSV or JSON",
-        "Open a .mid file in Keys to load its notes into the message list, then hit Play to hear it",
-        "Keys now opens on any browser — no MIDI hardware or Web MIDI support needed, since the on-screen keyboard and .mid playback work on their own",
-        "Tidied Keys for phones — narrower window, a two-octave keyboard you can now slide across with one finger, and octave up/down buttons on the full keyboard when it's maximised on a small screen",
-        "Reworked Collections: the picture tiles now scatter across the whole desktop, you can drag them anywhere and they stay put, and picking one no longer reshuffles the others — the window just grew a little so the selected picture sits centred",
-        "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread",
-        "Windows have a working resize grip in the bottom-right corner now — drag it to size a window, and it stays put where you left it"
+        "Added a Claude credit and tidied the README headings"
       ]
     },
     {
