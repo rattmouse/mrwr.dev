@@ -12,7 +12,8 @@
       "changes": [
         "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread",
         "Windows have a working resize grip in the bottom-right corner now — drag it to size a window, and it stays put where you left it",
-        "Split the version history into minor releases, so each card here is a short, readable list instead of one long dump"
+        "Split the version history into minor releases, so each card here is a short, readable list instead of one long dump",
+      "midi.exe is now laid out like an AKAI MPK mini PLUS — pitch bend and mod faders, a thumbstick, eight pads and eight knobs, all of which play and show up in the message log"
       ]
     },
     {

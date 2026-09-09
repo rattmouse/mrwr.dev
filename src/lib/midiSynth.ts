@@ -27,6 +27,8 @@ export class MidiSynth {
   private master: GainNode | null = null;
   private voices = new Map<number, Voice>();
   private waveform: Waveform = "square";
+  /** Current pitch-bend offset in cents, applied to every voice. */
+  private bendCents = 0;
 
   /** Create the context on first use; safe to call repeatedly. */
   private ensure(): { ctx: AudioContext; master: GainNode } | null {
@@ -62,6 +64,18 @@ export class MidiSynth {
     return this.waveform;
   }
 
+  /** Bend every sounding voice, and any that start while the bend is held. */
+  setPitchBend(semitones: number): void {
+    this.bendCents = semitones * 100;
+    this.voices.forEach((voice) => {
+      try {
+        voice.osc.detune.value = this.bendCents;
+      } catch {
+        /* voice already stopped */
+      }
+    });
+  }
+
   noteOn(note: number, velocity = 100): void {
     const parts = this.ensure();
     if (!parts) return;
@@ -74,6 +88,7 @@ export class MidiSynth {
     const osc = ctx.createOscillator();
     osc.type = this.waveform;
     osc.frequency.value = midiToFreq(note);
+    osc.detune.value = this.bendCents;
 
     const gain = ctx.createGain();
     const level = Math.max(0.05, Math.min(1, velocity / 127)) * VOICE_GAIN;
