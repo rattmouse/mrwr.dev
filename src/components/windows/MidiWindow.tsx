@@ -9,9 +9,31 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button, ScrollView } from "react95";
+import { ScrollView } from "react95";
 import { MidiSynth, type Waveform } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
+import {
+  BrandBar,
+  Chassis,
+  Cluster,
+  Fader,
+  Joystick,
+  KNOB_CC_BASE,
+  Knob,
+  Legend,
+  PAD_BANKS,
+  PAD_BANK_SIZE,
+  PAD_BASE_NOTE,
+  PAD_CHANNEL,
+  PANEL,
+  Pad,
+  PanelButton,
+  padBankBase,
+  STICK_CC_X,
+  STICK_CC_Y,
+  STICK_CENTRE,
+  Well,
+} from "@/components/windows/MpkPanel";
 
 export type MidiWindowHandle = {
   newSession: () => void;
@@ -63,6 +85,8 @@ type Parsed = {
   velocity?: number;
   cc?: number;
   ccValue?: number;
+  /** Raw 14-bit pitch-bend value, 8192 = centre. */
+  bend?: number;
 };
 
 type Meters = {
@@ -110,15 +134,32 @@ const SYSTEM_NAMES: Record<number, string> = {
 // black key to their immediate right.
 const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
 const BLACK_AFTER = new Set([0, 2, 5, 7, 9]);
-// Two octaves in the normal window; the full 88-key piano when maximised — or a
-// scrollable window of it, with octave buttons, when the screen is too narrow.
-const RANGE_NORMAL = { low: 48, high: 72 }; // C3–C5
+// The MPK's own 37 mini keys in the normal window, transposed by the OCT
+// buttons; the full 88-key piano when maximised — or a scrollable window of it,
+// with octave buttons, when the screen is too narrow.
+const MINI_KEY_SPAN = 36; // 37 keys, C to C
+const RANGE_NORMAL = { low: 36, high: 36 + MINI_KEY_SPAN }; // C2–C5 at octave 0
 const RANGE_FULL = { low: 21, high: 108 }; // A0–C8
 const FULL_WHITE_COUNT = 52;
 // Below this the full keyboard's keys are too small to hit — window it instead.
 const MIN_WHITE_PX = 22;
-const KEY_HEIGHT_NORMAL = 84;
+const KEY_HEIGHT_NORMAL = 72;
+// Bend / mod fader travel; the stick cluster is sized to match.
+const FADER_HEIGHT = 78;
 const KEY_HEIGHT_FULL = 132;
+
+// The stick's axes run -1..1 on screen and 0..127 on the wire, resting at 64.
+// The halves are scaled separately so full deflection reaches 0 and 127 either
+// way rather than stopping one short at the bottom.
+function axisToCc(axis: number): number {
+  const a = Math.max(-1, Math.min(1, axis));
+  return Math.round(STICK_CENTRE + a * (a < 0 ? STICK_CENTRE : 127 - STICK_CENTRE));
+}
+
+function ccToAxis(value: number): number {
+  const v = Math.max(0, Math.min(127, value));
+  return (v - STICK_CENTRE) / (v < STICK_CENTRE ? STICK_CENTRE : 127 - STICK_CENTRE);
+}
 
 // Computer-keyboard mapping: physical key code -> semitones above the base note.
 const KEY_SEMITONES: Record<string, number> = {
@@ -213,6 +254,7 @@ function describe(data: Uint8Array): Parsed | null {
         channel,
         type: "Pitch Bend",
         detail: `${(d2 << 7) | d1} (${((d2 << 7) | d1) - 8192 >= 0 ? "+" : ""}${((d2 << 7) | d1) - 8192})`,
+        bend: (d2 << 7) | d1,
       };
     default:
       return { channel, type: `0x${kind.toString(16)}`, detail: "" };
@@ -231,16 +273,16 @@ function MeterBar({
   const pct = hasValue ? Math.max(0, Math.min(1, value / 127)) * 100 : 0;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ flex: "0 0 40px", color: "#404040" }}>{label}</span>
+      <span style={{ flex: "0 0 40px", color: PANEL.dim }}>{label}</span>
       <div
         style={{
           flex: "1 1 auto",
           height: 9,
-          background: "#ffffff",
-          border: "1px solid #808080",
+          background: PANEL.canvas,
+          border: `1px solid ${PANEL.shadow}`,
         }}
       >
-        <div style={{ width: `${pct}%`, height: "100%", background: "#000080" }} />
+        <div style={{ width: `${pct}%`, height: "100%", background: PANEL.accent }} />
       </div>
       <span style={{ flex: "0 0 26px", textAlign: "right" }}>
         {hasValue ? Math.round(value) : "—"}
@@ -284,7 +326,7 @@ function BitSpotlight({
           return (
             <React.Fragment key={i}>
               {cell.boundary && i > 0 && (
-                <div style={{ flex: "0 0 2px", alignSelf: "stretch", background: "#404040" }} />
+                <div style={{ flex: "0 0 2px", alignSelf: "stretch", background: PANEL.dim }} />
               )}
               <div
                 style={{
@@ -298,7 +340,7 @@ function BitSpotlight({
                   borderRadius: 2,
                 }}
               >
-                <div style={{ textAlign: "center", color: "#404040", minHeight: 13 }}>
+                <div style={{ textAlign: "center", color: PANEL.dim, minHeight: 13 }}>
                   {cell.blank ? "" : cell.value.toString(16).toUpperCase().padStart(2, "0")}
                 </div>
                 {[7, 6, 5, 4, 3, 2, 1, 0].map((bit) => {
@@ -310,8 +352,8 @@ function BitSpotlight({
                       style={{
                         height: top ? 14 : 8,
                         marginBottom: top ? 2 : 0,
-                        border: "1px solid #808080",
-                        background: on ? (top ? mark : "#404040") : "#ffffff",
+                        border: `1px solid ${PANEL.shadow}`,
+                        background: on ? (top ? mark : PANEL.dim) : PANEL.canvas,
                       }}
                     />
                   );
@@ -326,7 +368,7 @@ function BitSpotlight({
                 >
                   {cell.blank ? "" : status ? "S" : "D"}
                 </div>
-                <div style={{ textAlign: "center", fontSize: 9, color: "#404040", minHeight: 11 }}>
+                <div style={{ textAlign: "center", fontSize: 9, color: PANEL.dim, minHeight: 11 }}>
                   {cell.blank ? "" : cell.value}
                 </div>
               </div>
@@ -337,7 +379,7 @@ function BitSpotlight({
           <div style={{ alignSelf: "center", color: "#9a9a9a", fontSize: 9 }}>…</div>
         )}
       </div>
-      <div style={{ fontSize: 9, color: "#404040" }}>
+      <div style={{ fontSize: 9, color: PANEL.dim }}>
         {empty ? "waiting for bytes" : "recent bytes"} · newest on the left · top cell = bit 7 (1 =
         status, 0 = data) · green note on / red note off · bar = message start
       </div>
@@ -522,6 +564,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     ccValue: 0,
   }));
   const [held, setHeld] = useState<number[]>([]);
+  // Panel state: knob positions, lit pads, and the latching function buttons.
+  const [knobs, setKnobs] = useState<number[]>(() => new Array(8).fill(0));
+  const [padHeld, setPadHeld] = useState<number[]>([]);
+  const [bendValue, setBendValue] = useState(8192);
+  const [modValue, setModValue] = useState(0);
+  // Stick position as the two CC values it sends, 64 at rest.
+  const [stick, setStick] = useState({ x: STICK_CENTRE, y: STICK_CENTRE });
+  const [latch, setLatch] = useState(false);
+  // Which of the two pad banks the grid is showing / playing.
+  const [padBank, setPadBank] = useState(0);
+  const [fullLevel, setFullLevel] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(0);
 
   const nextId = useRef(0);
   const startedAt = useRef(0);
@@ -538,7 +592,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     ccValue: 0,
   });
   // Held-note count keyed by MIDI note number, across every source and channel.
+  // Pad notes (channel 10, 36–43) are counted separately so a pad hit lights the
+  // pad rather than the key that shares its note number.
   const heldRef = useRef<Map<number, number>>(new Map());
+  const padHeldRef = useRef<Map<number, number>>(new Map());
+  const latchRef = useRef(false);
+  const padBankRef = useRef(0);
+  const fullLevelRef = useRef(false);
+  // Current bend / mod / stick, so the panel controls and incoming MIDI all agree
+  // and a drag only emits when the value actually moves.
+  const benderRef = useRef({ bend: 8192, mod: 0 });
+  const stickRef = useRef({ x: STICK_CENTRE, y: STICK_CENTRE });
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const synthRef = useRef<MidiSynth | null>(null);
   const entriesRef = useRef<LogEntry[]>([]);
@@ -561,6 +626,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     playingRef.current = playing;
   }, [playing]);
 
+  // Track the faceplate's width so the display and pads can sit side by side
+  // once there's room for them.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const measure = () => setPanelWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Track the keyboard panel's width so the maximised view can decide whether
   // the full 88 keys fit or it needs to window them.
   useEffect(() => {
@@ -576,13 +653,14 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // Which keys the on-screen keyboard shows, and how tall.
   const kb = useMemo(() => {
     if (!maximized) {
+      const low = RANGE_NORMAL.low + octaveShift * 12;
       return {
-        layout: KEYBOARD_NORMAL,
+        layout: octaveShift === 0 ? KEYBOARD_NORMAL : buildKeyboard(low, low + MINI_KEY_SPAN),
         height: KEY_HEIGHT_NORMAL,
         windowed: false,
-        lowNote: RANGE_NORMAL.low,
-        highNote: RANGE_NORMAL.high,
-        octavesVisible: 2,
+        lowNote: low,
+        highNote: low + MINI_KEY_SPAN,
+        octavesVisible: 3,
       };
     }
     const fitsFull = keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX;
@@ -607,7 +685,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       highNote: low + span,
       octavesVisible,
     };
-  }, [maximized, keysWidth, rangeLow]);
+  }, [maximized, keysWidth, rangeLow, octaveShift]);
 
   const shiftOctave = useCallback(
     (dir: 1 | -1) => {
@@ -645,6 +723,35 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         if (parsed.type === "Note On") synth.noteOn(parsed.note, parsed.velocity ?? 96);
         else if (parsed.type === "Note Off") synth.noteOff(parsed.note);
       }
+      // The bend fader and any bend from a real controller land here and detune
+      // whatever is sounding, +/- 2 semitones.
+      if (parsed.bend != null) {
+        ensureSynth().setPitchBend(((parsed.bend - 8192) / 8192) * 2);
+        benderRef.current.bend = parsed.bend;
+        setBendValue(parsed.bend);
+      }
+      if (parsed.cc === 1) {
+        benderRef.current.mod = parsed.ccValue ?? 0;
+        setModValue(parsed.ccValue ?? 0);
+      }
+      // The stick mirrors its own two CCs the same way the faders mirror theirs.
+      if (parsed.cc === STICK_CC_X || parsed.cc === STICK_CC_Y) {
+        const axis = parsed.cc === STICK_CC_X ? "x" : "y";
+        const value = parsed.ccValue ?? 0;
+        stickRef.current[axis] = value;
+        setStick((prev) => (prev[axis] === value ? prev : { ...prev, [axis]: value }));
+      }
+      // K1–K8 mirror CC 70–77 whoever sent them — panel, hardware or playback.
+      if (parsed.cc != null && parsed.cc >= KNOB_CC_BASE && parsed.cc < KNOB_CC_BASE + 8) {
+        const slot = parsed.cc - KNOB_CC_BASE;
+        const value = parsed.ccValue ?? 0;
+        setKnobs((prev) => {
+          if (prev[slot] === value) return prev;
+          const next = [...prev];
+          next[slot] = value;
+          return next;
+        });
+      }
 
       const m = metersRef.current;
       if (parsed.channel != null) m.channels[parsed.channel - 1] = 1;
@@ -654,7 +761,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         m.ccValue = parsed.ccValue ?? 0;
       }
       if (parsed.note != null) {
-        const counts = heldRef.current;
+        const isPad =
+          parsed.channel === PAD_CHANNEL &&
+          parsed.note >= PAD_BASE_NOTE &&
+          parsed.note < PAD_BASE_NOTE + PAD_BANK_SIZE * PAD_BANKS.length;
+        const counts = isPad ? padHeldRef.current : heldRef.current;
         if (parsed.type === "Note On") {
           counts.set(parsed.note, (counts.get(parsed.note) ?? 0) + 1);
         } else if (parsed.type === "Note Off") {
@@ -662,7 +773,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           if (next <= 0) counts.delete(parsed.note);
           else counts.set(parsed.note, next);
         }
-        setHeld(Array.from(counts.keys()));
+        if (isPad) setPadHeld(Array.from(counts.keys()));
+        else setHeld(Array.from(counts.keys()));
       }
       return parsed;
     },
@@ -724,7 +836,19 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       if (playingRef.current || note < 0 || note > 127) return;
       ensureAudio();
       if (startedAt.current === 0) startedAt.current = performance.now();
-      pushEntry("keys", Uint8Array.from(on ? [0x90, note, 96] : [0x80, note, 0]));
+      const velocity = fullLevelRef.current ? 127 : 96;
+      // LATCH holds a note until it's struck again, so releases are ignored and
+      // a second press is what sends the note off.
+      if (latchRef.current) {
+        if (!on) return;
+        const sounding = heldRef.current.has(note);
+        pushEntry(
+          "keys",
+          Uint8Array.from(sounding ? [0x80, note, 0] : [0x90, note, velocity]),
+        );
+        return;
+      }
+      pushEntry("keys", Uint8Array.from(on ? [0x90, note, velocity] : [0x80, note, 0]));
     },
     [ensureAudio, pushEntry],
   );
@@ -740,8 +864,16 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       playIntervalRef.current = null;
     }
     synthRef.current?.allNotesOff();
+    synthRef.current?.setPitchBend(0);
     heldRef.current.clear();
+    padHeldRef.current.clear();
     setHeld([]);
+    setPadHeld([]);
+    benderRef.current = { bend: 8192, mod: 0 };
+    setBendValue(8192);
+    setModValue(0);
+    stickRef.current = { x: STICK_CENTRE, y: STICK_CENTRE };
+    setStick({ x: STICK_CENTRE, y: STICK_CENTRE });
     playingRef.current = false;
     setPlaying(false);
     setPlayPos(0);
@@ -815,7 +947,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         });
       }
       heldRef.current.clear();
+      padHeldRef.current.clear();
       setHeld([]);
+      setPadHeld([]);
       setEntries(rows);
     },
     [stopPlayback],
@@ -1040,7 +1174,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         stopPlayback();
         synthRef.current?.allNotesOff();
         heldRef.current.clear();
+        padHeldRef.current.clear();
         setHeld([]);
+        setPadHeld([]);
+        setKnobs(new Array(8).fill(0));
         setEntries([]);
         setLoadError(null);
       },
@@ -1115,53 +1252,384 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return { cells, empty: entries.length === 0, truncated };
   }, [entries]);
 
-  const octaveLabel = octaveShift === 0 ? "" : ` · keys ${octaveShift > 0 ? "+" : ""}${octaveShift} oct`;
+
+  // ---- Faceplate controls ------------------------------------------------
+  // Everything the panel touches goes out as a real MIDI message, so the log,
+  // the meters, Save and Play all see it exactly like hardware input.
+
+  const panelSend = useCallback(
+    (bytes: number[]) => {
+      if (playingRef.current) return;
+      ensureAudio();
+      if (startedAt.current === 0) startedAt.current = performance.now();
+      pushEntry("panel", Uint8Array.from(bytes));
+    },
+    [ensureAudio, pushEntry],
+  );
+
+  const handleKnob = useCallback(
+    (slot: number, value: number) => {
+      panelSend([0xb0, KNOB_CC_BASE + slot, value]);
+    },
+    [panelSend],
+  );
+
+  const padDown = useCallback(
+    (index: number) => {
+      const note = padBankBase(padBankRef.current) + index;
+      const on = 0x90 | (PAD_CHANNEL - 1);
+      const off = 0x80 | (PAD_CHANNEL - 1);
+      const sounding = padHeldRef.current.has(note);
+      const velocity = fullLevelRef.current ? 127 : 110;
+      if (latchRef.current) {
+        panelSend(sounding ? [off, note, 0] : [on, note, velocity]);
+        return;
+      }
+      if (sounding) return;
+      panelSend([on, note, velocity]);
+    },
+    [panelSend],
+  );
+
+  const padUp = useCallback(
+    (index: number) => {
+      if (latchRef.current) return;
+      const note = padBankBase(padBankRef.current) + index;
+      if (!padHeldRef.current.has(note)) return;
+      panelSend([0x80 | (PAD_CHANNEL - 1), note, 0]);
+    },
+    [panelSend],
+  );
+
+  const sendBend = useCallback(
+    (value: number) => {
+      const bend = Math.max(0, Math.min(16383, Math.round(value)));
+      if (bend === benderRef.current.bend) return;
+      panelSend([0xe0, bend & 0x7f, bend >> 7]);
+    },
+    [panelSend],
+  );
+
+  const sendMod = useCallback(
+    (value: number) => {
+      const mod = Math.max(0, Math.min(127, Math.round(value)));
+      if (mod === benderRef.current.mod) return;
+      panelSend([0xb0, 1, mod]);
+    },
+    [panelSend],
+  );
+
+  // Pitch bend springs back to centre when you let go, like the wheel it stands
+  // in for; the mod fader stays where it's left.
+  const releaseBend = useCallback(() => sendBend(8192), [sendBend]);
+
+  // Both stick axes are plain CCs of their own, so the Bend and Mod faders keep
+  // pitch bend and CC 1 to themselves.
+  const stickMove = useCallback(
+    (x: number, y: number) => {
+      const cx = axisToCc(x);
+      const cy = axisToCc(y);
+      if (cx !== stickRef.current.x) panelSend([0xb0, STICK_CC_X, cx]);
+      if (cy !== stickRef.current.y) panelSend([0xb0, STICK_CC_Y, cy]);
+    },
+    [panelSend],
+  );
+
+  // Springs back to centre on release, like the stick it stands in for.
+  const stickRelease = useCallback(() => stickMove(0, 0), [stickMove]);
+
+  const bumpOctave = useCallback((dir: 1 | -1) => {
+    octaveShiftRef.current = Math.max(-3, Math.min(3, octaveShiftRef.current + dir));
+    setOctaveShift(octaveShiftRef.current);
+  }, []);
+
+  // Swapping banks re-points the grid at the next eight notes. Anything the old
+  // bank is still holding — a latched pad, a pad under the pointer — is let go
+  // first, so nothing sticks on out of sight.
+  const cyclePadBank = useCallback(() => {
+    Array.from(padHeldRef.current.keys()).forEach((note) =>
+      panelSend([0x80 | (PAD_CHANNEL - 1), note, 0]),
+    );
+    const next = (padBankRef.current + 1) % PAD_BANKS.length;
+    padBankRef.current = next;
+    setPadBank(next);
+  }, [panelSend]);
+
+  const toggleLatch = useCallback(() => {
+    const next = !latchRef.current;
+    latchRef.current = next;
+    setLatch(next);
+    // Letting go of LATCH drops whatever it was holding.
+    if (!next) {
+      Array.from(heldRef.current.keys()).forEach((note) => panelSend([0x80, note, 0]));
+      Array.from(padHeldRef.current.keys()).forEach((note) =>
+        panelSend([0x80 | (PAD_CHANNEL - 1), note, 0]),
+      );
+    }
+  }, [panelSend]);
+
+  const toggleFullLevel = useCallback(() => {
+    const next = !fullLevelRef.current;
+    fullLevelRef.current = next;
+    setFullLevel(next);
+  }, []);
+
+  // PROG steps through the synth's four waveforms — this panel's "programs".
+  const cycleProgram = useCallback(() => {
+    const order: Waveform[] = ["square", "sawtooth", "triangle", "sine"];
+    const next = order[(order.indexOf(waveform) + 1) % order.length];
+    setWaveformState(next);
+    ensureSynth().setWaveform(next);
+  }, [ensureSynth, waveform]);
+
+
+  const wide = panelWidth >= 500;
+  const octaveLabel = `oct ${octaveShift > 0 ? "+" : ""}${octaveShift}`;
+  const last = entries[0] ?? null;
+  // The bend fader reads out in semitones — the raw 14-bit number is too wide
+  // for a column this narrow, and means less.
+  const bendSemitones = Math.round(((bendValue - 8192) / 8192) * 2 * 10) / 10;
+
+  // The OLED strip stands in for the status line and the old footer: what the
+  // panel is connected to, the last message through it, and the current setup.
+  const screenNote =
+    loadError ??
+    (status === "checking"
+      ? "requesting midi access…"
+      : status === "unsupported"
+        ? "web midi unsupported here"
+        : status === "needsGesture"
+          ? "reopen this window to allow midi"
+          : status === "denied"
+            ? "midi blocked — check browser settings"
+            : devices.length === 0
+              ? "no midi inputs — play the panel"
+              : devices.map((d) => d.name).join(" · "));
+  const ledColor =
+    loadError || status === "denied" || status === "unsupported"
+      ? "#a80000"
+      : status === "ready" && devices.length > 0
+        ? "#1d9e75"
+        : "#c8a200";
 
   return (
-    <div
-      style={{
-        flex: "1 1 auto",
-        minHeight: 0,
-        minWidth: 0,
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        fontFamily: "monospace",
-        fontSize: 11,
-      }}
-    >
-      <div style={{ flex: "0 0 auto" }}>
-        {status === "checking" && <div>Requesting MIDI access…</div>}
-        {status === "unsupported" && <div>Web MIDI isn&apos;t supported here.</div>}
-        {status === "needsGesture" && <div>Reopen this window to allow MIDI access.</div>}
-        {status === "denied" && <div>MIDI is blocked — check browser settings.</div>}
-        {status === "ready" && devices.length === 0 && <div>No MIDI inputs detected.</div>}
-        {status === "ready" && devices.length > 0 && (
-          <div>
-            <div style={{ fontWeight: "bold" }}>Inputs</div>
-            {devices.map((device) => (
-              <div key={device.id}>
-                {device.name}
-                {device.manufacturer ? ` — ${device.manufacturer}` : ""} [{device.state}/{device.connection}]
+    <Chassis containerRef={panelRef}>
+      <BrandBar
+        right={
+          <span
+            title={screenNote}
+            aria-hidden
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: ledColor,
+              border: `1px solid ${PANEL.shadow}`,
+            }}
+          />
+        }
+      />
+
+      {/* Left to right, the way they sit on the hardware: bend, mod, stick,
+          pads, knobs. Wraps onto more lines when the window is narrow. */}
+      <div
+        style={{
+          flex: "0 0 auto",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "stretch",
+          gap: 4,
+          minWidth: 0,
+        }}
+      >
+        <Cluster label="Bend" style={{ flex: "0 0 auto", minWidth: 30 }}>
+          <Fader
+            ariaLabel="Pitch bend"
+            value={bendValue}
+            min={0}
+            max={16383}
+            size={FADER_HEIGHT}
+            disabled={playing}
+            readout={bendSemitones === 0 ? "0" : `${bendSemitones > 0 ? "+" : ""}${bendSemitones.toFixed(1)}`}
+            onChange={sendBend}
+            onCommit={releaseBend}
+          />
+        </Cluster>
+
+        <Cluster label="Mod" style={{ flex: "0 0 auto", minWidth: 30 }}>
+          <Fader
+            ariaLabel="Modulation — CC 1"
+            value={modValue}
+            min={0}
+            max={127}
+            size={FADER_HEIGHT}
+            disabled={playing}
+            readout={String(modValue)}
+            onChange={sendMod}
+          />
+        </Cluster>
+
+        <Cluster label="Stick" style={{ flex: "0 0 auto", minWidth: 58 }}>
+          <Joystick
+            size={FADER_HEIGHT - 22}
+            x={ccToAxis(stick.x)}
+            y={ccToAxis(stick.y)}
+            disabled={playing}
+            ariaLabel={`Stick — CC ${STICK_CC_X} across, CC ${STICK_CC_Y} up`}
+            readout={`${stick.x}·${stick.y}`}
+            onMove={stickMove}
+            onRelease={stickRelease}
+          />
+        </Cluster>
+
+        {/* The pads — eight notes on channel 10, from 36 (bank A) or 44 (bank B). */}
+        <Cluster label={`Pads · bank ${PAD_BANKS[padBank]}`} style={{ flex: "0 1 auto", minWidth: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, width: 164 }}>
+            {[
+              [4, 5, 6, 7],
+              [0, 1, 2, 3],
+            ].map((row, ri) => (
+              <div key={ri} style={{ display: "flex", gap: 3 }}>
+                {row.map((i) => (
+                  <Pad
+                    key={i}
+                    index={i}
+                    label={String(i + 1)}
+                    active={padHeld.includes(padBankBase(padBank) + i)}
+                    height={34}
+                    disabled={playing}
+                    onDown={() => padDown(i)}
+                    onUp={() => padUp(i)}
+                  />
+                ))}
               </div>
             ))}
           </div>
-        )}
-        {loadError && <div style={{ color: "#a80000" }}>{loadError}</div>}
+        </Cluster>
+
+        {/* K1–K8, sending CC 70–77 the way the hardware ships. */}
+        <Cluster label="Knobs" style={{ flex: "0 0 auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {[
+              [0, 1, 2, 3],
+              [4, 5, 6, 7],
+            ].map((row, ri) => (
+              <div key={ri} style={{ display: "flex", gap: 4 }}>
+                {row.map((i) => (
+                  <Knob
+                    key={i}
+                    label={`K${i + 1}`}
+                    cc={KNOB_CC_BASE + i}
+                    value={knobs[i]}
+                    size={30}
+                    disabled={playing}
+                    onChange={(next) => handleKnob(i, next)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </Cluster>
+      </div>
+
+      {/* The display strip: what's plugged in, the last message through the
+          panel, and the current program / octave / flags. */}
+      <Well style={{ background: PANEL.canvas, padding: "2px 5px" }}>
+        <div
+          style={{
+            fontFamily: "monospace",
+            fontSize: 11,
+            lineHeight: 1.35,
+            color: PANEL.text,
+            minWidth: 0,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ whiteSpace: "nowrap" }}>
+              {last
+                ? `${last.channel == null ? "--" : `CH${String(last.channel).padStart(2, "0")}`} ${last.type}`
+                : "MPK mini PLUS"}
+            </span>
+            <span
+              style={{
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {last ? last.detail || last.bytes : "ready"}
+            </span>
+          </div>
+          <div
+            style={{
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              color: loadError ? "#a80000" : PANEL.dim,
+            }}
+          >
+            {screenNote}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              color: PANEL.dim,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+              prog {waveform} · {octaveLabel}
+              {latch ? " · latch" : ""}
+              {fullLevel ? " · full" : ""}
+              {bitsView ? " · bits" : ""}
+            </span>
+            <span>
+              {playing
+                ? `▶ ${formatTransport(playPos)} / ${formatTransport(playTotal)}`
+                : `${entries.length} msg${entries.length >= MAX_ENTRIES ? " max" : ""}`}
+            </span>
+          </div>
+        </div>
+      </Well>
+
+      <div style={{ flex: "0 0 auto", display: "flex", gap: 3, alignItems: "stretch" }}>
+        <PanelButton
+          label="Oct −"
+          disabled={playing || octaveShift <= -3}
+          onClick={() => bumpOctave(-1)}
+        />
+        <PanelButton
+          label="Oct +"
+          disabled={playing || octaveShift >= 3}
+          onClick={() => bumpOctave(1)}
+        />
+        <PanelButton
+          label={wide ? "Full level" : "Full"}
+          active={fullLevel}
+          disabled={playing}
+          onClick={toggleFullLevel}
+        />
+        <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
+        <PanelButton
+          label={wide ? "Bank" : "Bk"}
+          sub={PAD_BANKS[padBank]}
+          disabled={playing}
+          onClick={cyclePadBank}
+        />
+        <PanelButton
+          label="Prog"
+          sub={wide ? waveform : waveform.slice(0, 3)}
+          weight={1.35}
+          disabled={playing}
+          onClick={cycleProgram}
+        />
       </div>
 
       {metersOpen && (
-        <div
-          style={{
-            flex: "0 0 auto",
-            display: "flex",
-            flexDirection: "column",
-            gap: 3,
-            padding: "3px 4px",
-            border: "2px solid",
-            borderColor: "#808080 #ffffff #ffffff #808080",
-          }}
-        >
+        <Well style={{ gap: 3, fontFamily: "monospace", fontSize: 11, padding: "3px 4px" }}>
           <div style={{ display: "flex", gap: 2 }}>
             {meters.channels.map((v, i) => (
               <div
@@ -1181,7 +1649,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
               display: "flex",
               justifyContent: "space-between",
               fontSize: 9,
-              color: "#404040",
+              color: PANEL.dim,
             }}
           >
             <span>CH 1</span>
@@ -1193,63 +1661,73 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             value={meters.ccValue}
             hasValue={meters.cc != null}
           />
-        </div>
+        </Well>
       )}
 
-      <div
-        ref={keysWrapRef}
-        style={{
-          flex: "0 0 auto",
-          padding: "4px 4px 3px",
-          border: "2px solid",
-          borderColor: "#808080 #ffffff #ffffff #808080",
-        }}
-      >
-          {kb.windowed && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 3,
-                fontSize: 10,
-                color: "#404040",
-              }}
-            >
-              <Button
-                size="sm"
-                disabled={kb.lowNote <= RANGE_FULL.low}
-                onClick={() => shiftOctave(-1)}
+      {/* The 37 mini keys, transposed by the Oct buttons. */}
+      <Well style={{ padding: "4px 4px 3px" }}>
+        <div style={{ display: "flex", alignItems: "flex-end" }}>
+          <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+            {kb.windowed && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: 3,
+                }}
               >
-                ◀ oct
-              </Button>
-              <span style={{ flex: "1 1 auto", textAlign: "center" }}>
-                {noteName(kb.lowNote)} – {noteName(kb.highNote)}
-              </span>
-              <Button
-                size="sm"
-                disabled={kb.highNote >= RANGE_FULL.high}
-                onClick={() => shiftOctave(1)}
-              >
-                oct ▶
-              </Button>
+                <div style={{ flex: "0 0 64px", display: "flex" }}>
+                  <PanelButton
+                    label="◀ oct"
+                    disabled={kb.lowNote <= RANGE_FULL.low}
+                    onClick={() => shiftOctave(-1)}
+                  />
+                </div>
+                <span style={{ flex: "1 1 auto", textAlign: "center" }}>
+                  <Legend>
+                    {noteName(kb.lowNote)} – {noteName(kb.highNote)}
+                  </Legend>
+                </span>
+                <div style={{ flex: "0 0 64px", display: "flex" }}>
+                  <PanelButton
+                    label="oct ▶"
+                    disabled={kb.highNote >= RANGE_FULL.high}
+                    onClick={() => shiftOctave(1)}
+                  />
+                </div>
+              </div>
+            )}
+            <div ref={keysWrapRef}>
+              <PlayableKeyboard
+                layout={kb.layout}
+                height={kb.height}
+                held={held}
+                disabled={playing}
+                onNoteOn={keyboardNoteOn}
+                onNoteOff={keyboardNoteOff}
+              />
             </div>
-          )}
-          <PlayableKeyboard
-            layout={kb.layout}
-            height={kb.height}
-            held={held}
-            disabled={playing}
-            onNoteOn={keyboardNoteOn}
-            onNoteOff={keyboardNoteOff}
-          />
-        <div style={{ marginTop: 3, fontSize: 9, color: "#404040" }}>
-          click, or type A–K (W E T Y U for sharps){octaveShift !== 0 ? ` · ${octaveShift > 0 ? "+" : ""}${octaveShift} oct` : ""} · Z / X shifts octave
+            <div style={{ marginTop: 3 }}>
+              <Legend>
+                {noteName(kb.lowNote)}–{noteName(kb.highNote)} · click, or type A–K (W E T Y U for
+                sharps) · Z / X shifts octave
+              </Legend>
+            </div>
+          </div>
         </div>
-      </div>
+      </Well>
 
       {(!bitsView || maximized) && (
-        <ScrollView style={{ flex: "1 1 auto", minHeight: 0, width: "100%" }}>
+        <ScrollView
+          style={{
+            flex: "1 1 auto",
+            minHeight: 0,
+            width: "100%",
+            fontFamily: "monospace",
+            fontSize: 11,
+          }}
+        >
           {entries.length === 0 ? (
             <div style={{ opacity: 0.6 }}>Waiting for messages…</div>
           ) : (
@@ -1266,34 +1744,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       {/* Bits view: swapped in for the log in a normal window; a strip below it
           when maximised, where there's room for everything. */}
       {bitsView && (
-        <div
-          style={{
-            flex: maximized ? "0 0 auto" : "1 1 auto",
-            minHeight: 0,
-            minWidth: 0,
-            overflow: "auto",
-            padding: "4px 4px 3px",
-            border: "2px solid",
-            borderColor: "#808080 #ffffff #ffffff #808080",
-          }}
+        <Well
+          grow={!maximized}
+          style={{ overflow: "auto", fontFamily: "monospace", fontSize: 11, padding: "4px 4px 3px" }}
         >
           <BitSpotlight
             cells={spotlight.cells}
             empty={spotlight.empty}
             truncated={spotlight.truncated}
           />
-        </div>
+        </Well>
       )}
-
-      <div style={{ flex: "0 0 auto", opacity: 0.6 }}>
-        {entries.length} message{entries.length === 1 ? "" : "s"}
-        {entries.length >= MAX_ENTRIES ? " (capped)" : ""}
-        {"  ·  "}
-        {`wave ${waveform}`}
-        {playing ? `  ·  ▶ ${formatTransport(playPos)} / ${formatTransport(playTotal)}` : ""}
-        {octaveLabel}
-      </div>
-    </div>
+    </Chassis>
   );
 });
 
