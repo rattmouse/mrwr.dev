@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import MockupList from "@/components/projects/MockupList";
+import ProjectList from "@/components/projects/ProjectList";
 import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
 
 type DocumentWindowProps = {
@@ -254,7 +255,15 @@ export default function DocumentWindow({
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const title =
-    id === "about" ? "about.txt" : id === "contact" ? "contact.txt" : id === "collections" ? "collections.exe" : "projects.txt";
+    id === "about"
+      ? "about.txt"
+      : id === "contact"
+        ? "contact.txt"
+        : id === "collections"
+          ? "collections.exe"
+          : id === "demos"
+            ? "demos.txt"
+            : "projects.txt";
   const titleIcon = id === "collections" ? "../w98_collections_cards.ico" : "../w95_default.ico";
   const emptyEntry =
     category === "paintings" ? EMPTY_PAINTING : category === "songs" ? EMPTY_SONG : EMPTY_ALBUM;
@@ -670,14 +679,15 @@ export default function DocumentWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
-      normalHeight={id === "collections" ? 356 : id === "projects" ? 360 : 200}
-      normalWidth={id === "collections" ? 340 : id === "projects" ? 340 : undefined}
+      normalHeight={id === "collections" ? 356 : id === "projects" || id === "demos" ? 360 : 200}
+      normalWidth={id === "collections" ? 340 : id === "projects" || id === "demos" ? 340 : undefined}
       onClose={onClose}
       onMinimize={onMinimize}
       onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
     >
-      {id === "projects" && <MockupList layout={layout} />}
+      {id === "projects" && <ProjectList layout={layout} />}
+      {id === "demos" && <MockupList layout={layout} />}
 
       {id === "collections" && (
         <div
@@ -845,7 +855,7 @@ export default function DocumentWindow({
                     </Anchor>
                   </li>
                   <li>
-                    - and some cleanup work from{" "}
+                    - and even more help from{" "}
                     <Anchor href="https://claude.ai/" target="_blank">
                       Claude
                     </Anchor>

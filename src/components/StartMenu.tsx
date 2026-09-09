@@ -237,6 +237,7 @@ export default function StartMenu({
         [
           { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
           { label: "Projects", icon: "../w95_default.ico", size: "sm", onClick: () => pick("projects") },
+          { label: "Demos", icon: "../w95_default.ico", size: "sm", onClick: () => pick("demos") },
           { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
         ],
     },
