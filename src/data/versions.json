@@ -18,7 +18,8 @@
         "midi.exe's pads now have two banks — hit Bank to swap between them, and anything still sounding stops on the way out",
         "The labels on midi.exe's front panel sit inside their own frames now, instead of spilling over the box next door",
         "midi.exe's pads now play an actual drum kit — kick, snare, hats, claps, toms and cymbals across two banks, with each pad's piece written on it",
-        "midi.exe's eight knobs now do something: filter cutoff and resonance, attack and release, drum tune and decay, echo and volume — with a readout on the display of what you just changed"
+        "midi.exe's eight knobs now do something: filter cutoff and resonance, attack and release, drum tune and decay, echo and volume — with a readout on the display of what you just changed",
+        "Added Party (dnd.exe) under Toys: roll up a D&D character — name, race, class, alignment, level and 4d6-drop-lowest ability scores — and Save it to a party roster that's remembered in your browser. Each one gets a chunky pixel loadout tile laid out like an armour stand — head, chest, hands, legs, feet and what they carry — where class picks the gear, race picks its colours and how tall they stand, and alignment picks the backdrop. A party only stays ten minutes — then it walks out from behind the window and off the desktop, and the roster starts fresh"
       ]
     },
     {

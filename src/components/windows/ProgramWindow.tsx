@@ -15,6 +15,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
+import DndWindow, { DndWindowHandle } from "@/components/windows/DndWindow";
 import type { Waveform } from "@/lib/midiSynth";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
@@ -91,6 +92,7 @@ export default function ProgramWindow({
   const strudelRef = useRef<StrudelReplHandle>(null);
   const midiRef = useRef<MidiWindowHandle>(null);
   const paintRef = useRef<PaintWindowHandle>(null);
+  const dndRef = useRef<DndWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiEditMenuRef = useRef<HTMLDivElement | null>(null);
@@ -115,6 +117,7 @@ export default function ProgramWindow({
   const [midiHasMessages, setMidiHasMessages] = useState(false);
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
   const [paintBrush, setPaintBrush] = useState<number>(6);
+  const [dndState, setDndState] = useState({ saved: false, dirty: true, count: 0 });
 
   const title =
     id === "notepad"
@@ -129,6 +132,8 @@ export default function ProgramWindow({
               ? "midi.exe"
               : id === "paint"
                 ? "paint.exe"
+                : id === "dnd"
+                  ? "dnd.exe"
         : "mrwr.dev";
   const titleIcon =
     id === "welcome"
@@ -143,7 +148,9 @@ export default function ProgramWindow({
               ? "../w98_music.ico"
               : id === "paint"
                 ? "../w95_paint.ico"
-                : "../w98_repl.ico";
+                : id === "dnd"
+                  ? "../w98_file_eye.ico"
+                  : "../w98_repl.ico";
 
   const normalHeight =
     id === "welcome" ? 160
@@ -151,9 +158,10 @@ export default function ProgramWindow({
         : id === "music" ? 220
           : id === "midi" ? 480
             : id === "paint" ? 320
-              : 300;
+              : id === "dnd" ? 520
+                : 300;
   const normalWidth =
-    id === "changes" ? 320 : id === "paint" ? 360 : id === "midi" ? 560 : undefined;
+    id === "changes" ? 320 : id === "paint" ? 360 : id === "midi" ? 560 : id === "dnd" ? 560 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -786,6 +794,42 @@ export default function ProgramWindow({
           Clear
         </Button>
       </>
+    ) : id === "dnd" ? (
+      <>
+        <Button variant="menu" size="sm" title="Roll up a new adventurer" onClick={() => dndRef.current?.newCharacter()}>
+          New
+        </Button>
+        <Button variant="menu" size="sm" title="Re-roll ability scores (4d6, drop lowest)" onClick={() => dndRef.current?.rollScores()}>
+          Roll
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          title={dndState.saved ? "Save changes to this sheet" : "Add this sheet to the party"}
+          disabled={!dndState.dirty}
+          onClick={() => dndRef.current?.save()}
+        >
+          Save
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          title="Strike this character from the party"
+          disabled={!dndState.saved}
+          onClick={() => dndRef.current?.remove()}
+        >
+          Delete
+        </Button>
+        <Button
+          variant="menu"
+          size="sm"
+          title="Send the whole party on its way now"
+          disabled={dndState.count === 0}
+          onClick={() => dndRef.current?.depart()}
+        >
+          Depart
+        </Button>
+      </>
     ) : undefined;
 
   return (
@@ -901,6 +945,8 @@ export default function ProgramWindow({
       {id === "paint" && (
         <PaintWindow ref={paintRef} color={paintColor} brushSize={paintBrush} />
       )}
+
+      {id === "dnd" && <DndWindow ref={dndRef} onStateChange={setDndState} />}
     </DesktopWindow>
   );
 }
