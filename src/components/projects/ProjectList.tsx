@@ -2,21 +2,20 @@
 
 import React, { useState } from "react";
 import { Anchor, Frame, ScrollView } from "react95";
-import { MOCKUPS } from "@/lib/mockups";
+import { PROJECTS } from "@/lib/projects";
 import { Layout } from "@/components/windows/windowTypes";
 
-type MockupListProps = {
+type ProjectListProps = {
   layout: Layout;
 };
 
 const SELECTED_BG = "#000080";
 
 /**
- * The Demos window content: a list of interface demos. They are deliberately
- * *not* presented as client work — the note at the top and the "demo" tag on
- * every row say so — they exist to show what the stack builds quickly.
+ * The Projects window content: real, public projects, each linking to its
+ * repository. The interface demos live in their own window (demos.txt).
  */
-export default function MockupList({ layout }: MockupListProps) {
+export default function ProjectList({ layout }: ProjectListProps) {
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const isMax = layout === "maximized";
   const thumbWidth = isMax ? 128 : 72;
@@ -25,24 +24,23 @@ export default function MockupList({ layout }: MockupListProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: "1 1 auto", minHeight: 0 }}>
       <Frame variant="well" style={{ padding: "6px 8px", background: "#fff", lineHeight: 1.45 }}>
-        <b>not real projects</b> — client work stays private, and the real ones are in{" "}
-        <b>projects.txt</b>. nine interface demos, built with <b>Next.js</b> + <b>React</b>, to show what
-        the stack does quickly.
+        <b>open source</b> — things I actually built and use. client work stays private; the interface
+        demos are in <b>demos.txt</b>.
       </Frame>
 
       <ScrollView style={{ flex: "1 1 auto", minHeight: 0, background: "#fff" }}>
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {MOCKUPS.map((mockup) => {
-            const selected = activeSlug === mockup.slug;
+          {PROJECTS.map((project) => {
+            const selected = activeSlug === project.slug;
             return (
-              <li key={mockup.slug}>
+              <li key={project.slug}>
                 <a
-                  href={`/mockups/${mockup.slug}`}
+                  href={project.repo}
                   target="_blank"
                   rel="noreferrer"
-                  onFocus={() => setActiveSlug(mockup.slug)}
+                  onFocus={() => setActiveSlug(project.slug)}
                   onBlur={() => setActiveSlug(null)}
-                  onMouseEnter={() => setActiveSlug(mockup.slug)}
+                  onMouseEnter={() => setActiveSlug(project.slug)}
                   onMouseLeave={() => setActiveSlug(null)}
                   style={{
                     display: "flex",
@@ -54,7 +52,7 @@ export default function MockupList({ layout }: MockupListProps) {
                   }}
                 >
                   <img
-                    src={`/mockups/thumbs/${mockup.slug}.webp`}
+                    src={`/projects/thumbs/${project.slug}.webp`}
                     alt=""
                     width={thumbWidth}
                     height={thumbHeight}
@@ -62,8 +60,8 @@ export default function MockupList({ layout }: MockupListProps) {
                   />
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: "block", marginBottom: 3 }}>
-                      <b>{mockup.name}</b>{" "}
-                      <span style={{ color: selected ? "#c8c8ff" : "#555" }}>— {mockup.kind}</span>{" "}
+                      <b>{project.name}</b>{" "}
+                      <span style={{ color: selected ? "#c8c8ff" : "#555" }}>— {project.kind}</span>{" "}
                       <span
                         style={{
                           border: `1px solid ${selected ? "#c8c8ff" : "#808080"}`,
@@ -72,10 +70,10 @@ export default function MockupList({ layout }: MockupListProps) {
                           verticalAlign: 1,
                         }}
                       >
-                        demo
+                        github
                       </span>
                     </span>
-                    <span style={{ display: "block", lineHeight: 1.4 }}>{mockup.blurb}</span>
+                    <span style={{ display: "block", lineHeight: 1.4 }}>{project.blurb}</span>
                     <span
                       style={{
                         display: "block",
@@ -84,7 +82,7 @@ export default function MockupList({ layout }: MockupListProps) {
                         color: selected ? "#c8c8ff" : "#555",
                       }}
                     >
-                      built with: {mockup.built}
+                      built with: {project.built}
                     </span>
                   </span>
                 </a>
@@ -95,8 +93,8 @@ export default function MockupList({ layout }: MockupListProps) {
       </ScrollView>
 
       <div style={{ display: "flex", gap: 6, lineHeight: 1.4 }}>
-        <Anchor href="/mockups/" target="_blank" rel="noreferrer">
-          all nine on one page
+        <Anchor href="https://github.com/rattmouse" target="_blank" rel="noreferrer">
+          all repos on github
         </Anchor>
         <span style={{ color: "#555" }}>·</span>
         <Anchor href="https://github.com/rattmouse/mrwr.dev" target="_blank" rel="noreferrer">
