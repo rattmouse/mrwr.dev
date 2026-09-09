@@ -21,11 +21,17 @@ import {
   KNOB_CC_BASE,
   Knob,
   Legend,
+  PAD_BANKS,
+  PAD_BANK_SIZE,
   PAD_BASE_NOTE,
   PAD_CHANNEL,
   PANEL,
   Pad,
   PanelButton,
+  padBankBase,
+  STICK_CC_X,
+  STICK_CC_Y,
+  STICK_CENTRE,
   Well,
 } from "@/components/windows/MpkPanel";
 
@@ -141,6 +147,19 @@ const KEY_HEIGHT_NORMAL = 72;
 // Bend / mod fader travel; the stick cluster is sized to match.
 const FADER_HEIGHT = 78;
 const KEY_HEIGHT_FULL = 132;
+
+// The stick's axes run -1..1 on screen and 0..127 on the wire, resting at 64.
+// The halves are scaled separately so full deflection reaches 0 and 127 either
+// way rather than stopping one short at the bottom.
+function axisToCc(axis: number): number {
+  const a = Math.max(-1, Math.min(1, axis));
+  return Math.round(STICK_CENTRE + a * (a < 0 ? STICK_CENTRE : 127 - STICK_CENTRE));
+}
+
+function ccToAxis(value: number): number {
+  const v = Math.max(0, Math.min(127, value));
+  return (v - STICK_CENTRE) / (v < STICK_CENTRE ? STICK_CENTRE : 127 - STICK_CENTRE);
+}
 
 // Computer-keyboard mapping: physical key code -> semitones above the base note.
 const KEY_SEMITONES: Record<string, number> = {
@@ -550,7 +569,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [padHeld, setPadHeld] = useState<number[]>([]);
   const [bendValue, setBendValue] = useState(8192);
   const [modValue, setModValue] = useState(0);
+  // Stick position as the two CC values it sends, 64 at rest.
+  const [stick, setStick] = useState({ x: STICK_CENTRE, y: STICK_CENTRE });
   const [latch, setLatch] = useState(false);
+  // Which of the two pad banks the grid is showing / playing.
+  const [padBank, setPadBank] = useState(0);
   const [fullLevel, setFullLevel] = useState(false);
   const [panelWidth, setPanelWidth] = useState(0);
 
@@ -574,10 +597,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const heldRef = useRef<Map<number, number>>(new Map());
   const padHeldRef = useRef<Map<number, number>>(new Map());
   const latchRef = useRef(false);
+  const padBankRef = useRef(0);
   const fullLevelRef = useRef(false);
-  // Current bend / mod, so the faders, the stick and incoming MIDI all agree and
-  // a drag only emits when the value actually moves.
+  // Current bend / mod / stick, so the panel controls and incoming MIDI all agree
+  // and a drag only emits when the value actually moves.
   const benderRef = useRef({ bend: 8192, mod: 0 });
+  const stickRef = useRef({ x: STICK_CENTRE, y: STICK_CENTRE });
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   const synthRef = useRef<MidiSynth | null>(null);
@@ -698,8 +723,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         if (parsed.type === "Note On") synth.noteOn(parsed.note, parsed.velocity ?? 96);
         else if (parsed.type === "Note Off") synth.noteOff(parsed.note);
       }
-      // The bend fader, the stick's X axis and any bend from a real controller
-      // all land here and detune whatever is sounding, +/- 2 semitones.
+      // The bend fader and any bend from a real controller land here and detune
+      // whatever is sounding, +/- 2 semitones.
       if (parsed.bend != null) {
         ensureSynth().setPitchBend(((parsed.bend - 8192) / 8192) * 2);
         benderRef.current.bend = parsed.bend;
@@ -708,6 +733,13 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       if (parsed.cc === 1) {
         benderRef.current.mod = parsed.ccValue ?? 0;
         setModValue(parsed.ccValue ?? 0);
+      }
+      // The stick mirrors its own two CCs the same way the faders mirror theirs.
+      if (parsed.cc === STICK_CC_X || parsed.cc === STICK_CC_Y) {
+        const axis = parsed.cc === STICK_CC_X ? "x" : "y";
+        const value = parsed.ccValue ?? 0;
+        stickRef.current[axis] = value;
+        setStick((prev) => (prev[axis] === value ? prev : { ...prev, [axis]: value }));
       }
       // K1–K8 mirror CC 70–77 whoever sent them — panel, hardware or playback.
       if (parsed.cc != null && parsed.cc >= KNOB_CC_BASE && parsed.cc < KNOB_CC_BASE + 8) {
@@ -732,7 +764,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         const isPad =
           parsed.channel === PAD_CHANNEL &&
           parsed.note >= PAD_BASE_NOTE &&
-          parsed.note < PAD_BASE_NOTE + 8;
+          parsed.note < PAD_BASE_NOTE + PAD_BANK_SIZE * PAD_BANKS.length;
         const counts = isPad ? padHeldRef.current : heldRef.current;
         if (parsed.type === "Note On") {
           counts.set(parsed.note, (counts.get(parsed.note) ?? 0) + 1);
@@ -840,6 +872,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     benderRef.current = { bend: 8192, mod: 0 };
     setBendValue(8192);
     setModValue(0);
+    stickRef.current = { x: STICK_CENTRE, y: STICK_CENTRE };
+    setStick({ x: STICK_CENTRE, y: STICK_CENTRE });
     playingRef.current = false;
     setPlaying(false);
     setPlayPos(0);
@@ -1242,7 +1276,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
   const padDown = useCallback(
     (index: number) => {
-      const note = PAD_BASE_NOTE + index;
+      const note = padBankBase(padBankRef.current) + index;
       const on = 0x90 | (PAD_CHANNEL - 1);
       const off = 0x80 | (PAD_CHANNEL - 1);
       const sounding = padHeldRef.current.has(note);
@@ -1260,7 +1294,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const padUp = useCallback(
     (index: number) => {
       if (latchRef.current) return;
-      const note = PAD_BASE_NOTE + index;
+      const note = padBankBase(padBankRef.current) + index;
       if (!padHeldRef.current.has(note)) return;
       panelSend([0x80 | (PAD_CHANNEL - 1), note, 0]);
     },
@@ -1289,21 +1323,37 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // in for; the mod fader stays where it's left.
   const releaseBend = useCallback(() => sendBend(8192), [sendBend]);
 
+  // Both stick axes are plain CCs of their own, so the Bend and Mod faders keep
+  // pitch bend and CC 1 to themselves.
   const stickMove = useCallback(
     (x: number, y: number) => {
-      sendBend(8192 + x * 8191);
-      // Only the up half of the Y axis does anything — it's the mod wheel.
-      sendMod(Math.max(0, y) * 127);
+      const cx = axisToCc(x);
+      const cy = axisToCc(y);
+      if (cx !== stickRef.current.x) panelSend([0xb0, STICK_CC_X, cx]);
+      if (cy !== stickRef.current.y) panelSend([0xb0, STICK_CC_Y, cy]);
     },
-    [sendBend, sendMod],
+    [panelSend],
   );
 
+  // Springs back to centre on release, like the stick it stands in for.
   const stickRelease = useCallback(() => stickMove(0, 0), [stickMove]);
 
   const bumpOctave = useCallback((dir: 1 | -1) => {
     octaveShiftRef.current = Math.max(-3, Math.min(3, octaveShiftRef.current + dir));
     setOctaveShift(octaveShiftRef.current);
   }, []);
+
+  // Swapping banks re-points the grid at the next eight notes. Anything the old
+  // bank is still holding — a latched pad, a pad under the pointer — is let go
+  // first, so nothing sticks on out of sight.
+  const cyclePadBank = useCallback(() => {
+    Array.from(padHeldRef.current.keys()).forEach((note) =>
+      panelSend([0x80 | (PAD_CHANNEL - 1), note, 0]),
+    );
+    const next = (padBankRef.current + 1) % PAD_BANKS.length;
+    padBankRef.current = next;
+    setPadBank(next);
+  }, [panelSend]);
 
   const toggleLatch = useCallback(() => {
     const next = !latchRef.current;
@@ -1422,14 +1472,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         <Cluster label="Stick" style={{ flex: "0 0 auto", minWidth: 58 }}>
           <Joystick
             size={FADER_HEIGHT - 22}
+            x={ccToAxis(stick.x)}
+            y={ccToAxis(stick.y)}
             disabled={playing}
+            ariaLabel={`Stick — CC ${STICK_CC_X} across, CC ${STICK_CC_Y} up`}
+            readout={`${stick.x}·${stick.y}`}
             onMove={stickMove}
             onRelease={stickRelease}
           />
         </Cluster>
 
-        {/* Bank A of the pads — notes 36–43 on channel 10. */}
-        <Cluster label="Pads · bank A" style={{ flex: "0 1 auto", minWidth: 0 }}>
+        {/* The pads — eight notes on channel 10, from 36 (bank A) or 44 (bank B). */}
+        <Cluster label={`Pads · bank ${PAD_BANKS[padBank]}`} style={{ flex: "0 1 auto", minWidth: 0 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, width: 164 }}>
             {[
               [4, 5, 6, 7],
@@ -1441,7 +1495,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
                     key={i}
                     index={i}
                     label={String(i + 1)}
-                    active={padHeld.includes(PAD_BASE_NOTE + i)}
+                    active={padHeld.includes(padBankBase(padBank) + i)}
                     height={34}
                     disabled={playing}
                     onDown={() => padDown(i)}
@@ -1559,6 +1613,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           onClick={toggleFullLevel}
         />
         <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
+        <PanelButton
+          label={wide ? "Bank" : "Bk"}
+          sub={PAD_BANKS[padBank]}
+          disabled={playing}
+          onClick={cyclePadBank}
+        />
         <PanelButton
           label="Prog"
           sub={wide ? waveform : waveform.slice(0, 3)}

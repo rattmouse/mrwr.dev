@@ -6,7 +6,7 @@
 // Everything here is presentation only; MidiWindow owns the MIDI that drives it.
 
 import React, { useRef } from "react";
-import { Button, GroupBox } from "react95";
+import { Button } from "react95";
 
 export const PANEL = {
   material: "#c0c0c0",
@@ -18,14 +18,31 @@ export const PANEL = {
   dim: "#404040",
   accent: "#000080",
   canvas: "#ffffff",
+  // The window's own face, a shade lighter than the controls sitting on it.
+  // Matches react95's material so a caption can sit flush on the window.
+  surface: "#c6c6c6",
 } as const;
 
-// Bank A of the MPC pad grid: pads 1–8 as notes 36–43 on channel 10, laid out
-// with pads 5–8 on the top row the way the hardware is.
+// The MPC pad grid: pads 1–8 on channel 10, laid out with pads 5–8 on the top
+// row the way the hardware is. Two banks, as the hardware ships them — A is
+// notes 36–43, B carries on from 44.
 export const PAD_BASE_NOTE = 36;
 export const PAD_CHANNEL = 10;
+export const PAD_BANK_SIZE = 8;
+export const PAD_BANKS = ["A", "B"] as const;
+
+export function padBankBase(bank: number): number {
+  return PAD_BASE_NOTE + bank * PAD_BANK_SIZE;
+}
+
 // K1–K8 send CC 70–77, the MPK's own factory assignment.
 export const KNOB_CC_BASE = 70;
+// The thumbstick is assignable on the hardware; here each axis sends its own
+// general-purpose CC (16 = X, 17 = Y) so it stays clear of the Bend and Mod
+// faders beside it. Both axes rest at 64 and spring back there on release.
+export const STICK_CC_X = 16;
+export const STICK_CC_Y = 17;
+export const STICK_CENTRE = 64;
 
 // Pad lamps. Win98 only ever had sixteen colours to spare, so the pads light in
 // the VGA palette rather than the hardware's full RGB.
@@ -147,19 +164,50 @@ export function Well({
 }
 
 // A labelled cluster of controls, like the group boxes in a Control Panel page.
+// react95's GroupBox positions its caption absolutely, at the window's full
+// 16px, so on the narrow clusters here the caption overhangs the frame and runs
+// into the box next door. A plain fieldset/legend instead: the frame widens to
+// fit its caption and the caption punches a gap in the frame, the way a Win98
+// group box actually looks.
 export function Cluster({
   label,
   children,
   style,
 }: {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactNode;
   style?: React.CSSProperties;
 }) {
   return (
-    <GroupBox label={label} style={{ margin: 0, padding: "2px 6px 5px", ...style }}>
+    <fieldset
+      style={{
+        margin: 0,
+        padding: "1px 5px 4px",
+        border: "none",
+        // The etched groove, drawn as two 1px frames like the real control.
+        boxShadow: [
+          `inset 1px 1px 0 ${PANEL.shadow}`,
+          `inset -1px -1px 0 ${PANEL.light}`,
+          `inset 2px 2px 0 ${PANEL.light}`,
+          `inset -2px -2px 0 ${PANEL.shadow}`,
+        ].join(", "),
+        ...style,
+      }}
+    >
+      <legend
+        style={{
+          padding: "0 3px",
+          marginLeft: 2,
+          fontSize: 11,
+          color: PANEL.text,
+          background: PANEL.surface,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </legend>
       {children}
-    </GroupBox>
+    </fieldset>
   );
 }
 
@@ -505,22 +553,33 @@ export function Fader({
   );
 }
 
-// The four-way thumbstick left of the keybed: X bends pitch, Y opens the mod
-// wheel, and it springs back to centre on release like the real one.
+// The four-way thumbstick left of the keybed. Both axes send their own CC —
+// STICK_CC_X / STICK_CC_Y — rather than doubling up on the bend and mod faders
+// next to it, and it springs back to centre on release like the real one. The
+// position is owned by the caller, the way the knobs' is, so incoming MIDI
+// moves the stick too.
 export function Joystick({
   size = 48,
+  x,
+  y,
   disabled,
+  ariaLabel,
+  readout,
   onMove,
   onRelease,
 }: {
   size?: number;
+  /** Stick position per axis, -1..1, centre 0. */
+  x: number;
+  y: number;
   disabled?: boolean;
+  ariaLabel: string;
+  readout: string;
   onMove: (x: number, y: number) => void;
   onRelease: () => void;
 }) {
   const wrap = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = React.useState(false);
-  const [pos, setPos] = React.useState({ x: 0, y: 0 });
 
   const at = (e: React.PointerEvent) => {
     const box = wrap.current?.getBoundingClientRect();
@@ -534,22 +593,37 @@ export function Joystick({
     if (disabled) return;
     e.preventDefault();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    // preventDefault stops the click from focusing the stick, so do it here —
+    // otherwise the arrow keys go nowhere until you Tab to it.
+    (e.currentTarget as HTMLElement).focus();
     setDragging(true);
     const p = at(e);
-    setPos(p);
     onMove(p.x, p.y);
   };
   const move = (e: React.PointerEvent) => {
     if (!dragging) return;
     const p = at(e);
-    setPos(p);
     onMove(p.x, p.y);
   };
   const end = () => {
     if (!dragging) return;
     setDragging(false);
-    setPos({ x: 0, y: 0 });
     onRelease();
+  };
+
+  // Arrow keys nudge the stick; letting go of a key springs it back, so Escape
+  // (or Home) is the way to recentre from the keyboard.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+    const step = e.shiftKey ? 0.5 : 1 / 8;
+    const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+    if (e.key === "ArrowLeft") onMove(clamp(x - step), y);
+    else if (e.key === "ArrowRight") onMove(clamp(x + step), y);
+    else if (e.key === "ArrowUp") onMove(x, clamp(y + step));
+    else if (e.key === "ArrowDown") onMove(x, clamp(y - step));
+    else if (e.key === "Home" || e.key === "Escape") onRelease();
+    else return;
+    e.preventDefault();
   };
 
   const travel = size / 2 - 9;
@@ -559,10 +633,15 @@ export function Joystick({
     >
       <div
         ref={wrap}
+        role="group"
+        aria-label={ariaLabel}
+        aria-disabled={disabled}
+        tabIndex={disabled ? -1 : 0}
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={end}
         onPointerCancel={end}
+        onKeyDown={onKeyDown}
         style={{
           position: "relative",
           width: size,
@@ -586,7 +665,7 @@ export function Joystick({
             boxSizing: "border-box",
             marginLeft: -(size * 0.23),
             marginTop: -(size * 0.23),
-            transform: `translate(${pos.x * travel}px, ${-pos.y * travel}px)`,
+            transform: `translate(${x * travel}px, ${-y * travel}px)`,
             transition: dragging ? "none" : "transform 120ms ease-out",
             borderRadius: "50%",
             background: PANEL.material,
@@ -594,6 +673,7 @@ export function Joystick({
           }}
         />
       </div>
+      <Legend>{readout}</Legend>
     </div>
   );
 }
