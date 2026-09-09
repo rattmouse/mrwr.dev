@@ -16,7 +16,9 @@
         "midi.exe is now laid out like an AKAI MPK mini PLUS — pitch bend and mod faders, a thumbstick, eight pads and eight knobs, all of which play and show up in the message log",
         "midi.exe's thumbstick now sends its own two controls instead of doubling up on the bend and mod faders, so you can move all four at once",
         "midi.exe's pads now have two banks — hit Bank to swap between them, and anything still sounding stops on the way out",
-        "The labels on midi.exe's front panel sit inside their own frames now, instead of spilling over the box next door"
+        "The labels on midi.exe's front panel sit inside their own frames now, instead of spilling over the box next door",
+        "midi.exe's pads now play an actual drum kit — kick, snare, hats, claps, toms and cymbals across two banks, with each pad's piece written on it",
+        "midi.exe's eight knobs now do something: filter cutoff and resonance, attack and release, drum tune and decay, echo and volume — with a readout on the display of what you just changed"
       ]
     },
     {

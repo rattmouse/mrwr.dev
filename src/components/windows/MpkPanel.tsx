@@ -7,6 +7,7 @@
 
 import React, { useRef } from "react";
 import { Button } from "react95";
+import { DRUM_BASE_NOTE, DRUM_CHANNEL } from "@/lib/midiSynth";
 
 export const PANEL = {
   material: "#c0c0c0",
@@ -25,9 +26,10 @@ export const PANEL = {
 
 // The MPC pad grid: pads 1–8 on channel 10, laid out with pads 5–8 on the top
 // row the way the hardware is. Two banks, as the hardware ships them — A is
-// notes 36–43, B carries on from 44.
-export const PAD_BASE_NOTE = 36;
-export const PAD_CHANNEL = 10;
+// notes 36–43, B carries on from 44. Those notes are the drum kit's, so the
+// numbers come from the synth rather than being repeated here.
+export const PAD_BASE_NOTE = DRUM_BASE_NOTE;
+export const PAD_CHANNEL = DRUM_CHANNEL;
 export const PAD_BANK_SIZE = 8;
 export const PAD_BANKS = ["A", "B"] as const;
 
@@ -228,6 +230,8 @@ function arc(cx: number, cy: number, r: number, from: number, to: number): strin
 // One of the eight knobs, bevelled like a Win98 control. Drag up/down to sweep
 // 0–127 (hold Shift for a fine sweep); the navy arc is the current value.
 export function Knob({
+  id,
+  name,
   label,
   cc,
   value,
@@ -235,6 +239,11 @@ export function Knob({
   disabled,
   onChange,
 }: {
+  /** The knob's silkscreened number — K1–K8. Caption space goes to `label`. */
+  id: string;
+  /** What the knob does, spelled out. */
+  name: string;
+  /** The abbreviation that fits under the cap. */
   label: string;
   cc: number;
   value: number;
@@ -280,7 +289,7 @@ export function Knob({
     >
       <svg
         role="slider"
-        aria-label={`Knob ${label} — CC ${cc}`}
+        aria-label={`Knob ${id} ${name} — CC ${cc}`}
         aria-valuemin={0}
         aria-valuemax={127}
         aria-valuenow={value}
@@ -322,7 +331,12 @@ export function Knob({
           strokeWidth={2}
         />
       </svg>
-      <span style={{ fontSize: 10, color: PANEL.dim }}>{label}</span>
+      <span
+        title={`${id} · ${name} · CC ${cc}`}
+        style={{ fontSize: 10, color: PANEL.dim, whiteSpace: "nowrap" }}
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -331,6 +345,8 @@ export function Knob({
 export function Pad({
   index,
   label,
+  name,
+  sub,
   active,
   height,
   disabled,
@@ -339,6 +355,10 @@ export function Pad({
 }: {
   index: number;
   label: string;
+  /** The kit piece this pad fires, spelled out. */
+  name?: string;
+  /** The same piece, abbreviated to what fits silkscreened across the pad. */
+  sub?: string;
   active: boolean;
   height: number;
   disabled?: boolean;
@@ -348,7 +368,8 @@ export function Pad({
   return (
     <div
       role="button"
-      aria-label={`Pad ${index + 1}`}
+      aria-label={name ? `Pad ${index + 1} — ${name}` : `Pad ${index + 1}`}
+      title={name}
       aria-pressed={active}
       onPointerDown={(e) => {
         if (disabled) return;
@@ -374,16 +395,29 @@ export function Pad({
         color: PANEL.text,
         fontSize: 10,
         display: "flex",
-        alignItems: "flex-end",
-        justifyContent: "flex-start",
-        padding: "0 0 1px 3px",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        padding: "1px 0 1px 3px",
+        overflow: "hidden",
         touchAction: "none",
         userSelect: "none",
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      {label}
+      <span
+        style={{
+          fontSize: 9,
+          lineHeight: 1,
+          letterSpacing: "0.02em",
+          color: active ? PANEL.darkest : PANEL.dim,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {sub}
+      </span>
+      <span style={{ lineHeight: 1 }}>{label}</span>
     </div>
   );
 }

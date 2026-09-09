@@ -10,7 +10,13 @@ import React, {
   useState,
 } from "react";
 import { ScrollView } from "react95";
-import { MidiSynth, type Waveform } from "@/lib/midiSynth";
+import {
+  KNOB_DEFAULTS,
+  KNOB_PARAMS,
+  MidiSynth,
+  drumForNote,
+  type Waveform,
+} from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
 import {
   BrandBar,
@@ -204,6 +210,15 @@ function formatTransport(ms: number): string {
 function formatBytes(data: Uint8Array): string {
   const hex = Array.from(data, (b) => b.toString(16).toUpperCase().padStart(2, "0"));
   return hex.length > MAX_HEX_BYTES ? `${hex.slice(0, MAX_HEX_BYTES).join(" ")} …` : hex.join(" ");
+}
+
+// A knob CC reads out as what it actually did — "Cutoff  4.2 kHz" — rather
+// than as the raw controller number the log row already carries.
+function knobReadout(entry: LogEntry): string | null {
+  const [status, cc, value] = entry.raw;
+  if (entry.raw.length < 3 || (status & 0xf0) !== 0xb0) return null;
+  const param = KNOB_PARAMS[cc - KNOB_CC_BASE];
+  return param ? `${param.name}  ${param.format(value)}` : null;
 }
 
 function describe(data: Uint8Array): Parsed | null {
@@ -565,7 +580,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }));
   const [held, setHeld] = useState<number[]>([]);
   // Panel state: knob positions, lit pads, and the latching function buttons.
-  const [knobs, setKnobs] = useState<number[]>(() => new Array(8).fill(0));
+  // K1–K8 rest where KNOB_PARAMS says, not at zero — a knob has a physical
+  // position, and cutoff parked at 0 would mean silence.
+  const [knobs, setKnobs] = useState<number[]>(() => [...KNOB_DEFAULTS]);
   const [padHeld, setPadHeld] = useState<number[]>([]);
   const [bendValue, setBendValue] = useState(8192);
   const [modValue, setModValue] = useState(0);
@@ -720,8 +737,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
       if (parsed.note != null) {
         const synth = ensureSynth();
-        if (parsed.type === "Note On") synth.noteOn(parsed.note, parsed.velocity ?? 96);
-        else if (parsed.type === "Note Off") synth.noteOff(parsed.note);
+        // Channel 10 is the kit; everything else is the keybed's oscillators.
+        const channel = parsed.channel ?? 1;
+        if (parsed.type === "Note On") synth.noteOn(parsed.note, parsed.velocity ?? 96, channel);
+        else if (parsed.type === "Note Off") synth.noteOff(parsed.note, channel);
       }
       // The bend fader and any bend from a real controller land here and detune
       // whatever is sounding, +/- 2 semitones.
@@ -741,10 +760,16 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         stickRef.current[axis] = value;
         setStick((prev) => (prev[axis] === value ? prev : { ...prev, [axis]: value }));
       }
-      // K1–K8 mirror CC 70–77 whoever sent them — panel, hardware or playback.
-      if (parsed.cc != null && parsed.cc >= KNOB_CC_BASE && parsed.cc < KNOB_CC_BASE + 8) {
+      // K1–K8 mirror CC 70–77 whoever sent them — panel, hardware or playback —
+      // and each one moves the synth parameter KNOB_PARAMS assigns to that slot.
+      if (
+        parsed.cc != null &&
+        parsed.cc >= KNOB_CC_BASE &&
+        parsed.cc < KNOB_CC_BASE + KNOB_PARAMS.length
+      ) {
         const slot = parsed.cc - KNOB_CC_BASE;
         const value = parsed.ccValue ?? 0;
+        ensureSynth().setKnob(slot, value);
         setKnobs((prev) => {
           if (prev[slot] === value) return prev;
           const next = [...prev];
@@ -1177,7 +1202,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         padHeldRef.current.clear();
         setHeld([]);
         setPadHeld([]);
-        setKnobs(new Array(8).fill(0));
+        setKnobs([...KNOB_DEFAULTS]);
+        synthRef.current?.resetKnobs();
         setEntries([]);
         setLoadError(null);
       },
@@ -1274,26 +1300,19 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     [panelSend],
   );
 
+  // Latch is a keybed thing: the pads fire one-shot drums, which ring out on
+  // their own, so holding one open would only leave the lamp stuck on.
   const padDown = useCallback(
     (index: number) => {
       const note = padBankBase(padBankRef.current) + index;
-      const on = 0x90 | (PAD_CHANNEL - 1);
-      const off = 0x80 | (PAD_CHANNEL - 1);
-      const sounding = padHeldRef.current.has(note);
-      const velocity = fullLevelRef.current ? 127 : 110;
-      if (latchRef.current) {
-        panelSend(sounding ? [off, note, 0] : [on, note, velocity]);
-        return;
-      }
-      if (sounding) return;
-      panelSend([on, note, velocity]);
+      if (padHeldRef.current.has(note)) return;
+      panelSend([0x90 | (PAD_CHANNEL - 1), note, fullLevelRef.current ? 127 : 110]);
     },
     [panelSend],
   );
 
   const padUp = useCallback(
     (index: number) => {
-      if (latchRef.current) return;
       const note = padBankBase(padBankRef.current) + index;
       if (!padHeldRef.current.has(note)) return;
       panelSend([0x80 | (PAD_CHANNEL - 1), note, 0]);
@@ -1495,6 +1514,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
                     key={i}
                     index={i}
                     label={String(i + 1)}
+                    name={drumForNote(padBankBase(padBank) + i).name}
+                    sub={drumForNote(padBankBase(padBank) + i).short}
                     active={padHeld.includes(padBankBase(padBank) + i)}
                     height={34}
                     disabled={playing}
@@ -1507,8 +1528,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           </div>
         </Cluster>
 
-        {/* K1–K8, sending CC 70–77 the way the hardware ships. */}
-        <Cluster label="Knobs" style={{ flex: "0 0 auto" }}>
+        {/* K1–K8, sending CC 70–77 the way the hardware ships — and each one
+            wired to the synth parameter named under it. */}
+        <Cluster label="Knobs · CC 70–77" style={{ flex: "0 0 auto" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
               [0, 1, 2, 3],
@@ -1518,7 +1540,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
                 {row.map((i) => (
                   <Knob
                     key={i}
-                    label={`K${i + 1}`}
+                    id={KNOB_PARAMS[i].id}
+                    name={KNOB_PARAMS[i].name}
+                    label={KNOB_PARAMS[i].short}
                     cc={KNOB_CC_BASE + i}
                     value={knobs[i]}
                     size={30}
@@ -1558,7 +1582,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
                 whiteSpace: "nowrap",
               }}
             >
-              {last ? last.detail || last.bytes : "ready"}
+              {last ? (knobReadout(last) ?? (last.detail || last.bytes)) : "ready"}
             </span>
           </div>
           <div
