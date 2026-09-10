@@ -258,15 +258,119 @@ type Graph = {
   mix: GainNode;
   send: GainNode;
   master: GainNode;
+  /** Tapped off the master, post-volume, so the scope shows what you hear. */
+  analyser: AnalyserNode;
 };
 
 function midiToFreq(note: number): number {
   return 440 * 2 ** ((note - 69) / 12);
 }
 
+// ---------------------------------------------------------------------------
+// The scope
+// ---------------------------------------------------------------------------
+
+/** How many samples the scope trace and the spectrum are taken from. */
+const FFT_SIZE = 4096;
+/** How much of the trace the autocorrelation matches against itself. */
+const PITCH_WINDOW = 1024;
+/** How well the best lag has to correlate before it counts as a pitch at all. */
+const PITCH_CLARITY = 0.6;
+// Autocorrelation over a thousand lags is not free; the readout only moves a
+// few times a second, so neither does this.
+const PITCH_INTERVAL_MS = 70;
+// The pitch detector only looks between these — below is rumble, above is the
+// hiss off the hats, and neither is the note anybody is playing.
+const PITCH_MIN_HZ = 40;
+const PITCH_MAX_HZ = 5000;
+// Under this RMS the signal is a decaying tail or nothing at all, and a
+// "detected" pitch would be noise dressed up as a number.
+const SILENCE_RMS = 0.0015;
+
+/**
+ * The pitch of the sound, by autocorrelation: slide the trace over itself and
+ * the lag that matches best is one period long. A spectrum can't do this job
+ * here — its bins are tens of Hz apart, which is a whole semitone or two down
+ * in the bass — while the lag is a whole sample and lands within a cent or so
+ * once it's interpolated.
+ *
+ * Two standard guards: the winner has to correlate well enough that the sound
+ * is actually periodic (a hat or a snare correlates with nothing, and gets no
+ * reading), and among near-equal lags the shortest wins, because every multiple
+ * of the true period correlates just as well and would read an octave flat.
+ */
+function detectPitch(wave: Float32Array, sampleRate: number): number | null {
+  const minLag = Math.max(2, Math.floor(sampleRate / PITCH_MAX_HZ));
+  const maxLag = Math.min(Math.ceil(sampleRate / PITCH_MIN_HZ), wave.length - PITCH_WINDOW - 1);
+  if (maxLag <= minLag) return null;
+
+  let energy = 0;
+  for (let i = 0; i < PITCH_WINDOW; i++) energy += wave[i] * wave[i];
+  if (energy <= 0) return null;
+
+  // Normalised against both windows' energy, so a decaying note doesn't bias
+  // the peak towards shorter lags and pull the reading sharp.
+  const corr = new Float32Array(maxLag + 1);
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let sum = 0;
+    let lagEnergy = 0;
+    for (let i = 0; i < PITCH_WINDOW; i++) {
+      const b = wave[i + lag];
+      sum += wave[i] * b;
+      lagEnergy += b * b;
+    }
+    corr[lag] = lagEnergy > 0 ? sum / Math.sqrt(energy * lagEnergy) : 0;
+  }
+
+  // Every signal correlates with itself at a lag of nothing much, so the first
+  // few lags are a slope down from 1 and not a period at all. Skip past it —
+  // candidates only start where the correlation first goes negative.
+  let from = minLag;
+  while (from <= maxLag && corr[from] > 0) from++;
+  if (from >= maxLag) return null;
+
+  let best = 0;
+  for (let lag = from; lag <= maxLag; lag++) if (corr[lag] > best) best = corr[lag];
+  if (best < PITCH_CLARITY) return null;
+
+  // The first lag that gets within a hair of the best is the true period; the
+  // later ones are its octaves. Walk to the top of that peak before taking it.
+  let lag = from;
+  while (lag <= maxLag && corr[lag] < best * 0.94) lag++;
+  while (lag < maxLag && corr[lag + 1] >= corr[lag]) lag++;
+  if (lag < from + 1 || lag > maxLag - 1) return sampleRate / lag;
+
+  const left = corr[lag - 1];
+  const right = corr[lag + 1];
+  const denom = left - 2 * corr[lag] + right;
+  const offset = denom === 0 ? 0 : (0.5 * (left - right)) / denom;
+  return sampleRate / (lag + Math.max(-0.5, Math.min(0.5, offset)));
+}
+
+export type ScopeFrame = {
+  /** Time domain, -1..1, oldest sample first. */
+  wave: Float32Array<ArrayBuffer>;
+  /** Magnitudes in dB-scaled bytes, bin 0 = DC. */
+  spectrum: Uint8Array<ArrayBuffer>;
+  sampleRate: number;
+  /** Hz per spectrum bin. */
+  binHz: number;
+  /** RMS of the trace, 0..1. */
+  level: number;
+  /** Dominant frequency in Hz, or null when it's too quiet to call. */
+  pitchHz: number | null;
+  /** Notes the keybed is holding, lowest first, pitch bend included. */
+  notes: { note: number; hz: number }[];
+};
+
 export class MidiSynth {
   private graph: Graph | null = null;
   private noise: AudioBuffer | null = null;
+  /** Scope buffers, reused frame to frame — this runs at 60 Hz. */
+  private scopeWave: Float32Array<ArrayBuffer> | null = null;
+  private scopeSpectrum: Uint8Array<ArrayBuffer> | null = null;
+  /** Last pitch reading and when it was taken, in performance-clock ms. */
+  private lastPitch: { hz: number | null; at: number } = { hz: null, at: -Infinity };
   private voices = new Map<number, Voice>();
   private waveform: Waveform = "square";
   /** Current pitch-bend offset in cents, applied to every voice. */
@@ -286,7 +390,13 @@ export class MidiSynth {
     const ctx = new Ctor();
 
     const master = ctx.createGain();
-    master.connect(ctx.destination);
+    // The scope tap sits between the master and the speakers, so it sees the
+    // dry mix, the echo returns and the volume knob — everything you hear.
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.6;
+    master.connect(analyser);
+    analyser.connect(ctx.destination);
 
     const mix = ctx.createGain();
     mix.connect(master);
@@ -317,7 +427,7 @@ export class MidiSynth {
     feedback.connect(delay);
     delay.connect(master);
 
-    this.graph = { ctx, tone, filter, drums, mix, send, master };
+    this.graph = { ctx, tone, filter, drums, mix, send, master, analyser };
     // Jump straight to the knob positions rather than gliding — a fresh graph
     // starts at the node defaults, and gliding down from unity gain would put a
     // moment of full-volume, half-filtered sound in front of the first note.
@@ -559,6 +669,57 @@ export class MidiSynth {
     }
   }
 
+  /**
+   * One frame for the scope: the trace, the spectrum, how loud it is, what note
+   * it is, and what the keybed is holding. Returns null before the first sound,
+   * when there is no audio graph to read.
+   */
+  readScope(): ScopeFrame | null {
+    const g = this.graph;
+    if (!g) return null;
+    const { analyser, ctx } = g;
+    if (!this.scopeWave || this.scopeWave.length !== analyser.fftSize) {
+      this.scopeWave = new Float32Array(analyser.fftSize);
+      this.scopeSpectrum = new Uint8Array(analyser.frequencyBinCount);
+    }
+    const wave = this.scopeWave;
+    const spectrum = this.scopeSpectrum!;
+    analyser.getFloatTimeDomainData(wave);
+    analyser.getByteFrequencyData(spectrum);
+
+    let sum = 0;
+    for (let i = 0; i < wave.length; i++) sum += wave[i] * wave[i];
+    const level = Math.sqrt(sum / wave.length);
+
+    const binHz = ctx.sampleRate / analyser.fftSize;
+    const notes = [...this.voices.keys()]
+      .map((note) => ({ note, hz: midiToFreq(note) * 2 ** (this.bendCents / 1200) }))
+      .sort((a, b) => a.note - b.note);
+
+    return {
+      wave,
+      spectrum,
+      sampleRate: ctx.sampleRate,
+      binHz,
+      level,
+      pitchHz: this.pitch(wave, ctx.sampleRate, level),
+      notes,
+    };
+  }
+
+  /** Cached pitch — silence answers straight away, sound at most every 70 ms. */
+  private pitch(wave: Float32Array, sampleRate: number, level: number): number | null {
+    if (level < SILENCE_RMS) {
+      this.lastPitch = { hz: null, at: -Infinity };
+      return null;
+    }
+    const now = typeof performance === "undefined" ? Date.now() : performance.now();
+    if (now - this.lastPitch.at < PITCH_INTERVAL_MS) return this.lastPitch.hz;
+    const hz = detectPitch(wave, sampleRate);
+    this.lastPitch = { hz, at: now };
+    return hz;
+  }
+
   dispose(): void {
     this.allNotesOff();
     if (this.graph) {
@@ -566,6 +727,8 @@ export class MidiSynth {
       this.graph = null;
     }
     this.noise = null;
+    this.scopeWave = null;
+    this.scopeSpectrum = null;
     this.voices.clear();
   }
 }

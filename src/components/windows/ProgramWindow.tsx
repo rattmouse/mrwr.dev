@@ -112,6 +112,7 @@ export default function ProgramWindow({
   const [midiSaveAsTop, setMidiSaveAsTop] = useState(0);
   const [midiEditOpen, setMidiEditOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
+  const [midiScopeOpen, setMidiScopeOpen] = useState(false);
   const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
   const [midiPlaying, setMidiPlaying] = useState(false);
   const [midiHasMessages, setMidiHasMessages] = useState(false);
@@ -729,6 +730,15 @@ export default function ProgramWindow({
         >
           Meters
         </Button>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Waveform and frequency of the sound playing"
+          active={midiScopeOpen}
+          onClick={() => midiRef.current?.toggleScope()}
+        >
+          Scope
+        </Button>
         <input
           ref={midiFileInputRef}
           type="file"
@@ -936,6 +946,7 @@ export default function ProgramWindow({
           ref={midiRef}
           maximized={layout === "maximized"}
           onMetersOpenChange={setMidiMetersOpen}
+          onScopeOpenChange={setMidiScopeOpen}
           onWaveformChange={setMidiWaveform}
           onPlayingChange={setMidiPlaying}
           onHasMessagesChange={setMidiHasMessages}

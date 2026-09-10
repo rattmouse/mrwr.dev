@@ -15,6 +15,7 @@ import {
   KNOB_PARAMS,
   MidiSynth,
   drumForNote,
+  type ScopeFrame,
   type Waveform,
 } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
@@ -44,6 +45,7 @@ import {
 export type MidiWindowHandle = {
   newSession: () => void;
   toggleMeters: () => void;
+  toggleScope: () => void;
   setWaveform: (waveform: Waveform) => void;
   loadSmf: (bytes: Uint8Array, name: string) => void;
   play: () => void;
@@ -56,6 +58,7 @@ export type MidiWindowHandle = {
 type MidiWindowProps = {
   maximized?: boolean;
   onMetersOpenChange?: (open: boolean) => void;
+  onScopeOpenChange?: (open: boolean) => void;
   onWaveformChange?: (waveform: Waveform) => void;
   onPlayingChange?: (playing: boolean) => void;
   onHasMessagesChange?: (hasMessages: boolean) => void;
@@ -404,6 +407,272 @@ function BitSpotlight({
 
 type KeyCell = { note: number; leftPct: number; widthPct: number };
 
+
+// ---------------------------------------------------------------------------
+// Scope
+// ---------------------------------------------------------------------------
+
+// Height of the scope canvas, windowed and maximised, and how much of it the
+// trace gets — the rest is the spectrum underneath it.
+const SCOPE_HEIGHT = 78;
+const SCOPE_HEIGHT_FULL = 148;
+const SCOPE_TRACE_SHARE = 0.62;
+// The spectrum's axis runs log, like hearing does, over these ends.
+const SPECTRUM_LO_HZ = 40;
+const SPECTRUM_HI_HZ = 16000;
+/** How many held notes the readout names before it starts counting instead. */
+const SCOPE_MAX_NAMED = 6;
+// The readout is text, not a trace — a few updates a second is plenty, and it
+// keeps the panel from re-rendering sixty times a second.
+const READOUT_MS = 100;
+
+type ScopeReadout = {
+  pitchHz: number | null;
+  level: number;
+  notes: { note: number; hz: number }[];
+};
+
+/** Nearest note to a frequency, and how far off it is in cents. */
+function nearestNote(hz: number): { name: string; cents: number } {
+  const midi = 69 + 12 * Math.log2(hz / 440);
+  const rounded = Math.round(midi);
+  return { name: noteName(rounded), cents: Math.round((midi - rounded) * 100) };
+}
+
+function formatHz(hz: number): string {
+  if (hz >= 1000) return `${(hz / 1000).toFixed(2)} kHz`;
+  return `${hz.toFixed(hz < 100 ? 2 : 1)} Hz`;
+}
+
+/**
+ * The scope: what the synth's output actually looks like. The trace on top is
+ * the waveform, started at a rising zero crossing so a held note stands still
+ * instead of sliding across; the bars below are its spectrum on a log axis,
+ * with the detected fundamental marked. Draws from the synth's analyser every
+ * frame while it's open, and reads out the pitch a few times a second.
+ */
+function ScopeView({
+  read,
+  waveform,
+  playing,
+  tall,
+}: {
+  read: () => ScopeFrame | null;
+  waveform: Waveform;
+  playing: boolean;
+  tall: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [readout, setReadout] = useState<ScopeReadout>({ pitchHz: null, level: 0, notes: [] });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    let width = 0;
+    let height = 0;
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = Math.max(1, Math.floor(rect.width));
+      height = Math.max(1, Math.floor(rect.height));
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    let raf = 0;
+    let lastReadout = 0;
+    // Trace gain, eased frame to frame (see below).
+    let gain = 1;
+    const draw = (now: number) => {
+      raf = window.requestAnimationFrame(draw);
+      const frame = read();
+      const traceH = Math.floor(height * SCOPE_TRACE_SHARE);
+      const specTop = traceH + 1;
+      const specH = height - specTop;
+
+      ctx.fillStyle = PANEL.canvas;
+      ctx.fillRect(0, 0, width, height);
+
+      // Graticule: the zero line, and the divide between trace and spectrum.
+      ctx.strokeStyle = "#d0d0d0";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 1; i < 8; i++) {
+        const x = Math.round((width * i) / 8) + 0.5;
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, traceH);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = "#a0a0a0";
+      ctx.beginPath();
+      ctx.moveTo(0, Math.round(traceH / 2) + 0.5);
+      ctx.lineTo(width, Math.round(traceH / 2) + 0.5);
+      ctx.moveTo(0, traceH + 0.5);
+      ctx.lineTo(width, traceH + 0.5);
+      ctx.stroke();
+
+      if (!frame) {
+        ctx.fillStyle = PANEL.dim;
+        ctx.font = "10px monospace";
+        ctx.fillText("no signal — play something", 6, Math.round(traceH / 2) - 5);
+        return;
+      }
+
+      // Spectrum first, so the trace sits over it if they ever overlap. Each bar
+      // is one pixel column, taking the loudest bin that falls in it — with a
+      // log axis the low columns cover a fraction of a bin and the high ones
+      // dozens, and a max keeps a narrow peak from being averaged away.
+      const { spectrum, binHz, wave } = frame;
+      const logLo = Math.log2(SPECTRUM_LO_HZ);
+      const logSpan = Math.log2(SPECTRUM_HI_HZ) - logLo;
+      const xForHz = (hz: number) => ((Math.log2(hz) - logLo) / logSpan) * width;
+      ctx.fillStyle = "#8a8ab4";
+      for (let x = 0; x < width; x++) {
+        const from = 2 ** (logLo + (x / width) * logSpan);
+        const to = 2 ** (logLo + ((x + 1) / width) * logSpan);
+        const first = Math.max(1, Math.floor(from / binHz));
+        const last = Math.min(spectrum.length - 1, Math.max(first, Math.ceil(to / binHz) - 1));
+        let peak = 0;
+        for (let bin = first; bin <= last; bin++) peak = Math.max(peak, spectrum[bin]);
+        const h = Math.round((peak / 255) * specH);
+        if (h > 0) ctx.fillRect(x, height - h, 1, h);
+      }
+
+      // Decade ticks, so the bars have somewhere to sit.
+      ctx.fillStyle = PANEL.dim;
+      ctx.font = "8px monospace";
+      for (const hz of [100, 1000, 10000]) {
+        const x = Math.round(xForHz(hz)) + 0.5;
+        if (x < 2 || x > width - 2) continue;
+        ctx.strokeStyle = "#c8c8c8";
+        ctx.beginPath();
+        ctx.moveTo(x, specTop);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+        ctx.fillText(hz >= 1000 ? `${hz / 1000}k` : String(hz), x + 2, height - 2);
+      }
+
+      // The fundamental, marked in the spectrum.
+      if (frame.pitchHz != null) {
+        const x = Math.round(xForHz(frame.pitchHz)) + 0.5;
+        ctx.strokeStyle = "#a80000";
+        ctx.beginPath();
+        ctx.moveTo(x, specTop);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+
+      // The trace, drawn to fill the height rather than at true scale — the
+      // synth's own output sits around a tenth of full swing, and a shape you
+      // can't see isn't worth a panel. The gain eases between frames so a note
+      // decaying doesn't make the trace breathe. The dB readout below is what
+      // says how loud it actually is.
+      let peak = 0;
+      for (let i = 0; i < wave.length; i++) peak = Math.max(peak, Math.abs(wave[i]));
+      const target = peak > 0.01 ? Math.min(0.92 / peak, 12) : 1;
+      gain += (target - gain) * 0.12;
+
+      // One period of the detected pitch per eighth of the window where there
+      // is one, so the shape reads at any pitch; otherwise the whole buffer.
+      // Either way it starts at a rising zero crossing.
+      const span = frame.pitchHz
+        ? Math.min(wave.length, Math.round((frame.sampleRate / frame.pitchHz) * 8))
+        : wave.length;
+      let start = 0;
+      for (let i = 1; i < wave.length - span; i++) {
+        if (wave[i - 1] <= 0 && wave[i] > 0) {
+          start = i;
+          break;
+        }
+      }
+      ctx.strokeStyle = PANEL.accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const mid = traceH / 2;
+      for (let i = 0; i < span; i++) {
+        const x = (i / (span - 1)) * width;
+        const y = mid - Math.max(-1, Math.min(1, wave[start + i] * gain)) * (traceH / 2 - 2);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      if (now - lastReadout >= READOUT_MS) {
+        lastReadout = now;
+        setReadout({ pitchHz: frame.pitchHz, level: frame.level, notes: frame.notes });
+      }
+    };
+    raf = window.requestAnimationFrame(draw);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [read]);
+
+  const near = readout.pitchHz == null ? null : nearestNote(readout.pitchHz);
+  const dB = readout.level > 0.0002 ? Math.round(20 * Math.log10(readout.level)) : null;
+  // A held chord is worth naming; a forearm on the keybed is not, so past a
+  // handful the rest are a count.
+  const held =
+    readout.notes.length > SCOPE_MAX_NAMED
+      ? `${readout.notes
+          .slice(0, SCOPE_MAX_NAMED)
+          .map((n) => noteName(n.note))
+          .join(" ")} +${readout.notes.length - SCOPE_MAX_NAMED}`
+      : readout.notes.map((n) => noteName(n.note)).join(" ");
+
+  return (
+    <Well style={{ gap: 2, padding: "3px 4px" }}>
+      <canvas
+        ref={canvasRef}
+        aria-label="Waveform and spectrum of the sound playing"
+        style={{
+          display: "block",
+          width: "100%",
+          height: tall ? SCOPE_HEIGHT_FULL : SCOPE_HEIGHT,
+          background: PANEL.canvas,
+          border: `1px solid ${PANEL.shadow}`,
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          fontFamily: "monospace",
+          fontSize: 11,
+          color: PANEL.text,
+          whiteSpace: "nowrap",
+          minWidth: 0,
+        }}
+      >
+        <span>
+          {readout.pitchHz == null || near == null
+            ? "— Hz"
+            : `${formatHz(readout.pitchHz)} · ${near.name}${
+                near.cents === 0 ? "" : ` ${near.cents > 0 ? "+" : ""}${near.cents}¢`
+              }`}
+        </span>
+        <span
+          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: PANEL.dim }}
+        >
+          {held || (playing ? "playing" : "—")}
+        </span>
+        <span style={{ color: PANEL.dim }}>
+          {waveform.slice(0, 3)} · {dB == null ? "−∞" : `${dB}`} dB
+        </span>
+      </div>
+    </Well>
+  );
+}
+
 function buildKeyboard(low: number, high: number): { whites: KeyCell[]; blacks: KeyCell[] } {
   const whiteNotes: number[] = [];
   for (let n = low; n <= high; n++) {
@@ -550,6 +819,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   {
     maximized = false,
     onMetersOpenChange,
+    onScopeOpenChange,
     onWaveformChange,
     onPlayingChange,
     onHasMessagesChange,
@@ -560,6 +830,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [metersOpen, setMetersOpen] = useState(false);
+  // The scope: waveform + spectrum of whatever the synth is making right now.
+  const [scopeOpen, setScopeOpen] = useState(false);
   // Swapped for the scrolling message log once the secret note code is played.
   const [bitsView, setBitsView] = useState(false);
   const [waveform, setWaveformState] = useState<Waveform>("square");
@@ -1180,6 +1452,14 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, [metersOpen, onMetersOpenChange]);
 
   useEffect(() => {
+    onScopeOpenChange?.(scopeOpen);
+  }, [scopeOpen, onScopeOpenChange]);
+
+  // The scope reads straight off the synth every frame. Nothing to read until
+  // the audio graph exists, which is fine — it draws "no signal" until then.
+  const readScope = useCallback(() => synthRef.current?.readScope() ?? null, []);
+
+  useEffect(() => {
     onWaveformChange?.(waveform);
   }, [waveform, onWaveformChange]);
 
@@ -1208,6 +1488,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setLoadError(null);
       },
       toggleMeters: () => setMetersOpen((v) => !v),
+      toggleScope: () => setScopeOpen((v) => !v),
       setWaveform: (next: Waveform) => {
         setWaveformState(next);
         ensureSynth().setWaveform(next);
@@ -1686,6 +1967,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             hasValue={meters.cc != null}
           />
         </Well>
+      )}
+
+      {scopeOpen && (
+        <ScopeView read={readScope} waveform={waveform} playing={playing} tall={maximized} />
       )}
 
       {/* The 37 mini keys, transposed by the Oct buttons. */}
