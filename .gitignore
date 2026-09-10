@@ -46,6 +46,9 @@ yarn-error.log*
 next-env.d.ts
 src/data/issues.json
 src/data/search-history.json
+# build-time GitHub enrichment for the Projects window (see scripts/content/refresh-projects.sh)
+src/data/projects.json
+/public/projects/remote/
 /public/collections
 
 # durable search-log archive written by server.js at runtime (issue #55)

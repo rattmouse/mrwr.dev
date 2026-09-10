@@ -73,6 +73,26 @@ Requires `gh` authenticated (`gh auth status`), ssh access to prod (same as
 you've filed or skipped so they don't come back. Gitignored, machine-local; delete
 it to start triage over.
 
+## The Projects window
+
+The Projects window (`projects.txt`) renders `src/data/projects.base.json` — the
+committed fallback list — merged with `src/data/projects.json`, a build-time
+enrichment file that is gitignored and read only at build time.
+
+### `refresh-projects.sh` — pull descriptions + README images from GitHub
+
+Runs `refresh-projects.mjs`, which for every base entry with a `ghRepo` field
+reads the repo's GitHub description and the first image in its README (via
+`gh repo view` / `gh api .../readme`), downloads that image into
+`public/projects/remote/`, and writes a `{ [slug]: { description, image } }` map
+to `src/data/projects.json`. `src/lib/projects.ts` merges it over the base list,
+so a missing description or image just falls back to the local blurb and
+`/projects/thumbs/<slug>.webp`.
+
+`scripts/deploy/deploy.sh` runs it before every build (best-effort — a GitHub
+failure ships `projects.json` as-is, or pass `--skip-projects`). Run it by hand
+to make `npm run dev` / a local build pick up new metadata.
+
 ## The search-bar history dropdown
 
 The search box (top-right of the Start bar) shows a dropdown of earlier searches

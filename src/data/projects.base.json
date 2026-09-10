@@ -1,0 +1,22 @@
+[
+  {
+    "slug": "cairn",
+    "name": "cairn",
+    "kind": "local-first notes editor",
+    "blurb": "A local-first markdown notes editor. Two files, the Python standard library and git: a folder of .md files is the entire data model.",
+    "built": "Python standard library · vanilla JS",
+    "repo": "https://github.com/rattmouse/cairn",
+    "ghRepo": "rattmouse/cairn",
+    "thumb": "/projects/thumbs/cairn.webp"
+  },
+  {
+    "slug": "mrwr-dev",
+    "name": "mrwr.dev",
+    "kind": "this website",
+    "blurb": "A Windows-95-flavoured desktop in the browser — windows, a start menu, and a heap of small apps. You're looking at it.",
+    "built": "Next.js · React · react95",
+    "repo": "https://github.com/rattmouse/mrwr.dev",
+    "ghRepo": "rattmouse/mrwr.dev",
+    "url": "https://mrwr.dev"
+  }
+]
