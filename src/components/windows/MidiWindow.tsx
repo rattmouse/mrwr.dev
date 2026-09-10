@@ -413,13 +413,21 @@ type KeyCell = { note: number; leftPct: number; widthPct: number };
 // ---------------------------------------------------------------------------
 
 // Height of the scope canvas, windowed and maximised, and how much of it the
-// trace gets — the rest is the spectrum underneath it.
-const SCOPE_HEIGHT = 78;
-const SCOPE_HEIGHT_FULL = 148;
-const SCOPE_TRACE_SHARE = 0.62;
-// The spectrum's axis runs log, like hearing does, over these ends.
+// trace gets — the rest is the spectrogram underneath it.
+const SCOPE_HEIGHT = 108;
+const SCOPE_HEIGHT_FULL = 180;
+const SCOPE_TRACE_SHARE = 0.44;
+// The spectrogram's axis runs log, like hearing does, over these ends.
 const SPECTRUM_LO_HZ = 40;
 const SPECTRUM_HI_HZ = 16000;
+// How coarse the spectrogram is: bands across, rows back, and how often a new
+// row lands. Low-res on purpose — it's a panel meter, not an analysis tool, and
+// coarse hills read better at this size than a wall of hair.
+const SPEC_BANDS = 24;
+const SPEC_ROWS = 7;
+const SPEC_ROW_MS = 90;
+/** Below this fraction of the analyser's scale is floor noise, not signal. */
+const SPEC_FLOOR = 0.32;
 /** How many held notes the readout names before it starts counting instead. */
 const SCOPE_MAX_NAMED = 6;
 // The readout is text, not a trace — a few updates a second is plenty, and it
@@ -447,8 +455,9 @@ function formatHz(hz: number): string {
 /**
  * The scope: what the synth's output actually looks like. The trace on top is
  * the waveform, started at a rising zero crossing so a held note stands still
- * instead of sliding across; the bars below are its spectrum on a log axis,
- * with the detected fundamental marked. Draws from the synth's analyser every
+ * instead of sliding across; below it a low-res spectrogram, the last couple of
+ * seconds of spectra stacked back into the distance, with the detected
+ * fundamental ticked on the front row. Draws from the synth's analyser every
  * frame while it's open, and reads out the pitch a few times a second.
  */
 function ScopeView({
@@ -463,6 +472,11 @@ function ScopeView({
   tall: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Spectrogram rows (newest first) and the trace's gain live outside the draw
+  // loop, so a re-render that restarts the loop doesn't wipe the history or
+  // snap the trace back to unity.
+  const historyRef = useRef<Float32Array[]>([]);
+  const gainRef = useRef(1);
   const [readout, setReadout] = useState<ScopeReadout>({ pitchHz: null, level: 0, notes: [] });
 
   useEffect(() => {
@@ -487,8 +501,8 @@ function ScopeView({
 
     let raf = 0;
     let lastReadout = 0;
-    // Trace gain, eased frame to frame (see below).
-    let gain = 1;
+    let lastRow = 0;
+    const history = historyRef.current;
     const draw = (now: number) => {
       raf = window.requestAnimationFrame(draw);
       const frame = read();
@@ -524,48 +538,90 @@ function ScopeView({
         return;
       }
 
-      // Spectrum first, so the trace sits over it if they ever overlap. Each bar
-      // is one pixel column, taking the loudest bin that falls in it — with a
-      // log axis the low columns cover a fraction of a bin and the high ones
-      // dozens, and a max keeps a narrow peak from being averaged away.
+      // The spectrogram: the last couple of seconds of spectra, stacked into
+      // the distance. Each row is one sample of the spectrum, low-res on
+      // purpose — a few dozen log-spaced bands, each taking the loudest bin
+      // that falls in it, so a narrow peak isn't averaged away. Rows land at a
+      // fixed rate rather than one a frame, so the hills drift back at the same
+      // speed whatever the browser is doing.
       const { spectrum, binHz, wave } = frame;
       const logLo = Math.log2(SPECTRUM_LO_HZ);
       const logSpan = Math.log2(SPECTRUM_HI_HZ) - logLo;
-      const xForHz = (hz: number) => ((Math.log2(hz) - logLo) / logSpan) * width;
-      ctx.fillStyle = "#8a8ab4";
-      for (let x = 0; x < width; x++) {
-        const from = 2 ** (logLo + (x / width) * logSpan);
-        const to = 2 ** (logLo + ((x + 1) / width) * logSpan);
-        const first = Math.max(1, Math.floor(from / binHz));
-        const last = Math.min(spectrum.length - 1, Math.max(first, Math.ceil(to / binHz) - 1));
-        let peak = 0;
-        for (let bin = first; bin <= last; bin++) peak = Math.max(peak, spectrum[bin]);
-        const h = Math.round((peak / 255) * specH);
-        if (h > 0) ctx.fillRect(x, height - h, 1, h);
+      if (now - lastRow >= SPEC_ROW_MS) {
+        lastRow = now;
+        const row = new Float32Array(SPEC_BANDS);
+        for (let b = 0; b < SPEC_BANDS; b++) {
+          const from = 2 ** (logLo + (b / SPEC_BANDS) * logSpan);
+          const to = 2 ** (logLo + ((b + 1) / SPEC_BANDS) * logSpan);
+          const first = Math.max(1, Math.floor(from / binHz));
+          const last = Math.min(spectrum.length - 1, Math.max(first, Math.ceil(to / binHz) - 1));
+          let peak = 0;
+          for (let bin = first; bin <= last; bin++) peak = Math.max(peak, spectrum[bin]);
+          // The analyser's bytes run from a very quiet floor, so the bottom
+          // third of the scale is hiss and room tone rather than anything you
+          // played — cut it off, then curve what's left so quiet harmonics
+          // still make a hill instead of a flat line with one spike on it.
+          row[b] = Math.max(0, (peak / 255 - SPEC_FLOOR) / (1 - SPEC_FLOOR)) ** 0.75;
+        }
+        history.unshift(row);
+        if (history.length > SPEC_ROWS) history.length = SPEC_ROWS;
       }
 
-      // Decade ticks, so the bars have somewhere to sit.
+      // Straight oblique projection — no vanishing point, just a fixed shove
+      // right and up per row back. Rows are drawn back to front and filled with
+      // the panel's own white, so a near hill hides the one behind it: the
+      // cheapest hidden-line removal there is, and the one every scope of this
+      // vintage used.
+      const skewX = specH * 0.7;
+      const rowW = width - skewX - 2;
+      const stepX = skewX / (SPEC_ROWS - 1);
+      // Each row back steps up by enough that its ridge clears the one in
+      // front — otherwise the stack collapses into a single hill and the depth
+      // is lost, which is the whole point of drawing it this way.
+      const stepY = (specH * 0.62) / (SPEC_ROWS - 1);
+      const peakH = specH * 0.36;
+      for (let r = history.length - 1; r >= 0; r--) {
+        const row = history[r];
+        const ox = 1 + r * stepX;
+        const base = height - 1 - r * stepY;
+        ctx.beginPath();
+        ctx.moveTo(ox, base);
+        for (let b = 0; b < SPEC_BANDS; b++) {
+          const x = ox + (b / (SPEC_BANDS - 1)) * rowW;
+          ctx.lineTo(x, base - row[b] * peakH);
+        }
+        ctx.lineTo(ox + rowW, base);
+        ctx.closePath();
+        ctx.fillStyle = PANEL.canvas;
+        ctx.fill();
+        // The front row is the sound right now, in the panel's ink; the ones
+        // behind it grey out with distance. Solid greys rather than a fading
+        // alpha — a hairline at 20% on white is not there at all.
+        const age = r / (SPEC_ROWS - 1);
+        const shade = Math.round(40 + age * 120);
+        ctx.strokeStyle = r === 0 ? PANEL.accent : `rgb(${shade}, ${shade}, ${shade + 45})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Where the axis runs, marked at the near corner rather than across the
+      // hills, where the labels would be in the way.
       ctx.fillStyle = PANEL.dim;
       ctx.font = "8px monospace";
-      for (const hz of [100, 1000, 10000]) {
-        const x = Math.round(xForHz(hz)) + 0.5;
-        if (x < 2 || x > width - 2) continue;
-        ctx.strokeStyle = "#c8c8c8";
-        ctx.beginPath();
-        ctx.moveTo(x, specTop);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-        ctx.fillText(hz >= 1000 ? `${hz / 1000}k` : String(hz), x + 2, height - 2);
-      }
+      ctx.fillText("40", 2, height - 2);
+      ctx.fillText("16k", rowW - 8, height - 2);
 
-      // The fundamental, marked in the spectrum.
+      // The fundamental, ticked on the front row.
       if (frame.pitchHz != null) {
-        const x = Math.round(xForHz(frame.pitchHz)) + 0.5;
-        ctx.strokeStyle = "#a80000";
-        ctx.beginPath();
-        ctx.moveTo(x, specTop);
-        ctx.lineTo(x, height);
-        ctx.stroke();
+        const band = (Math.log2(frame.pitchHz) - logLo) / logSpan;
+        if (band >= 0 && band <= 1) {
+          const x = Math.round(1 + band * rowW) + 0.5;
+          ctx.strokeStyle = "#a80000";
+          ctx.beginPath();
+          ctx.moveTo(x, height - 1);
+          ctx.lineTo(x, height - 5);
+          ctx.stroke();
+        }
       }
 
       // The trace, drawn to fill the height rather than at true scale — the
@@ -576,7 +632,8 @@ function ScopeView({
       let peak = 0;
       for (let i = 0; i < wave.length; i++) peak = Math.max(peak, Math.abs(wave[i]));
       const target = peak > 0.01 ? Math.min(0.92 / peak, 12) : 1;
-      gain += (target - gain) * 0.12;
+      gainRef.current += (target - gainRef.current) * 0.12;
+      const gain = gainRef.current;
 
       // One period of the detected pitch per eighth of the window where there
       // is one, so the shape reads at any pitch; otherwise the whole buffer.
