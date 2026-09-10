@@ -35,7 +35,7 @@ export default function ProjectList({ layout }: ProjectListProps) {
             return (
               <li key={project.slug}>
                 <a
-                  href={project.repo}
+                  href={project.href}
                   target="_blank"
                   rel="noreferrer"
                   onFocus={() => setActiveSlug(project.slug)}
@@ -51,13 +51,32 @@ export default function ProjectList({ layout }: ProjectListProps) {
                     background: selected ? SELECTED_BG : "transparent",
                   }}
                 >
-                  <img
-                    src={`/projects/thumbs/${project.slug}.webp`}
-                    alt=""
-                    width={thumbWidth}
-                    height={thumbHeight}
-                    style={{ flex: "none", border: "1px solid #808080", background: "#000", objectFit: "cover" }}
-                  />
+                  {project.thumb ? (
+                    <img
+                      src={project.thumb}
+                      alt=""
+                      width={thumbWidth}
+                      height={thumbHeight}
+                      style={{ flex: "none", border: "1px solid #808080", background: "#000", objectFit: "cover" }}
+                    />
+                  ) : (
+                    <span
+                      aria-hidden
+                      style={{
+                        flex: "none",
+                        width: thumbWidth,
+                        height: thumbHeight,
+                        border: "1px solid #808080",
+                        background: "#c0c0c0",
+                        display: "grid",
+                        placeItems: "center",
+                        fontWeight: 700,
+                        color: selected ? "#000080" : "#808080",
+                      }}
+                    >
+                      {project.name.charAt(0).toUpperCase()}
+                    </span>
+                  )}
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: "block", marginBottom: 3 }}>
                       <b>{project.name}</b>{" "}

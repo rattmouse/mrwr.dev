@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build] [--skip-issues]
-#                            [--skip-search-history]
+#                            [--skip-search-history] [--skip-projects]
 #
 # Run this from whatever machine has the repo checked out and can reach prod
 # over ssh — that's your Kubuntu box, not a separate build VM. There's no
@@ -24,13 +24,15 @@ ALLOW_DIRTY=0
 SKIP_BUILD=0
 SKIP_ISSUES=0
 SKIP_SEARCH_HISTORY=0
+SKIP_PROJECTS=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
     --skip-issues) SKIP_ISSUES=1 ;;
     --skip-search-history) SKIP_SEARCH_HISTORY=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history)" ;;
+    --skip-projects) SKIP_PROJECTS=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects)" ;;
   esac
 done
 
@@ -79,6 +81,19 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
       || warn "Search-history refresh failed; shipping src/data/search-history.json as-is."
   else
     warn "Skipping search-history refresh (--skip-search-history) — shipping src/data/search-history.json as-is."
+  fi
+
+  if [[ "$SKIP_PROJECTS" -ne 1 ]]; then
+    log "Refreshing project metadata from GitHub..."
+    # src/data/projects.json + public/projects/remote/ are gitignored and
+    # read at build time — the GitHub descriptions and README images behind
+    # the Projects window. Best-effort: on failure the site falls back to
+    # src/data/projects.base.json and /projects/thumbs/, never a failed
+    # deploy (or pass --skip-projects).
+    "$REPO_ROOT/scripts/content/refresh-projects.sh" \
+      || warn "Project metadata refresh failed; shipping src/data/projects.json as-is."
+  else
+    warn "Skipping project metadata refresh (--skip-projects) — shipping src/data/projects.json as-is."
   fi
 
   log "Installing dependencies..."

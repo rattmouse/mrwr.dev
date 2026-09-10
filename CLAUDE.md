@@ -14,7 +14,12 @@ Orientation notes for working in this repo.
   deal: gitignored, build-time only, refreshed by
   `scripts/content/refresh-search-history.sh` — which `deploy.sh` also runs
   before every build. It pulls the prod search-log archive over ssh; a failure
-  is non-fatal (ships an empty history). `server.js` flags malicious queries via
+  is non-fatal (ships an empty history).
+- `src/data/projects.json` + `public/projects/remote/` (GitHub descriptions and
+  README images for the Projects window) are the same deal again: gitignored,
+  build-time only, refreshed by `scripts/content/refresh-projects.sh` (also run
+  by `deploy.sh`). `src/lib/projects.ts` merges them over the committed
+  fallbacks in `src/data/projects.base.json`; a failure is non-fatal. `server.js` flags malicious queries via
   `search-guard.js` (repo root); `deploy.sh` ships that file with `server.js`.
 - `search-sessions.js` (repo root, also shipped by `deploy.sh`) holds the
   session-grouping heuristics shared by `refresh-search-history.mjs` and
