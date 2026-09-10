@@ -59,17 +59,68 @@ export default function DesktopWindow({
   const MIN_H = 130;
 
   // In the normal layout the window is centred with a transform. The first drag
-  // of the resize grip freezes it to an explicit top-left + size so the corner
-  // pulls naturally; this override is cleared whenever the layout changes or a
-  // different window takes over the frame, so sizes never persist.
-  const [resizeBox, setResizeBox] = useState<
+  // — of the title bar or of the resize grip — freezes it to an explicit
+  // top-left + size so the corner pulls and the window moves naturally; this
+  // override is cleared whenever the layout changes or a different window takes
+  // over the frame, so positions and sizes never persist.
+  const [box, setBox] = useState<
     { left: number; top: number; width: number; height: number } | null
   >(null);
   const gripRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setResizeBox(null);
+    setBox(null);
   }, [layout, title, normalWidth, normalHeight]);
+
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+  // Enough of the title bar has to stay reachable that you can always grab it
+  // back — dragging a window off an edge, or up under the taskbar, would
+  // strand it there.
+  const KEEP_ON_SCREEN = 60;
+
+  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isMax || isDocked || controlsDisabled) return;
+    // The title-bar controls are buttons first and drag handles never.
+    if ((e.target as HTMLElement).closest("button")) return;
+    const frame = headerRef.current?.parentElement;
+    if (!frame) return;
+    e.preventDefault();
+
+    const rect = frame.getBoundingClientRect();
+    const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    const startX = e.clientX;
+    const startY = e.clientY;
+    setBox(base);
+
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+
+    const onMove = (ev: PointerEvent) => {
+      const minLeft = KEEP_ON_SCREEN - base.width;
+      const maxLeft = window.innerWidth - KEEP_ON_SCREEN;
+      const headerH = headerRef.current?.offsetHeight ?? 30;
+      const maxTop = window.innerHeight - headerH;
+      setBox({
+        ...base,
+        left: clamp(base.left + (ev.clientX - startX), minLeft, maxLeft),
+        top: clamp(base.top + (ev.clientY - startY), TASKBAR_H, maxTop),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
 
   const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isMax || isDocked || controlsDisabled) return;
@@ -81,19 +132,17 @@ export default function DesktopWindow({
     const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     const startX = e.clientX;
     const startY = e.clientY;
-    setResizeBox(base);
+    setBox(base);
 
     const prevUserSelect = document.body.style.userSelect;
     const prevCursor = document.body.style.cursor;
     document.body.style.userSelect = "none";
     document.body.style.cursor = "nwse-resize";
 
-    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
-
     const onMove = (ev: PointerEvent) => {
       const maxW = Math.max(MIN_W, window.innerWidth - base.left - GAP);
       const maxH = Math.max(MIN_H, window.innerHeight - base.top - GAP);
-      setResizeBox({
+      setBox({
         ...base,
         width: clamp(base.width + (ev.clientX - startX), MIN_W, maxW),
         height: clamp(base.height + (ev.clientY - startY), MIN_H, maxH),
@@ -150,13 +199,13 @@ export default function DesktopWindow({
           flexDirection: "column",
           boxShadow: frameShadow,
         }
-      : resizeBox
+      : box
         ? {
             position: "absolute",
-            left: resizeBox.left,
-            top: resizeBox.top,
-            width: resizeBox.width,
-            height: resizeBox.height,
+            left: box.left,
+            top: box.top,
+            width: box.width,
+            height: box.height,
             zIndex: Z.WINDOW,
             display: "flex",
             flexDirection: "column",
@@ -184,16 +233,22 @@ export default function DesktopWindow({
   // content edge. The gutter tracks the layout only (not controlsDisabled) so
   // toggling the title-bar controls doesn't reflow the window body.
   const hasResizeGutter = !isMax && !isDocked;
-  const showResizeGrip = hasResizeGutter && !controlsDisabled;
+  // The title bar drags and the grip resizes under exactly the same conditions.
+  const isDraggable = hasResizeGutter && !controlsDisabled;
+  const showResizeGrip = isDraggable;
 
   return (
     <Window style={style}>
       <WindowHeader
+        ref={headerRef}
+        onPointerDown={startDrag}
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flex: "0 0 auto",
+          cursor: isDraggable ? "grab" : undefined,
+          touchAction: isDraggable ? "none" : undefined,
         }}
       >
         <span

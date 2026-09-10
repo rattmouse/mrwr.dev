@@ -27,7 +27,8 @@
         "midi.exe folds itself up when the window is narrow — a phone, or a window you've dragged small: the bend, pad and knob sections go behind tabs, the function buttons split into two rows, and the keybed shows as many octaves as will fit at a size you can actually hit, with arrows to move along it",
         "Windows no longer open wider than the screen they're on, so on a phone the title bar and its buttons are where you can reach them",
         "Dropped midi.exe's Edit menu — the Prog button on the panel already steps through the waveforms",
-        "about.txt now credits Claude with even more help, not just cleanup work"
+        "about.txt now credits Claude with even more help, not just cleanup work",
+        "Windows can be moved now — grab a title bar and drag it anywhere on the desktop; the window keeps whatever size you gave it"
       ]
     },
     {
