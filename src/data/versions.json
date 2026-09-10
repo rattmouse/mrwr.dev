@@ -23,6 +23,10 @@
         "Projects (projects.txt) now lists real open-source work, starting with cairn, a local-first markdown notes editor. The nine interface demos moved to their own Demos window (demos.txt) under Documents",
         "Each project in projects.txt now shows the description and preview image straight from its GitHub repo, falling back to a hand-written blurb and thumbnail when the repo has none",
         "Added this site itself to projects.txt",
+        "midi.exe has a Scope button now: it draws the shape of the sound you're playing above a little 3D spectrogram — the last few seconds of its frequencies stacked back into the distance — and reads out the frequency in Hz, the note it's nearest to and how many cents sharp or flat, plus what's being held and how loud it is",
+        "midi.exe folds itself up when the window is narrow — a phone, or a window you've dragged small: the bend, pad and knob sections go behind tabs, the function buttons split into two rows, and the keybed shows as many octaves as will fit at a size you can actually hit, with arrows to move along it",
+        "Windows no longer open wider than the screen they're on, so on a phone the title bar and its buttons are where you can reach them",
+        "Dropped midi.exe's Edit menu — the Prog button on the panel already steps through the waveforms",
         "about.txt now credits Claude with even more help, not just cleanup work"
       ]
     },

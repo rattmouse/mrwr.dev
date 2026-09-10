@@ -16,7 +16,6 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import DndWindow, { DndWindowHandle } from "@/components/windows/DndWindow";
-import type { Waveform } from "@/lib/midiSynth";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import strudelSongs from "@/data/strudelSongs.json";
@@ -41,7 +40,6 @@ const PAINT_COLORS = [
 ] as const;
 const PAINT_SIZES = [2, 6, 14] as const;
 
-const MIDI_WAVEFORMS: readonly Waveform[] = ["square", "sawtooth", "triangle", "sine"];
 
 // Hand the browser a Blob to save. First (and only) file download in the app —
 // nothing here touches the network.
@@ -95,7 +93,6 @@ export default function ProgramWindow({
   const dndRef = useRef<DndWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
-  const midiEditMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
@@ -110,9 +107,8 @@ export default function ProgramWindow({
   const [midiFileOpen, setMidiFileOpen] = useState(false);
   const [midiSaveAsOpen, setMidiSaveAsOpen] = useState(false);
   const [midiSaveAsTop, setMidiSaveAsTop] = useState(0);
-  const [midiEditOpen, setMidiEditOpen] = useState(false);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
-  const [midiWaveform, setMidiWaveform] = useState<Waveform>("square");
+  const [midiScopeOpen, setMidiScopeOpen] = useState(false);
   const [midiPlaying, setMidiPlaying] = useState(false);
   const [midiHasMessages, setMidiHasMessages] = useState(false);
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
@@ -236,7 +232,6 @@ export default function ProgramWindow({
     if (id !== "midi") {
       setMidiFileOpen(false);
       setMidiSaveAsOpen(false);
-      setMidiEditOpen(false);
       return;
     }
     const handleMouseDown = (event: MouseEvent) => {
@@ -245,9 +240,6 @@ export default function ProgramWindow({
       if (!(midiFileMenuRef.current?.contains(target) ?? false)) {
         setMidiFileOpen(false);
         setMidiSaveAsOpen(false);
-      }
-      if (!(midiEditMenuRef.current?.contains(target) ?? false)) {
-        setMidiEditOpen(false);
       }
     };
     document.addEventListener("mousedown", handleMouseDown);
@@ -659,47 +651,6 @@ export default function ProgramWindow({
             </div>
           )}
         </div>
-        <div ref={midiEditMenuRef} style={{ position: "relative", display: "inline-block" }}>
-          <Button
-            variant="menu"
-            size="sm"
-            active={midiEditOpen}
-            disabled={midiPlaying}
-            aria-label="Edit"
-            title="Edit"
-            onClick={() => setMidiEditOpen((prev) => !prev)}
-          >
-            Edit
-          </Button>
-          {midiEditOpen && (
-            <div
-              style={{
-                position: "absolute",
-                top: "calc(100% - 2px)",
-                left: 0,
-                zIndex: 1000,
-                width: "max-content",
-              }}
-              onMouseLeave={() => setMidiEditOpen(false)}
-            >
-              <MenuList style={{ marginTop: 0 }}>
-                {MIDI_WAVEFORMS.map((wave) => (
-                  <MenuListItem
-                    key={wave}
-                    size="sm"
-                    onClick={() => {
-                      midiRef.current?.setWaveform(wave);
-                      setMidiEditOpen(false);
-                    }}
-                  >
-                    {wave === midiWaveform ? "• " : "  "}
-                    {wave}
-                  </MenuListItem>
-                ))}
-              </MenuList>
-            </div>
-          )}
-        </div>
         <Button
           size="sm"
           style={{ fontWeight: "bold" }}
@@ -728,6 +679,15 @@ export default function ProgramWindow({
           onClick={() => midiRef.current?.toggleMeters()}
         >
           Meters
+        </Button>
+        <Button
+          size="sm"
+          style={{ fontWeight: "bold" }}
+          title="Waveform and frequency of the sound playing"
+          active={midiScopeOpen}
+          onClick={() => midiRef.current?.toggleScope()}
+        >
+          Scope
         </Button>
         <input
           ref={midiFileInputRef}
@@ -936,7 +896,7 @@ export default function ProgramWindow({
           ref={midiRef}
           maximized={layout === "maximized"}
           onMetersOpenChange={setMidiMetersOpen}
-          onWaveformChange={setMidiWaveform}
+          onScopeOpenChange={setMidiScopeOpen}
           onPlayingChange={setMidiPlaying}
           onHasMessagesChange={setMidiHasMessages}
         />

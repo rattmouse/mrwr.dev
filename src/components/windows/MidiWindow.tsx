@@ -15,6 +15,7 @@ import {
   KNOB_PARAMS,
   MidiSynth,
   drumForNote,
+  type ScopeFrame,
   type Waveform,
 } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
@@ -44,7 +45,7 @@ import {
 export type MidiWindowHandle = {
   newSession: () => void;
   toggleMeters: () => void;
-  setWaveform: (waveform: Waveform) => void;
+  toggleScope: () => void;
   loadSmf: (bytes: Uint8Array, name: string) => void;
   play: () => void;
   stop: () => void;
@@ -56,12 +57,21 @@ export type MidiWindowHandle = {
 type MidiWindowProps = {
   maximized?: boolean;
   onMetersOpenChange?: (open: boolean) => void;
-  onWaveformChange?: (waveform: Waveform) => void;
+  onScopeOpenChange?: (open: boolean) => void;
   onPlayingChange?: (playing: boolean) => void;
   onHasMessagesChange?: (hasMessages: boolean) => void;
 };
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
+
+/** The faceplate's control clusters, one per tab when the panel is narrow. */
+type PanelTab = "wheels" | "pads" | "knobs";
+
+const PANEL_TABS: { id: PanelTab; label: string }[] = [
+  { id: "wheels", label: "Wheels" },
+  { id: "pads", label: "Pads" },
+  { id: "knobs", label: "Knobs" },
+];
 
 type DeviceInfo = {
   id: string;
@@ -149,6 +159,10 @@ const RANGE_FULL = { low: 21, high: 108 }; // A0–C8
 const FULL_WHITE_COUNT = 52;
 // Below this the full keyboard's keys are too small to hit — window it instead.
 const MIN_WHITE_PX = 22;
+// Under this the faceplate can't hold bend, mod, stick, pads and knobs side by
+// side without them wrapping into a tower, so they go behind tabs instead. It's
+// the panel's own width, not the browser's — these windows resize.
+const COMPACT_WIDTH = 470;
 const KEY_HEIGHT_NORMAL = 72;
 // Bend / mod fader travel; the stick cluster is sized to match.
 const FADER_HEIGHT = 78;
@@ -404,6 +418,329 @@ function BitSpotlight({
 
 type KeyCell = { note: number; leftPct: number; widthPct: number };
 
+
+// ---------------------------------------------------------------------------
+// Scope
+// ---------------------------------------------------------------------------
+
+// Height of the scope canvas, windowed and maximised, and how much of it the
+// trace gets — the rest is the spectrogram underneath it.
+const SCOPE_HEIGHT = 108;
+const SCOPE_HEIGHT_FULL = 180;
+const SCOPE_TRACE_SHARE = 0.44;
+// The spectrogram's axis runs log, like hearing does, over these ends.
+const SPECTRUM_LO_HZ = 40;
+const SPECTRUM_HI_HZ = 16000;
+// How coarse the spectrogram is: bands across, rows back, and how often a new
+// row lands. Low-res on purpose — it's a panel meter, not an analysis tool, and
+// coarse hills read better at this size than a wall of hair.
+const SPEC_BANDS = 24;
+const SPEC_ROWS = 7;
+const SPEC_ROW_MS = 90;
+/** Below this fraction of the analyser's scale is floor noise, not signal. */
+const SPEC_FLOOR = 0.32;
+/** How many held notes the readout names before it starts counting instead. */
+const SCOPE_MAX_NAMED = 6;
+// The readout is text, not a trace — a few updates a second is plenty, and it
+// keeps the panel from re-rendering sixty times a second.
+const READOUT_MS = 100;
+
+type ScopeReadout = {
+  pitchHz: number | null;
+  level: number;
+  notes: { note: number; hz: number }[];
+};
+
+/** Nearest note to a frequency, and how far off it is in cents. */
+function nearestNote(hz: number): { name: string; cents: number } {
+  const midi = 69 + 12 * Math.log2(hz / 440);
+  const rounded = Math.round(midi);
+  return { name: noteName(rounded), cents: Math.round((midi - rounded) * 100) };
+}
+
+function formatHz(hz: number): string {
+  if (hz >= 1000) return `${(hz / 1000).toFixed(2)} kHz`;
+  return `${hz.toFixed(hz < 100 ? 2 : 1)} Hz`;
+}
+
+/**
+ * The scope: what the synth's output actually looks like. The trace on top is
+ * the waveform, started at a rising zero crossing so a held note stands still
+ * instead of sliding across; below it a low-res spectrogram, the last couple of
+ * seconds of spectra stacked back into the distance, with the detected
+ * fundamental ticked on the front row. Draws from the synth's analyser every
+ * frame while it's open, and reads out the pitch a few times a second.
+ */
+function ScopeView({
+  read,
+  waveform,
+  playing,
+  tall,
+}: {
+  read: () => ScopeFrame | null;
+  waveform: Waveform;
+  playing: boolean;
+  tall: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Spectrogram rows (newest first) and the trace's gain live outside the draw
+  // loop, so a re-render that restarts the loop doesn't wipe the history or
+  // snap the trace back to unity.
+  const historyRef = useRef<Float32Array[]>([]);
+  const gainRef = useRef(1);
+  const [readout, setReadout] = useState<ScopeReadout>({ pitchHz: null, level: 0, notes: [] });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    let width = 0;
+    let height = 0;
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = Math.max(1, Math.floor(rect.width));
+      height = Math.max(1, Math.floor(rect.height));
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    let raf = 0;
+    let lastReadout = 0;
+    let lastRow = 0;
+    const history = historyRef.current;
+    const draw = (now: number) => {
+      raf = window.requestAnimationFrame(draw);
+      const frame = read();
+      const traceH = Math.floor(height * SCOPE_TRACE_SHARE);
+      const specTop = traceH + 1;
+      const specH = height - specTop;
+
+      ctx.fillStyle = PANEL.canvas;
+      ctx.fillRect(0, 0, width, height);
+
+      // Graticule: the zero line, and the divide between trace and spectrum.
+      ctx.strokeStyle = "#d0d0d0";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 1; i < 8; i++) {
+        const x = Math.round((width * i) / 8) + 0.5;
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, traceH);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = "#a0a0a0";
+      ctx.beginPath();
+      ctx.moveTo(0, Math.round(traceH / 2) + 0.5);
+      ctx.lineTo(width, Math.round(traceH / 2) + 0.5);
+      ctx.moveTo(0, traceH + 0.5);
+      ctx.lineTo(width, traceH + 0.5);
+      ctx.stroke();
+
+      if (!frame) {
+        ctx.fillStyle = PANEL.dim;
+        ctx.font = "10px monospace";
+        ctx.fillText("no signal — play something", 6, Math.round(traceH / 2) - 5);
+        return;
+      }
+
+      // The spectrogram: the last couple of seconds of spectra, stacked into
+      // the distance. Each row is one sample of the spectrum, low-res on
+      // purpose — a few dozen log-spaced bands, each taking the loudest bin
+      // that falls in it, so a narrow peak isn't averaged away. Rows land at a
+      // fixed rate rather than one a frame, so the hills drift back at the same
+      // speed whatever the browser is doing.
+      const { spectrum, binHz, wave } = frame;
+      const logLo = Math.log2(SPECTRUM_LO_HZ);
+      const logSpan = Math.log2(SPECTRUM_HI_HZ) - logLo;
+      if (now - lastRow >= SPEC_ROW_MS) {
+        lastRow = now;
+        const row = new Float32Array(SPEC_BANDS);
+        for (let b = 0; b < SPEC_BANDS; b++) {
+          const from = 2 ** (logLo + (b / SPEC_BANDS) * logSpan);
+          const to = 2 ** (logLo + ((b + 1) / SPEC_BANDS) * logSpan);
+          const first = Math.max(1, Math.floor(from / binHz));
+          const last = Math.min(spectrum.length - 1, Math.max(first, Math.ceil(to / binHz) - 1));
+          let peak = 0;
+          for (let bin = first; bin <= last; bin++) peak = Math.max(peak, spectrum[bin]);
+          // The analyser's bytes run from a very quiet floor, so the bottom
+          // third of the scale is hiss and room tone rather than anything you
+          // played — cut it off, then curve what's left so quiet harmonics
+          // still make a hill instead of a flat line with one spike on it.
+          row[b] = Math.max(0, (peak / 255 - SPEC_FLOOR) / (1 - SPEC_FLOOR)) ** 0.75;
+        }
+        history.unshift(row);
+        if (history.length > SPEC_ROWS) history.length = SPEC_ROWS;
+      }
+
+      // Straight oblique projection — no vanishing point, just a fixed shove
+      // right and up per row back. Rows are drawn back to front and filled with
+      // the panel's own white, so a near hill hides the one behind it: the
+      // cheapest hidden-line removal there is, and the one every scope of this
+      // vintage used.
+      const skewX = specH * 0.7;
+      const rowW = width - skewX - 2;
+      const stepX = skewX / (SPEC_ROWS - 1);
+      // Each row back steps up by enough that its ridge clears the one in
+      // front — otherwise the stack collapses into a single hill and the depth
+      // is lost, which is the whole point of drawing it this way.
+      const stepY = (specH * 0.62) / (SPEC_ROWS - 1);
+      const peakH = specH * 0.36;
+      for (let r = history.length - 1; r >= 0; r--) {
+        const row = history[r];
+        const ox = 1 + r * stepX;
+        const base = height - 1 - r * stepY;
+        ctx.beginPath();
+        ctx.moveTo(ox, base);
+        for (let b = 0; b < SPEC_BANDS; b++) {
+          const x = ox + (b / (SPEC_BANDS - 1)) * rowW;
+          ctx.lineTo(x, base - row[b] * peakH);
+        }
+        ctx.lineTo(ox + rowW, base);
+        ctx.closePath();
+        ctx.fillStyle = PANEL.canvas;
+        ctx.fill();
+        // The front row is the sound right now, in the panel's ink; the ones
+        // behind it grey out with distance. Solid greys rather than a fading
+        // alpha — a hairline at 20% on white is not there at all.
+        const age = r / (SPEC_ROWS - 1);
+        const shade = Math.round(40 + age * 120);
+        ctx.strokeStyle = r === 0 ? PANEL.accent : `rgb(${shade}, ${shade}, ${shade + 45})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Where the axis runs, marked at the near corner rather than across the
+      // hills, where the labels would be in the way.
+      ctx.fillStyle = PANEL.dim;
+      ctx.font = "8px monospace";
+      ctx.fillText("40", 2, height - 2);
+      ctx.fillText("16k", rowW - 8, height - 2);
+
+      // The fundamental, ticked on the front row.
+      if (frame.pitchHz != null) {
+        const band = (Math.log2(frame.pitchHz) - logLo) / logSpan;
+        if (band >= 0 && band <= 1) {
+          const x = Math.round(1 + band * rowW) + 0.5;
+          ctx.strokeStyle = "#a80000";
+          ctx.beginPath();
+          ctx.moveTo(x, height - 1);
+          ctx.lineTo(x, height - 5);
+          ctx.stroke();
+        }
+      }
+
+      // The trace, drawn to fill the height rather than at true scale — the
+      // synth's own output sits around a tenth of full swing, and a shape you
+      // can't see isn't worth a panel. The gain eases between frames so a note
+      // decaying doesn't make the trace breathe. The dB readout below is what
+      // says how loud it actually is.
+      let peak = 0;
+      for (let i = 0; i < wave.length; i++) peak = Math.max(peak, Math.abs(wave[i]));
+      const target = peak > 0.01 ? Math.min(0.92 / peak, 12) : 1;
+      gainRef.current += (target - gainRef.current) * 0.12;
+      const gain = gainRef.current;
+
+      // One period of the detected pitch per eighth of the window where there
+      // is one, so the shape reads at any pitch; otherwise the whole buffer.
+      // Either way it starts at a rising zero crossing.
+      const span = frame.pitchHz
+        ? Math.min(wave.length, Math.round((frame.sampleRate / frame.pitchHz) * 8))
+        : wave.length;
+      let start = 0;
+      for (let i = 1; i < wave.length - span; i++) {
+        if (wave[i - 1] <= 0 && wave[i] > 0) {
+          start = i;
+          break;
+        }
+      }
+      ctx.strokeStyle = PANEL.accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const mid = traceH / 2;
+      for (let i = 0; i < span; i++) {
+        const x = (i / (span - 1)) * width;
+        const y = mid - Math.max(-1, Math.min(1, wave[start + i] * gain)) * (traceH / 2 - 2);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      if (now - lastReadout >= READOUT_MS) {
+        lastReadout = now;
+        setReadout({ pitchHz: frame.pitchHz, level: frame.level, notes: frame.notes });
+      }
+    };
+    raf = window.requestAnimationFrame(draw);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [read]);
+
+  const near = readout.pitchHz == null ? null : nearestNote(readout.pitchHz);
+  const dB = readout.level > 0.0002 ? Math.round(20 * Math.log10(readout.level)) : null;
+  // A held chord is worth naming; a forearm on the keybed is not, so past a
+  // handful the rest are a count.
+  const held =
+    readout.notes.length > SCOPE_MAX_NAMED
+      ? `${readout.notes
+          .slice(0, SCOPE_MAX_NAMED)
+          .map((n) => noteName(n.note))
+          .join(" ")} +${readout.notes.length - SCOPE_MAX_NAMED}`
+      : readout.notes.map((n) => noteName(n.note)).join(" ");
+
+  return (
+    <Well style={{ gap: 2, padding: "3px 4px" }}>
+      <canvas
+        ref={canvasRef}
+        aria-label="Waveform and spectrum of the sound playing"
+        style={{
+          display: "block",
+          width: "100%",
+          height: tall ? SCOPE_HEIGHT_FULL : SCOPE_HEIGHT,
+          background: PANEL.canvas,
+          border: `1px solid ${PANEL.shadow}`,
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          fontFamily: "monospace",
+          fontSize: 11,
+          color: PANEL.text,
+          whiteSpace: "nowrap",
+          minWidth: 0,
+        }}
+      >
+        <span>
+          {readout.pitchHz == null || near == null
+            ? "— Hz"
+            : `${formatHz(readout.pitchHz)} · ${near.name}${
+                near.cents === 0 ? "" : ` ${near.cents > 0 ? "+" : ""}${near.cents}¢`
+              }`}
+        </span>
+        <span
+          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: PANEL.dim }}
+        >
+          {held || (playing ? "playing" : "—")}
+        </span>
+        <span style={{ color: PANEL.dim }}>
+          {waveform.slice(0, 3)} · {dB == null ? "−∞" : `${dB}`} dB
+        </span>
+      </div>
+    </Well>
+  );
+}
+
 function buildKeyboard(low: number, high: number): { whites: KeyCell[]; blacks: KeyCell[] } {
   const whiteNotes: number[] = [];
   for (let n = low; n <= high; n++) {
@@ -550,7 +887,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   {
     maximized = false,
     onMetersOpenChange,
-    onWaveformChange,
+    onScopeOpenChange,
     onPlayingChange,
     onHasMessagesChange,
   },
@@ -560,6 +897,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [metersOpen, setMetersOpen] = useState(false);
+  // The scope: waveform + spectrum of whatever the synth is making right now.
+  const [scopeOpen, setScopeOpen] = useState(false);
   // Swapped for the scrolling message log once the secret note code is played.
   const [bitsView, setBitsView] = useState(false);
   const [waveform, setWaveformState] = useState<Waveform>("square");
@@ -593,6 +932,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [padBank, setPadBank] = useState(0);
   const [fullLevel, setFullLevel] = useState(false);
   const [panelWidth, setPanelWidth] = useState(0);
+  // Which control cluster the tabs are showing, when the panel is too narrow to
+  // show them all at once.
+  const [panelTab, setPanelTab] = useState<PanelTab>("pads");
 
   const nextId = useRef(0);
   const startedAt = useRef(0);
@@ -655,8 +997,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return () => ro.disconnect();
   }, []);
 
-  // Track the keyboard panel's width so the maximised view can decide whether
-  // the full 88 keys fit or it needs to window them.
+  // Track the keyboard panel's width so it can decide how many octaves fit at a
+  // playable key size, and whether it has to window them.
   useEffect(() => {
     const el = keysWrapRef.current;
     if (!el) return;
@@ -667,9 +1009,28 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return () => ro.disconnect();
   }, [maximized]);
 
-  // Which keys the on-screen keyboard shows, and how tall.
+  // Which keys the on-screen keyboard shows, and how tall. The keybed asks for
+  // three octaves normally and the whole 88 maximised, but what it gets is what
+  // the panel is wide enough to draw at a size you can actually hit — a phone
+  // gets two octaves and the ◀ oct / oct ▶ buttons to move them.
   const kb = useMemo(() => {
-    if (!maximized) {
+    const octavesFit =
+      keysWidth === 0 ? 7 : Math.max(1, Math.floor(keysWidth / (7 * MIN_WHITE_PX)));
+
+    if (maximized && (keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX)) {
+      return {
+        layout: KEYBOARD_FULL,
+        height: KEY_HEIGHT_FULL,
+        windowed: false,
+        lowNote: RANGE_FULL.low,
+        highNote: RANGE_FULL.high,
+        octavesVisible: 7,
+      };
+    }
+
+    // The mini keybed, whole and transposed by Oct − / Oct +, whenever its three
+    // octaves fit.
+    if (!maximized && octavesFit >= 3) {
       const low = RANGE_NORMAL.low + octaveShift * 12;
       return {
         layout: octaveShift === 0 ? KEYBOARD_NORMAL : buildKeyboard(low, low + MINI_KEY_SPAN),
@@ -680,23 +1041,13 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         octavesVisible: 3,
       };
     }
-    const fitsFull = keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX;
-    if (fitsFull) {
-      return {
-        layout: KEYBOARD_FULL,
-        height: KEY_HEIGHT_FULL,
-        windowed: false,
-        lowNote: RANGE_FULL.low,
-        highNote: RANGE_FULL.high,
-        octavesVisible: 7,
-      };
-    }
-    const octavesVisible = Math.max(2, Math.min(7, Math.floor(keysWidth / (7 * MIN_WHITE_PX))));
+
+    const octavesVisible = Math.min(7, octavesFit);
     const span = octavesVisible * 12;
     const low = Math.max(RANGE_FULL.low, Math.min(RANGE_FULL.high - span, rangeLow));
     return {
       layout: buildKeyboard(low, low + span),
-      height: KEY_HEIGHT_FULL,
+      height: maximized ? KEY_HEIGHT_FULL : KEY_HEIGHT_NORMAL,
       windowed: true,
       lowNote: low,
       highNote: low + span,
@@ -1180,8 +1531,12 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, [metersOpen, onMetersOpenChange]);
 
   useEffect(() => {
-    onWaveformChange?.(waveform);
-  }, [waveform, onWaveformChange]);
+    onScopeOpenChange?.(scopeOpen);
+  }, [scopeOpen, onScopeOpenChange]);
+
+  // The scope reads straight off the synth every frame. Nothing to read until
+  // the audio graph exists, which is fine — it draws "no signal" until then.
+  const readScope = useCallback(() => synthRef.current?.readScope() ?? null, []);
 
   useEffect(() => {
     onPlayingChange?.(playing);
@@ -1208,10 +1563,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setLoadError(null);
       },
       toggleMeters: () => setMetersOpen((v) => !v),
-      setWaveform: (next: Waveform) => {
-        setWaveformState(next);
-        ensureSynth().setWaveform(next);
-      },
+      toggleScope: () => setScopeOpen((v) => !v),
       loadSmf,
       play,
       stop: stopPlayback,
@@ -1403,6 +1755,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
 
   const wide = panelWidth >= 500;
+  // Narrow panel: one cluster at a time, behind tabs.
+  const compact = panelWidth > 0 && panelWidth < COMPACT_WIDTH;
+  const showCluster = (tab: PanelTab) => !compact || panelTab === tab;
   const octaveLabel = `oct ${octaveShift > 0 ? "+" : ""}${octaveShift}`;
   const last = entries[0] ?? null;
   // The bend fader reads out in semitones — the raw 14-bit number is too wide
@@ -1449,6 +1804,21 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         }
       />
 
+      {/* Too narrow to lay the clusters out side by side: one at a time, and a
+          tab to pick which. */}
+      {compact && (
+        <div style={{ flex: "0 0 auto", display: "flex", gap: 3 }}>
+          {PANEL_TABS.map((t) => (
+            <PanelButton
+              key={t.id}
+              label={t.label}
+              active={panelTab === t.id}
+              onClick={() => setPanelTab(t.id)}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Left to right, the way they sit on the hardware: bend, mod, stick,
           pads, knobs. Wraps onto more lines when the window is narrow. */}
       <div
@@ -1461,6 +1831,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           minWidth: 0,
         }}
       >
+        {showCluster("wheels") && (
         <Cluster label="Bend" style={{ flex: "0 0 auto", minWidth: 30 }}>
           <Fader
             ariaLabel="Pitch bend"
@@ -1474,7 +1845,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onCommit={releaseBend}
           />
         </Cluster>
+        )}
 
+        {showCluster("wheels") && (
         <Cluster label="Mod" style={{ flex: "0 0 auto", minWidth: 30 }}>
           <Fader
             ariaLabel="Modulation — CC 1"
@@ -1487,7 +1860,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onChange={sendMod}
           />
         </Cluster>
+        )}
 
+        {showCluster("wheels") && (
         <Cluster label="Stick" style={{ flex: "0 0 auto", minWidth: 58 }}>
           <Joystick
             size={FADER_HEIGHT - 22}
@@ -1500,8 +1875,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onRelease={stickRelease}
           />
         </Cluster>
+        )}
 
         {/* The pads — eight notes on channel 10, from 36 (bank A) or 44 (bank B). */}
+        {showCluster("pads") && (
         <Cluster label={`Pads · bank ${PAD_BANKS[padBank]}`} style={{ flex: "0 1 auto", minWidth: 0 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, width: 164 }}>
             {[
@@ -1527,9 +1904,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             ))}
           </div>
         </Cluster>
+        )}
 
         {/* K1–K8, sending CC 70–77 the way the hardware ships — and each one
             wired to the synth parameter named under it. */}
+        {showCluster("knobs") && (
         <Cluster label="Knobs · CC 70–77" style={{ flex: "0 0 auto" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
@@ -1554,6 +1933,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             ))}
           </div>
         </Cluster>
+        )}
       </div>
 
       {/* The display strip: what's plugged in, the last message through the
@@ -1619,37 +1999,51 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         </div>
       </Well>
 
-      <div style={{ flex: "0 0 auto", display: "flex", gap: 3, alignItems: "stretch" }}>
-        <PanelButton
-          label="Oct −"
-          disabled={playing || octaveShift <= -3}
-          onClick={() => bumpOctave(-1)}
-        />
-        <PanelButton
-          label="Oct +"
-          disabled={playing || octaveShift >= 3}
-          onClick={() => bumpOctave(1)}
-        />
-        <PanelButton
-          label={wide ? "Full level" : "Full"}
-          active={fullLevel}
-          disabled={playing}
-          onClick={toggleFullLevel}
-        />
-        <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
-        <PanelButton
-          label={wide ? "Bank" : "Bk"}
-          sub={PAD_BANKS[padBank]}
-          disabled={playing}
-          onClick={cyclePadBank}
-        />
-        <PanelButton
-          label="Prog"
-          sub={wide ? waveform : waveform.slice(0, 3)}
-          weight={1.35}
-          disabled={playing}
-          onClick={cycleProgram}
-        />
+      {/* The function buttons. Six across is more than a narrow panel can show
+          without shaving them down to initials, so they break into two rows. */}
+      <div
+        style={{
+          flex: "0 0 auto",
+          display: "flex",
+          flexDirection: compact ? "column" : "row",
+          gap: 3,
+          alignItems: "stretch",
+        }}
+      >
+        <div style={{ display: "flex", gap: 3, flex: "1 1 auto" }}>
+          <PanelButton
+            label="Oct −"
+            disabled={playing || octaveShift <= -3}
+            onClick={() => bumpOctave(-1)}
+          />
+          <PanelButton
+            label="Oct +"
+            disabled={playing || octaveShift >= 3}
+            onClick={() => bumpOctave(1)}
+          />
+          <PanelButton
+            label={wide || compact ? "Full level" : "Full"}
+            active={fullLevel}
+            disabled={playing}
+            onClick={toggleFullLevel}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 3, flex: "1 1 auto" }}>
+          <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
+          <PanelButton
+            label={wide || compact ? "Bank" : "Bk"}
+            sub={PAD_BANKS[padBank]}
+            disabled={playing}
+            onClick={cyclePadBank}
+          />
+          <PanelButton
+            label="Prog"
+            sub={wide || compact ? waveform : waveform.slice(0, 3)}
+            weight={1.35}
+            disabled={playing}
+            onClick={cycleProgram}
+          />
+        </div>
       </div>
 
       {metersOpen && (
@@ -1686,6 +2080,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             hasValue={meters.cc != null}
           />
         </Well>
+      )}
+
+      {scopeOpen && (
+        <ScopeView read={readScope} waveform={waveform} playing={playing} tall={maximized} />
       )}
 
       {/* The 37 mini keys, transposed by the Oct buttons. */}

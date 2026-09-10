@@ -169,6 +169,11 @@ export default function DesktopWindow({
             transform: `translate(calc(-50% + ${jitterX}px), calc(-50% + ${jitterY}px))`,
             width: NORMAL_W,
             height: normalHeight,
+            // A window's natural size is a wish, not a promise: on a phone the
+            // screen is narrower than any of them, and a window centred at its
+            // full width hangs off both edges with its controls out of reach.
+            maxWidth: `calc(100vw - ${GAP * 2}px)`,
+            maxHeight: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
             zIndex: Z.WINDOW,
             display: "flex",
             flexDirection: "column",
