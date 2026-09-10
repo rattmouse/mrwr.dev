@@ -46,7 +46,6 @@ export type MidiWindowHandle = {
   newSession: () => void;
   toggleMeters: () => void;
   toggleScope: () => void;
-  setWaveform: (waveform: Waveform) => void;
   loadSmf: (bytes: Uint8Array, name: string) => void;
   play: () => void;
   stop: () => void;
@@ -59,12 +58,20 @@ type MidiWindowProps = {
   maximized?: boolean;
   onMetersOpenChange?: (open: boolean) => void;
   onScopeOpenChange?: (open: boolean) => void;
-  onWaveformChange?: (waveform: Waveform) => void;
   onPlayingChange?: (playing: boolean) => void;
   onHasMessagesChange?: (hasMessages: boolean) => void;
 };
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
+
+/** The faceplate's control clusters, one per tab when the panel is narrow. */
+type PanelTab = "wheels" | "pads" | "knobs";
+
+const PANEL_TABS: { id: PanelTab; label: string }[] = [
+  { id: "wheels", label: "Wheels" },
+  { id: "pads", label: "Pads" },
+  { id: "knobs", label: "Knobs" },
+];
 
 type DeviceInfo = {
   id: string;
@@ -152,6 +159,10 @@ const RANGE_FULL = { low: 21, high: 108 }; // A0–C8
 const FULL_WHITE_COUNT = 52;
 // Below this the full keyboard's keys are too small to hit — window it instead.
 const MIN_WHITE_PX = 22;
+// Under this the faceplate can't hold bend, mod, stick, pads and knobs side by
+// side without them wrapping into a tower, so they go behind tabs instead. It's
+// the panel's own width, not the browser's — these windows resize.
+const COMPACT_WIDTH = 470;
 const KEY_HEIGHT_NORMAL = 72;
 // Bend / mod fader travel; the stick cluster is sized to match.
 const FADER_HEIGHT = 78;
@@ -877,7 +888,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     maximized = false,
     onMetersOpenChange,
     onScopeOpenChange,
-    onWaveformChange,
     onPlayingChange,
     onHasMessagesChange,
   },
@@ -922,6 +932,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [padBank, setPadBank] = useState(0);
   const [fullLevel, setFullLevel] = useState(false);
   const [panelWidth, setPanelWidth] = useState(0);
+  // Which control cluster the tabs are showing, when the panel is too narrow to
+  // show them all at once.
+  const [panelTab, setPanelTab] = useState<PanelTab>("pads");
 
   const nextId = useRef(0);
   const startedAt = useRef(0);
@@ -984,8 +997,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return () => ro.disconnect();
   }, []);
 
-  // Track the keyboard panel's width so the maximised view can decide whether
-  // the full 88 keys fit or it needs to window them.
+  // Track the keyboard panel's width so it can decide how many octaves fit at a
+  // playable key size, and whether it has to window them.
   useEffect(() => {
     const el = keysWrapRef.current;
     if (!el) return;
@@ -996,9 +1009,28 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return () => ro.disconnect();
   }, [maximized]);
 
-  // Which keys the on-screen keyboard shows, and how tall.
+  // Which keys the on-screen keyboard shows, and how tall. The keybed asks for
+  // three octaves normally and the whole 88 maximised, but what it gets is what
+  // the panel is wide enough to draw at a size you can actually hit — a phone
+  // gets two octaves and the ◀ oct / oct ▶ buttons to move them.
   const kb = useMemo(() => {
-    if (!maximized) {
+    const octavesFit =
+      keysWidth === 0 ? 7 : Math.max(1, Math.floor(keysWidth / (7 * MIN_WHITE_PX)));
+
+    if (maximized && (keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX)) {
+      return {
+        layout: KEYBOARD_FULL,
+        height: KEY_HEIGHT_FULL,
+        windowed: false,
+        lowNote: RANGE_FULL.low,
+        highNote: RANGE_FULL.high,
+        octavesVisible: 7,
+      };
+    }
+
+    // The mini keybed, whole and transposed by Oct − / Oct +, whenever its three
+    // octaves fit.
+    if (!maximized && octavesFit >= 3) {
       const low = RANGE_NORMAL.low + octaveShift * 12;
       return {
         layout: octaveShift === 0 ? KEYBOARD_NORMAL : buildKeyboard(low, low + MINI_KEY_SPAN),
@@ -1009,23 +1041,13 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         octavesVisible: 3,
       };
     }
-    const fitsFull = keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX;
-    if (fitsFull) {
-      return {
-        layout: KEYBOARD_FULL,
-        height: KEY_HEIGHT_FULL,
-        windowed: false,
-        lowNote: RANGE_FULL.low,
-        highNote: RANGE_FULL.high,
-        octavesVisible: 7,
-      };
-    }
-    const octavesVisible = Math.max(2, Math.min(7, Math.floor(keysWidth / (7 * MIN_WHITE_PX))));
+
+    const octavesVisible = Math.min(7, octavesFit);
     const span = octavesVisible * 12;
     const low = Math.max(RANGE_FULL.low, Math.min(RANGE_FULL.high - span, rangeLow));
     return {
       layout: buildKeyboard(low, low + span),
-      height: KEY_HEIGHT_FULL,
+      height: maximized ? KEY_HEIGHT_FULL : KEY_HEIGHT_NORMAL,
       windowed: true,
       lowNote: low,
       highNote: low + span,
@@ -1517,10 +1539,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const readScope = useCallback(() => synthRef.current?.readScope() ?? null, []);
 
   useEffect(() => {
-    onWaveformChange?.(waveform);
-  }, [waveform, onWaveformChange]);
-
-  useEffect(() => {
     onPlayingChange?.(playing);
   }, [playing, onPlayingChange]);
 
@@ -1546,10 +1564,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       },
       toggleMeters: () => setMetersOpen((v) => !v),
       toggleScope: () => setScopeOpen((v) => !v),
-      setWaveform: (next: Waveform) => {
-        setWaveformState(next);
-        ensureSynth().setWaveform(next);
-      },
       loadSmf,
       play,
       stop: stopPlayback,
@@ -1741,6 +1755,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
 
   const wide = panelWidth >= 500;
+  // Narrow panel: one cluster at a time, behind tabs.
+  const compact = panelWidth > 0 && panelWidth < COMPACT_WIDTH;
+  const showCluster = (tab: PanelTab) => !compact || panelTab === tab;
   const octaveLabel = `oct ${octaveShift > 0 ? "+" : ""}${octaveShift}`;
   const last = entries[0] ?? null;
   // The bend fader reads out in semitones — the raw 14-bit number is too wide
@@ -1787,6 +1804,21 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         }
       />
 
+      {/* Too narrow to lay the clusters out side by side: one at a time, and a
+          tab to pick which. */}
+      {compact && (
+        <div style={{ flex: "0 0 auto", display: "flex", gap: 3 }}>
+          {PANEL_TABS.map((t) => (
+            <PanelButton
+              key={t.id}
+              label={t.label}
+              active={panelTab === t.id}
+              onClick={() => setPanelTab(t.id)}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Left to right, the way they sit on the hardware: bend, mod, stick,
           pads, knobs. Wraps onto more lines when the window is narrow. */}
       <div
@@ -1799,6 +1831,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           minWidth: 0,
         }}
       >
+        {showCluster("wheels") && (
         <Cluster label="Bend" style={{ flex: "0 0 auto", minWidth: 30 }}>
           <Fader
             ariaLabel="Pitch bend"
@@ -1812,7 +1845,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onCommit={releaseBend}
           />
         </Cluster>
+        )}
 
+        {showCluster("wheels") && (
         <Cluster label="Mod" style={{ flex: "0 0 auto", minWidth: 30 }}>
           <Fader
             ariaLabel="Modulation — CC 1"
@@ -1825,7 +1860,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onChange={sendMod}
           />
         </Cluster>
+        )}
 
+        {showCluster("wheels") && (
         <Cluster label="Stick" style={{ flex: "0 0 auto", minWidth: 58 }}>
           <Joystick
             size={FADER_HEIGHT - 22}
@@ -1838,8 +1875,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             onRelease={stickRelease}
           />
         </Cluster>
+        )}
 
         {/* The pads — eight notes on channel 10, from 36 (bank A) or 44 (bank B). */}
+        {showCluster("pads") && (
         <Cluster label={`Pads · bank ${PAD_BANKS[padBank]}`} style={{ flex: "0 1 auto", minWidth: 0 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, width: 164 }}>
             {[
@@ -1865,9 +1904,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             ))}
           </div>
         </Cluster>
+        )}
 
         {/* K1–K8, sending CC 70–77 the way the hardware ships — and each one
             wired to the synth parameter named under it. */}
+        {showCluster("knobs") && (
         <Cluster label="Knobs · CC 70–77" style={{ flex: "0 0 auto" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {[
@@ -1892,6 +1933,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             ))}
           </div>
         </Cluster>
+        )}
       </div>
 
       {/* The display strip: what's plugged in, the last message through the
@@ -1957,37 +1999,51 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         </div>
       </Well>
 
-      <div style={{ flex: "0 0 auto", display: "flex", gap: 3, alignItems: "stretch" }}>
-        <PanelButton
-          label="Oct −"
-          disabled={playing || octaveShift <= -3}
-          onClick={() => bumpOctave(-1)}
-        />
-        <PanelButton
-          label="Oct +"
-          disabled={playing || octaveShift >= 3}
-          onClick={() => bumpOctave(1)}
-        />
-        <PanelButton
-          label={wide ? "Full level" : "Full"}
-          active={fullLevel}
-          disabled={playing}
-          onClick={toggleFullLevel}
-        />
-        <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
-        <PanelButton
-          label={wide ? "Bank" : "Bk"}
-          sub={PAD_BANKS[padBank]}
-          disabled={playing}
-          onClick={cyclePadBank}
-        />
-        <PanelButton
-          label="Prog"
-          sub={wide ? waveform : waveform.slice(0, 3)}
-          weight={1.35}
-          disabled={playing}
-          onClick={cycleProgram}
-        />
+      {/* The function buttons. Six across is more than a narrow panel can show
+          without shaving them down to initials, so they break into two rows. */}
+      <div
+        style={{
+          flex: "0 0 auto",
+          display: "flex",
+          flexDirection: compact ? "column" : "row",
+          gap: 3,
+          alignItems: "stretch",
+        }}
+      >
+        <div style={{ display: "flex", gap: 3, flex: "1 1 auto" }}>
+          <PanelButton
+            label="Oct −"
+            disabled={playing || octaveShift <= -3}
+            onClick={() => bumpOctave(-1)}
+          />
+          <PanelButton
+            label="Oct +"
+            disabled={playing || octaveShift >= 3}
+            onClick={() => bumpOctave(1)}
+          />
+          <PanelButton
+            label={wide || compact ? "Full level" : "Full"}
+            active={fullLevel}
+            disabled={playing}
+            onClick={toggleFullLevel}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 3, flex: "1 1 auto" }}>
+          <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
+          <PanelButton
+            label={wide || compact ? "Bank" : "Bk"}
+            sub={PAD_BANKS[padBank]}
+            disabled={playing}
+            onClick={cyclePadBank}
+          />
+          <PanelButton
+            label="Prog"
+            sub={wide || compact ? waveform : waveform.slice(0, 3)}
+            weight={1.35}
+            disabled={playing}
+            onClick={cycleProgram}
+          />
+        </div>
       </div>
 
       {metersOpen && (
