@@ -1100,15 +1100,19 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         benderRef.current.bend = parsed.bend;
         setBendValue(parsed.bend);
       }
+      // Mod is vibrato depth, from the fader or a real mod wheel alike.
       if (parsed.cc === 1) {
+        ensureSynth().setModWheel(parsed.ccValue ?? 0);
         benderRef.current.mod = parsed.ccValue ?? 0;
         setModValue(parsed.ccValue ?? 0);
       }
-      // The stick mirrors its own two CCs the same way the faders mirror theirs.
+      // The stick sweeps the filter — across is cutoff, up and down resonance —
+      // and mirrors its own two CCs the same way the faders mirror theirs.
       if (parsed.cc === STICK_CC_X || parsed.cc === STICK_CC_Y) {
         const axis = parsed.cc === STICK_CC_X ? "x" : "y";
         const value = parsed.ccValue ?? 0;
         stickRef.current[axis] = value;
+        ensureSynth().setStick(stickRef.current.x, stickRef.current.y);
         setStick((prev) => (prev[axis] === value ? prev : { ...prev, [axis]: value }));
       }
       // K1–K8 mirror CC 70–77 whoever sent them — panel, hardware or playback —
@@ -1241,6 +1245,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     }
     synthRef.current?.allNotesOff();
     synthRef.current?.setPitchBend(0);
+    synthRef.current?.setModWheel(0);
+    synthRef.current?.setStick(STICK_CENTRE, STICK_CENTRE);
     heldRef.current.clear();
     padHeldRef.current.clear();
     setHeld([]);
@@ -1850,7 +1856,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         {showCluster("wheels") && (
         <Cluster label="Mod" style={{ flex: "0 0 auto", minWidth: 30 }}>
           <Fader
-            ariaLabel="Modulation — CC 1"
+            ariaLabel="Modulation (vibrato) — CC 1"
             value={modValue}
             min={0}
             max={127}
@@ -1869,7 +1875,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             x={ccToAxis(stick.x)}
             y={ccToAxis(stick.y)}
             disabled={playing}
-            ariaLabel={`Stick — CC ${STICK_CC_X} across, CC ${STICK_CC_Y} up`}
+            ariaLabel={`Stick — filter cutoff across (CC ${STICK_CC_X}), resonance up (CC ${STICK_CC_Y})`}
             readout={`${stick.x}·${stick.y}`}
             onMove={stickMove}
             onRelease={stickRelease}
