@@ -43,7 +43,7 @@ follow-up commit or a separate "record PR #NN" PR after merge.
 Do this on your feature branch before the PR merges:
 
 1. **Add one bullet** to `versions[0].changes[]` — the newest card (currently
-   v4.0). Describe the **user-facing effect**, not the mechanics, and match the
+   v4.9). Describe the **user-facing effect**, not the mechanics, and match the
    voice of the bullets already there (short, plain, no hashes or file paths).
 2. **Record closed issues.** If the PR closes any issues, add their numbers to
    `versions[0].issues[]` (deduped, keep it sorted). Their titles and the "closed
