@@ -8,7 +8,7 @@
       "name": "Search & windows",
       "date": "2026-09-08",
       "summary": "Notes that nudge, windows that resize.",
-      "issues": [3, 53, 55, 95],
+      "issues": [3, 12, 53, 55, 95],
       "changes": [
         "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread",
         "Windows have a working resize grip in the bottom-right corner now — drag it to size a window, and it stays put where you left it",
@@ -32,7 +32,8 @@
         "midi.exe's Mod fader and stick finally do something: Mod adds vibrato, and the stick sweeps the filter — left and right for brighter or darker, up and down for more or less resonance",
         "midi.exe's drum pads hit harder — the whole kit is louder next to the keys",
         "midi.exe fits a phone now — the keys stay at the bottom with room for a fingertip, and the pads, knobs, wheels, log and scope take turns in one space above them, with a tall Bank pad beside the drum pads",
-        "midi.exe's meters and scope moved into a new View menu, and on a wide window they sit to the right of the knobs instead of pushing the keys down"
+        "midi.exe's meters and scope moved into a new View menu, and on a wide window they sit to the right of the knobs instead of pushing the keys down",
+        "Notepad and Paint remember what you left in them — closing the window, refreshing or shutting down no longer wipes the page — and both have a File menu to start fresh, open a file from your computer, or save your work as a download"
       ]
     },
     {
