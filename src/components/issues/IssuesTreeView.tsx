@@ -576,7 +576,8 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             if (!reveal) return;
             const path = revealIssue(issues, reveal);
             if (path) {
-                setExpanded(path.expanded);
+                // Open just the path to the target; leave whatever else is open alone.
+                setExpanded((prev) => uniq([...prev, ...path.expanded]));
                 setSelected([path.selected]);
                 scrollTargetRef.current = path.selected;
             }

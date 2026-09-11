@@ -15,7 +15,7 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import DndWindow, { DndWindowHandle } from "@/components/windows/DndWindow";
-import NotepadWindow, { NotepadDoc, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
+import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
@@ -64,7 +64,7 @@ type ProgramWindowProps = {
   id: ProgramWindowId;
   layout: Layout;
   versions: VersionEntry[];
-  notepadDoc?: NotepadDoc | null;
+  notepadDoc?: NotepadIncoming | null;
   onNotepadDocApplied?: () => void;
   issueReveal?: SearchIssueLink | null;
   onIssueRevealed?: () => void;

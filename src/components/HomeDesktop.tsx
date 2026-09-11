@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import StartMenu from "@/components/StartMenu";
 import ProgramWindow from "@/components/windows/ProgramWindow";
 import DocumentWindow from "@/components/windows/DocumentWindow";
-import { NotepadDoc } from "@/components/windows/NotepadWindow";
+import { NotepadIncoming } from "@/components/windows/NotepadWindow";
 import { VersionEntry } from "@/lib/versions.types";
 import { SearchHistorySession, SearchIssueLink } from "@/lib/searchHistory.types";
 import { Layout, WindowId, isDocumentWindow, isProgramWindow } from "@/components/windows/windowTypes";
@@ -19,7 +19,7 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
   const [layout, setLayout] = useState<Layout>("normal");
   // A picked past search, waiting to land in Notepad or the Issues tree; each
   // window clears its own once it's on screen.
-  const [notepadDoc, setNotepadDoc] = useState<NotepadDoc | null>(null);
+  const [notepadDoc, setNotepadDoc] = useState<NotepadIncoming | null>(null);
   const [issueReveal, setIssueReveal] = useState<SearchIssueLink | null>(null);
   const [phoneOrientation, setPhoneOrientation] = useState<"portrait" | "landscape">("landscape");
   const [rotationCount, setRotationCount] = useState(0);
@@ -64,14 +64,24 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
     setLayout("normal");
   };
 
-  // A search that became an issue opens on that issue; any other opens as text in Notepad.
+  // Bring up the window a picked search lands in. If it's already the open
+  // window, leave its size and place alone — just un-dock it so the new
+  // content is visible.
+  const showWindow = (id: WindowId) => {
+    if (activeWindow !== id) openWindow(id);
+    else if (layout === "docked") setLayout("normal");
+  };
+
+  // A search that became an issue opens on that issue; any other goes to
+  // Notepad — added to the end of the page if Notepad is already open,
+  // otherwise as a fresh page.
   const openSearch = (session: SearchHistorySession, text: string) => {
     if (session.issue) {
       setIssueReveal(session.issue);
-      openWindow("issues");
+      showWindow("issues");
     } else {
-      setNotepadDoc({ text, name: "search.txt" });
-      openWindow("notepad");
+      setNotepadDoc({ text, name: "search.txt", append: activeWindow === "notepad" });
+      showWindow("notepad");
     }
   };
 
