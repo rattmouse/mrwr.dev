@@ -28,7 +28,9 @@
         "Windows no longer open wider than the screen they're on, so on a phone the title bar and its buttons are where you can reach them",
         "Dropped midi.exe's Edit menu — the Prog button on the panel already steps through the waveforms",
         "about.txt now credits Claude with even more help, not just cleanup work",
-        "Windows can be moved now — grab a title bar and drag it anywhere on the desktop; the window keeps whatever size you gave it"
+        "Windows can be moved now — grab a title bar and drag it anywhere on the desktop; the window keeps whatever size you gave it",
+        "midi.exe's Mod fader and stick finally do something: Mod adds vibrato, and the stick sweeps the filter — left and right for brighter or darker, up and down for more or less resonance",
+        "midi.exe's drum pads hit harder — the whole kit is louder next to the keys"
       ]
     },
     {

@@ -1,7 +1,8 @@
 // A tiny polyphonic Web Audio synth for the Keys (midi.exe) window. One
 // oscillator per held note through a filter, a short attack, an exponential-ish
-// release tail — plus a drum kit on channel 10 for the pads and an eight-slot
-// parameter set for the knobs. No dependencies, no samples.
+// release tail — plus a drum kit on channel 10 for the pads, an eight-slot
+// parameter set for the knobs, vibrato on the mod fader and a filter sweep on
+// the stick. No dependencies, no samples.
 
 export type Waveform = "square" | "sawtooth" | "triangle" | "sine";
 
@@ -15,6 +16,10 @@ export const DRUM_BASE_NOTE = 36;
 const ATTACK = 0.005;
 // Per-voice ceiling before the master stage.
 const VOICE_GAIN = 0.9;
+// The drum bus's lift over the keybed. At unity even the kick sat ~6 dB under a
+// held square wave; this is +8 dB, and a kick plus a note still peaks under 0.8
+// with the volume knob all the way up.
+const DRUM_GAIN = 2.5;
 
 // ---------------------------------------------------------------------------
 // The kit
@@ -72,17 +77,17 @@ export const DRUM_KIT: readonly DrumDef[] = [
   {
     name: "Closed hat",
     short: "HAT",
-    noise: { filter: "highpass", freq: 8000, q: 1, decay: 0.045, level: 0.45 },
+    noise: { filter: "highpass", freq: 8000, q: 1, decay: 0.045, level: 0.9 },
   },
   {
     name: "Open hat",
     short: "OPEN",
-    noise: { filter: "highpass", freq: 7000, q: 1, decay: 0.32, level: 0.4 },
+    noise: { filter: "highpass", freq: 7000, q: 1, decay: 0.32, level: 0.6 },
   },
   {
     name: "Clap",
     short: "CLAP",
-    noise: { filter: "bandpass", freq: 1500, q: 1.2, decay: 0.16, level: 0.6 },
+    noise: { filter: "bandpass", freq: 1500, q: 1.2, decay: 0.16, level: 1.4 },
     bursts: 3,
   },
   {
@@ -93,8 +98,8 @@ export const DRUM_KIT: readonly DrumDef[] = [
   {
     name: "Rim",
     short: "RIM",
-    body: { type: "square", from: 400, to: 220, pitchDecay: 0.012, decay: 0.03, level: 0.3 },
-    noise: { filter: "bandpass", freq: 2200, q: 4, decay: 0.04, level: 0.5 },
+    body: { type: "square", from: 400, to: 220, pitchDecay: 0.012, decay: 0.03, level: 0.6 },
+    noise: { filter: "bandpass", freq: 2200, q: 4, decay: 0.04, level: 1 },
   },
   {
     name: "Crash",
@@ -110,13 +115,13 @@ export const DRUM_KIT: readonly DrumDef[] = [
   {
     name: "Rimshot",
     short: "SNR 2",
-    body: { type: "triangle", from: 240, to: 180, pitchDecay: 0.02, decay: 0.08, level: 0.4 },
-    noise: { filter: "highpass", freq: 2500, q: 0.8, decay: 0.1, level: 0.7 },
+    body: { type: "triangle", from: 240, to: 180, pitchDecay: 0.02, decay: 0.08, level: 0.5 },
+    noise: { filter: "highpass", freq: 2500, q: 0.8, decay: 0.1, level: 0.9 },
   },
   {
     name: "Shaker",
     short: "SHKR",
-    noise: { filter: "bandpass", freq: 6000, q: 1.5, decay: 0.09, level: 0.45 },
+    noise: { filter: "bandpass", freq: 6000, q: 1.5, decay: 0.09, level: 1.3 },
   },
   {
     name: "Cowbell",
@@ -136,13 +141,13 @@ export const DRUM_KIT: readonly DrumDef[] = [
   {
     name: "Ride",
     short: "RIDE",
-    noise: { filter: "highpass", freq: 6000, q: 0.7, decay: 0.85, level: 0.28 },
-    metal: { type: "square", freqs: [1200, 1800], decay: 0.5, level: 0.1 },
+    noise: { filter: "highpass", freq: 6000, q: 0.7, decay: 0.85, level: 0.35 },
+    metal: { type: "square", freqs: [1200, 1800], decay: 0.5, level: 0.12 },
   },
   {
     name: "Clave",
     short: "CLAVE",
-    metal: { type: "triangle", freqs: [1200, 2400], decay: 0.09, level: 0.4 },
+    metal: { type: "triangle", freqs: [1200, 2400], decay: 0.09, level: 0.55 },
   },
 ];
 
@@ -239,6 +244,25 @@ export const KNOB_DEFAULTS: number[] = KNOB_PARAMS.map((p) => p.default);
 const ECHO_TIME = 0.26;
 
 // ---------------------------------------------------------------------------
+// The mod fader and the stick
+// ---------------------------------------------------------------------------
+
+// Mod (CC 1) is vibrato: one shared LFO wobbling every voice's pitch, its depth
+// following the fader. Squared so the bottom of the travel stays subtle.
+const VIBRATO_HZ = 5.5;
+const vibratoCents = (v: number) => (v / 127) ** 2 * 60;
+
+// The stick plays the filter on top of K1 / K2: across sweeps the cutoff up to
+// three octaves either way, up opens the resonance, down takes it back out.
+// Both spring back to centre, so they're offsets rather than new settings.
+const STICK_CUTOFF_OCTAVES = 3;
+const STICK_RESONANCE_Q = 12;
+const stickAxis = (v: number) => {
+  const c = Math.max(0, Math.min(127, v));
+  return (c - 64) / (c < 64 ? 64 : 63);
+};
+
+// ---------------------------------------------------------------------------
 
 type Voice = {
   osc: OscillatorNode;
@@ -260,6 +284,8 @@ type Graph = {
   master: GainNode;
   /** Tapped off the master, post-volume, so the scope shows what you hear. */
   analyser: AnalyserNode;
+  /** The vibrato LFO's output, in cents; every voice's detune listens to it. */
+  vibrato: GainNode;
 };
 
 function midiToFreq(note: number): number {
@@ -377,6 +403,10 @@ export class MidiSynth {
   private bendCents = 0;
   /** Raw 0–127 knob positions, index 0 = K1. */
   private knobs = [...KNOB_DEFAULTS];
+  /** Raw 0–127 mod fader (CC 1). */
+  private mod = 0;
+  /** Raw 0–127 stick axes, 64 at rest. */
+  private stick = { x: 64, y: 64 };
 
   /** Create the context on first use; safe to call repeatedly. */
   private ensure(): Graph | null {
@@ -410,7 +440,7 @@ export class MidiSynth {
     tone.connect(filter);
 
     const drums = ctx.createGain();
-    drums.gain.value = 1;
+    drums.gain.value = DRUM_GAIN;
     drums.connect(mix);
 
     // Echo: a send off the mix into one delay tap that feeds itself, returning
@@ -427,7 +457,16 @@ export class MidiSynth {
     feedback.connect(delay);
     delay.connect(master);
 
-    this.graph = { ctx, tone, filter, drums, mix, send, master, analyser };
+    // Vibrato: a free-running sine whose depth gain is the mod fader. At zero
+    // depth it's silent, so it can run from the start and never needs resyncing.
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = VIBRATO_HZ;
+    const vibrato = ctx.createGain();
+    vibrato.gain.value = 0;
+    lfo.connect(vibrato);
+    lfo.start();
+
+    this.graph = { ctx, tone, filter, drums, mix, send, master, analyser, vibrato };
     // Jump straight to the knob positions rather than gliding — a fresh graph
     // starts at the node defaults, and gliding down from unity gain would put a
     // moment of full-volume, half-filtered sound in front of the first note.
@@ -487,10 +526,26 @@ export class MidiSynth {
     // Ease rather than jump, so a fast sweep doesn't click.
     const set = (param: AudioParam, value: number) =>
       immediate ? param.setValueAtTime(value, now) : param.setTargetAtTime(value, now, 0.01);
-    set(g.filter.frequency, cutoffHz(this.knobs[0]));
-    set(g.filter.Q, resonanceQ(this.knobs[1]));
+    const nyquist = g.ctx.sampleRate / 2;
+    const cutoff = cutoffHz(this.knobs[0]) * 2 ** (stickAxis(this.stick.x) * STICK_CUTOFF_OCTAVES);
+    const q = resonanceQ(this.knobs[1]) + stickAxis(this.stick.y) * STICK_RESONANCE_Q;
+    set(g.filter.frequency, Math.max(30, Math.min(nyquist - 100, cutoff)));
+    set(g.filter.Q, Math.max(0.3, Math.min(25, q)));
     set(g.send.gain, echoMix(this.knobs[6]) * 0.6);
     set(g.master.gain, volumeGain(this.knobs[7]));
+    set(g.vibrato.gain, vibratoCents(this.mod));
+  }
+
+  /** The mod fader, 0–127: how deep the vibrato goes. */
+  setModWheel(value: number): void {
+    this.mod = Math.max(0, Math.min(127, value));
+    this.applyKnobs();
+  }
+
+  /** The stick, 0–127 per axis with 64 at rest: a filter sweep over K1 / K2. */
+  setStick(x: number, y: number): void {
+    this.stick = { x, y };
+    this.applyKnobs();
   }
 
   /** Bend every sounding voice, and any that start while the bend is held. */
@@ -512,7 +567,7 @@ export class MidiSynth {
     }
     const g = this.ensure();
     if (!g) return;
-    const { ctx, tone } = g;
+    const { ctx, tone, vibrato } = g;
     if (ctx.state === "suspended") void ctx.resume();
 
     // Retrigger: drop the old voice on this note first.
@@ -521,7 +576,9 @@ export class MidiSynth {
     const osc = ctx.createOscillator();
     osc.type = this.waveform;
     osc.frequency.value = midiToFreq(note);
+    // The bend sets the detune; the vibrato is summed on top of it.
     osc.detune.value = this.bendCents;
+    vibrato.connect(osc.detune);
 
     const gain = ctx.createGain();
     const level = Math.max(0.05, Math.min(1, velocity / 127)) * VOICE_GAIN;
@@ -646,6 +703,7 @@ export class MidiSynth {
     this.voices.delete(note);
     const now = ctx.currentTime;
     const { osc, gain } = voice;
+    const vibrato = this.graph?.vibrato;
     try {
       gain.gain.cancelScheduledValues(now);
       gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
@@ -658,6 +716,8 @@ export class MidiSynth {
       }
       osc.onended = () => {
         try {
+          // The LFO is shared and outlives the voice, so unhook it by hand.
+          vibrato?.disconnect(osc.detune);
           osc.disconnect();
           gain.disconnect();
         } catch {
