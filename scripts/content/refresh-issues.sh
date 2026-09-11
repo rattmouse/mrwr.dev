@@ -32,7 +32,7 @@ TMP=$(mktemp "${DEST}.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 
 gh issue list --repo rattmouse/mrwr.dev \
-  --json number,title,body,state,stateReason,comments \
+  --json number,title,body,state,stateReason,comments,createdAt \
   --state all --limit 1000 \
   > "$TMP"
 
