@@ -422,6 +422,76 @@ export function Pad({
   );
 }
 
+// The bank switch, built like a pad but standing the full height of the grid
+// beside it: it goes in while it's held, and the big letter is the bank the
+// pads are playing.
+export function BankPad({
+  bank,
+  width,
+  height,
+  disabled,
+  onPress,
+}: {
+  bank: string;
+  width: number;
+  height: number;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  const [down, setDown] = React.useState(false);
+  const release = () => setDown(false);
+  return (
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-label={`Pad bank ${bank} — switch bank`}
+      aria-disabled={disabled}
+      onPointerDown={(e) => {
+        if (disabled) return;
+        e.preventDefault();
+        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+        setDown(true);
+        onPress();
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onKeyDown={(e) => {
+        if (disabled || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        onPress();
+      }}
+      style={{
+        flex: `0 0 ${width}px`,
+        height,
+        boxSizing: "border-box",
+        background: PANEL.material,
+        ...(down
+          ? {
+              border: "2px solid",
+              borderColor: `${PANEL.darkest} ${PANEL.light} ${PANEL.light} ${PANEL.darkest}`,
+              boxShadow: `inset 1px 1px 0 ${PANEL.shadow}`,
+            }
+          : RAISED),
+        color: PANEL.text,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "3px 0",
+        touchAction: "none",
+        userSelect: "none",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <span style={{ fontSize: 9, lineHeight: 1, letterSpacing: "0.04em", color: PANEL.dim }}>
+        BANK
+      </span>
+      <span style={{ fontSize: 18, lineHeight: 1, fontWeight: "bold" }}>{bank}</span>
+    </div>
+  );
+}
+
 // A function button. `sub` is the small legend the hardware silkscreens under
 // each one; here it doubles as the button's current setting.
 export function PanelButton({
@@ -430,6 +500,7 @@ export function PanelButton({
   active,
   disabled,
   weight = 1,
+  ariaLabel,
   onClick,
 }: {
   label: string;
@@ -438,6 +509,8 @@ export function PanelButton({
   disabled?: boolean;
   /** Share of the button row this one takes, for legends longer than the rest. */
   weight?: number;
+  /** For buttons whose label is only an arrow. */
+  ariaLabel?: string;
   onClick: () => void;
 }) {
   return (
@@ -445,6 +518,7 @@ export function PanelButton({
       size="sm"
       active={active}
       disabled={disabled}
+      aria-label={ariaLabel}
       onClick={onClick}
       style={{
         flex: `${weight} 1 0`,
@@ -469,6 +543,7 @@ export function Fader({
   min,
   max,
   size = 84,
+  width = 22,
   disabled,
   readout,
   ariaLabel,
@@ -479,6 +554,8 @@ export function Fader({
   min: number;
   max: number;
   size?: number;
+  /** Thumb width — wider on a phone, where it's under a finger, not a cursor. */
+  width?: number;
   disabled?: boolean;
   readout: string;
   ariaLabel: string;
@@ -547,7 +624,7 @@ export function Fader({
         onKeyDown={onKeyDown}
         style={{
           position: "relative",
-          width: 22,
+          width,
           height: size,
           touchAction: "none",
           cursor: disabled ? "default" : "pointer",
@@ -574,7 +651,7 @@ export function Fader({
             position: "absolute",
             left: 0,
             top: (1 - fraction) * travel,
-            width: 22,
+            width,
             height: thumbH,
             boxSizing: "border-box",
             background: PANEL.material,

@@ -20,6 +20,7 @@ import {
 } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
 import {
+  BankPad,
   BrandBar,
   Chassis,
   Cluster,
@@ -64,13 +65,18 @@ type MidiWindowProps = {
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
 
-/** The faceplate's control clusters, one per tab when the panel is narrow. */
-type PanelTab = "wheels" | "pads" | "knobs";
+/**
+ * When the panel is phone-narrow, everything above the keys takes turns in one
+ * deck: the three control clusters, the log, and the meters and scope while
+ * they're switched on.
+ */
+type PanelTab = "wheels" | "pads" | "knobs" | "log" | "meters" | "scope";
 
 const PANEL_TABS: { id: PanelTab; label: string }[] = [
   { id: "wheels", label: "Wheels" },
   { id: "pads", label: "Pads" },
   { id: "knobs", label: "Knobs" },
+  { id: "log", label: "Log" },
 ];
 
 type DeviceInfo = {
@@ -157,12 +163,34 @@ const MINI_KEY_SPAN = 36; // 37 keys, C to C
 const RANGE_NORMAL = { low: 36, high: 36 + MINI_KEY_SPAN }; // C2–C5 at octave 0
 const RANGE_FULL = { low: 21, high: 108 }; // A0–C8
 const FULL_WHITE_COUNT = 52;
+// The mini keybed's 22 white keys, less a little slack: at this many it's
+// drawn whole rather than windowed.
+const MINI_WHITE_FIT = 21;
 // Below this the full keyboard's keys are too small to hit — window it instead.
+// A fingertip needs more than a cursor does, so a touchscreen gets fewer, wider
+// keys.
 const MIN_WHITE_PX = 22;
+const MIN_WHITE_PX_TOUCH = 30;
 // Under this the faceplate can't hold bend, mod, stick, pads and knobs side by
-// side without them wrapping into a tower, so they go behind tabs instead. It's
-// the panel's own width, not the browser's — these windows resize.
+// side without them wrapping into a tower, so it switches to the phone layout:
+// one deck of tabs above a keybed pinned to the bottom. It's the panel's own
+// width, not the browser's — these windows resize.
 const COMPACT_WIDTH = 470;
+// The phone layout's keybed takes this share of the panel's height, within
+// these bounds; the deck above it gets whatever's left.
+const COMPACT_KEY_SHARE = 0.3;
+const COMPACT_KEY_MIN = 96;
+const COMPACT_KEY_MAX = 200;
+// Fader thumbs in the phone layout, sized for a finger.
+const COMPACT_FADER_WIDTH = 36;
+// The phone layout's bank switch, standing beside the pads.
+const BANK_PAD_WIDTH = 52;
+// From this panel width the meters and scope sit beside the knobs instead of
+// under the function buttons: the five clusters come to about 480px, and the
+// readouts want 260 or so of their own.
+const SIDE_READOUTS_WIDTH = 750;
+// The meters' share of that space when the scope is beside them too.
+const SIDE_METERS_WIDTH = 200;
 const KEY_HEIGHT_NORMAL = 72;
 // Bend / mod fader travel; the stick cluster is sized to match.
 const FADER_HEIGHT = 78;
@@ -475,13 +503,15 @@ function ScopeView({
   read,
   waveform,
   playing,
-  tall,
+  height,
 }: {
   read: () => ScopeFrame | null;
   waveform: Waveform;
   playing: boolean;
-  tall: boolean;
+  /** Canvas height, or "fill" to take whatever the parent gives it. */
+  height: number | "fill";
 }) {
+  const fill = height === "fill";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Spectrogram rows (newest first) and the trace's gain live outside the draw
   // loop, so a re-render that restarts the loop doesn't wipe the history or
@@ -697,14 +727,14 @@ function ScopeView({
       : readout.notes.map((n) => noteName(n.note)).join(" ");
 
   return (
-    <Well style={{ gap: 2, padding: "3px 4px" }}>
+    <Well grow={fill} style={{ gap: 2, padding: "3px 4px" }}>
       <canvas
         ref={canvasRef}
         aria-label="Waveform and spectrum of the sound playing"
         style={{
           display: "block",
           width: "100%",
-          height: tall ? SCOPE_HEIGHT_FULL : SCOPE_HEIGHT,
+          ...(fill ? { flex: "1 1 0", minHeight: 0 } : { height }),
           background: PANEL.canvas,
           border: `1px solid ${PANEL.shadow}`,
         }}
@@ -765,6 +795,54 @@ function buildKeyboard(low: number, high: number): { whites: KeyCell[]; blacks: 
     }
   });
   return { whites, blacks };
+}
+
+// The note `count` white keys up from `low` (or down from `high`), counting the
+// starting key itself when it's white.
+function whitesUp(low: number, count: number): number {
+  let note = low;
+  let seen = WHITE_PCS.has(note % 12) ? 1 : 0;
+  while (seen < count) {
+    note++;
+    if (WHITE_PCS.has(note % 12)) seen++;
+  }
+  return note;
+}
+
+function whitesDown(high: number, count: number): number {
+  let note = high;
+  let seen = WHITE_PCS.has(note % 12) ? 1 : 0;
+  while (seen < count) {
+    note--;
+    if (WHITE_PCS.has(note % 12)) seen++;
+  }
+  return note;
+}
+
+function clamp(value: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, value));
+}
+
+// Tracks an element's size. A callback ref rather than an effect, so it follows
+// the element when the phone and desktop layouts swap it for another.
+function useElementSize<T extends HTMLElement>() {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: T | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el) return;
+    const measure = () =>
+      setSize((prev) =>
+        prev.width === el.clientWidth && prev.height === el.clientHeight
+          ? prev
+          : { width: el.clientWidth, height: el.clientHeight },
+      );
+    measure();
+    observer.current = new ResizeObserver(measure);
+    observer.current.observe(el);
+  }, []);
+  return [ref, size] as const;
 }
 
 const KEYBOARD_NORMAL = buildKeyboard(RANGE_NORMAL.low, RANGE_NORMAL.high);
@@ -907,10 +985,10 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const [playTotal, setPlayTotal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [octaveShift, setOctaveShift] = useState(0);
-  // Maximised-window keyboard: measured panel width + the lowest note of the
-  // windowed view (only used when the full 88 keys don't fit).
-  const [keysWidth, setKeysWidth] = useState(0);
+  // The lowest note of the windowed keyboard (only used when the keys the
+  // window asks for don't fit).
   const [rangeLow, setRangeLow] = useState(48); // C3
+  const [coarse, setCoarse] = useState(false);
   const [meters, setMeters] = useState<Meters>(() => ({
     channels: new Array(16).fill(0),
     velocity: 0,
@@ -931,10 +1009,13 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // Which of the two pad banks the grid is showing / playing.
   const [padBank, setPadBank] = useState(0);
   const [fullLevel, setFullLevel] = useState(false);
-  const [panelWidth, setPanelWidth] = useState(0);
-  // Which control cluster the tabs are showing, when the panel is too narrow to
-  // show them all at once.
+  // Which tab the phone layout's deck is showing.
   const [panelTab, setPanelTab] = useState<PanelTab>("pads");
+  // The faceplate (decides the layout), the keyboard (decides how many keys
+  // fit) and the phone layout's deck (sizes the controls to fill it).
+  const [panelRef, panelSize] = useElementSize<HTMLDivElement>();
+  const [keysWrapRef, { width: keysWidth }] = useElementSize<HTMLDivElement>();
+  const [deckRef, deckSize] = useElementSize<HTMLDivElement>();
 
   const nextId = useRef(0);
   const startedAt = useRef(0);
@@ -962,7 +1043,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // and a drag only emits when the value actually moves.
   const benderRef = useRef({ bend: 8192, mod: 0 });
   const stickRef = useRef({ x: STICK_CENTRE, y: STICK_CENTRE });
-  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const synthRef = useRef<MidiSynth | null>(null);
   const entriesRef = useRef<LogEntry[]>([]);
@@ -971,7 +1051,6 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const playIntervalRef = useRef<number | null>(null);
   const octaveShiftRef = useRef(0);
   const pressedCodesRef = useRef<Map<string, number>>(new Map());
-  const keysWrapRef = useRef<HTMLDivElement | null>(null);
   // Last few note-on pitch classes, for matching the secret Bits-view code.
   const codeBufRef = useRef<number[]>([]);
 
@@ -985,52 +1064,37 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     playingRef.current = playing;
   }, [playing]);
 
-  // Track the faceplate's width so the display and pads can sit side by side
-  // once there's room for them.
+  // A touchscreen gets wider keys, and no "type A–K" hint it has no keys for.
   useEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    const measure = () => setPanelWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCoarse(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, []);
-
-  // Track the keyboard panel's width so it can decide how many octaves fit at a
-  // playable key size, and whether it has to window them.
-  useEffect(() => {
-    const el = keysWrapRef.current;
-    if (!el) return;
-    const measure = () => setKeysWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [maximized]);
 
   // Which keys the on-screen keyboard shows, and how tall. The keybed asks for
   // three octaves normally and the whole 88 maximised, but what it gets is what
   // the panel is wide enough to draw at a size you can actually hit — a phone
-  // gets two octaves and the ◀ oct / oct ▶ buttons to move them.
+  // gets an octave and a half and the ◀ / ▶ buttons to move them.
   const kb = useMemo(() => {
-    const octavesFit =
-      keysWidth === 0 ? 7 : Math.max(1, Math.floor(keysWidth / (7 * MIN_WHITE_PX)));
+    const minWhite = coarse ? MIN_WHITE_PX_TOUCH : MIN_WHITE_PX;
+    const whitesFit =
+      keysWidth === 0 ? FULL_WHITE_COUNT : Math.max(1, Math.floor(keysWidth / minWhite));
 
-    if (maximized && (keysWidth === 0 || keysWidth >= FULL_WHITE_COUNT * MIN_WHITE_PX)) {
+    if (maximized && whitesFit >= FULL_WHITE_COUNT) {
       return {
         layout: KEYBOARD_FULL,
         height: KEY_HEIGHT_FULL,
         windowed: false,
         lowNote: RANGE_FULL.low,
         highNote: RANGE_FULL.high,
-        octavesVisible: 7,
       };
     }
 
     // The mini keybed, whole and transposed by Oct − / Oct +, whenever its three
     // octaves fit.
-    if (!maximized && octavesFit >= 3) {
+    if (!maximized && whitesFit >= MINI_WHITE_FIT) {
       const low = RANGE_NORMAL.low + octaveShift * 12;
       return {
         layout: octaveShift === 0 ? KEYBOARD_NORMAL : buildKeyboard(low, low + MINI_KEY_SPAN),
@@ -1038,31 +1102,34 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         windowed: false,
         lowNote: low,
         highNote: low + MINI_KEY_SPAN,
-        octavesVisible: 3,
       };
     }
 
-    const octavesVisible = Math.min(7, octavesFit);
-    const span = octavesVisible * 12;
-    const low = Math.max(RANGE_FULL.low, Math.min(RANGE_FULL.high - span, rangeLow));
+    // As many white keys as fit, starting from rangeLow — counted in keys, not
+    // octaves, so a phone gets an octave and a half rather than rounding down
+    // to one. Pushed back down if that runs off the top of the 88.
+    const count = Math.min(FULL_WHITE_COUNT, whitesFit);
+    let low = clamp(rangeLow, RANGE_FULL.low, RANGE_FULL.high);
+    if (!WHITE_PCS.has(low % 12)) low--;
+    let high = whitesUp(low, count);
+    if (high > RANGE_FULL.high) {
+      high = RANGE_FULL.high;
+      low = whitesDown(high, count);
+    }
     return {
-      layout: buildKeyboard(low, low + span),
+      layout: buildKeyboard(low, high),
       height: maximized ? KEY_HEIGHT_FULL : KEY_HEIGHT_NORMAL,
       windowed: true,
       lowNote: low,
-      highNote: low + span,
-      octavesVisible,
+      highNote: high,
     };
-  }, [maximized, keysWidth, rangeLow, octaveShift]);
+  }, [maximized, keysWidth, rangeLow, octaveShift, coarse]);
 
+  // Moves the windowed keyboard an octave, landing on a C so the range reads
+  // cleanly even after it was pushed off one at either end.
   const shiftOctave = useCallback(
-    (dir: 1 | -1) => {
-      setRangeLow((l) => {
-        const span = kb.octavesVisible * 12;
-        return Math.max(RANGE_FULL.low, Math.min(RANGE_FULL.high - span, l + dir * 12));
-      });
-    },
-    [kb.octavesVisible],
+    (dir: 1 | -1) => setRangeLow(12 * Math.round((kb.lowNote + dir * 12) / 12)),
+    [kb.lowNote],
   );
 
   const ensureSynth = useCallback(() => {
@@ -1568,8 +1635,16 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         setEntries([]);
         setLoadError(null);
       },
-      toggleMeters: () => setMetersOpen((v) => !v),
-      toggleScope: () => setScopeOpen((v) => !v),
+      // Switching one on in the phone layout brings its tab to the front;
+      // switching it off takes the tab away.
+      toggleMeters: () => {
+        if (!metersOpen) setPanelTab("meters");
+        setMetersOpen(!metersOpen);
+      },
+      toggleScope: () => {
+        if (!scopeOpen) setPanelTab("scope");
+        setScopeOpen(!scopeOpen);
+      },
       loadSmf,
       play,
       stop: stopPlayback,
@@ -1610,7 +1685,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         return `${header}\n${body}`;
       },
     }),
-    [ensureSynth, loadSmf, play, stopPlayback],
+    [ensureSynth, loadSmf, play, stopPlayback, metersOpen, scopeOpen],
   );
 
   // The Bits panel window: the most recent raw bytes with the newest on the
@@ -1760,15 +1835,34 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   }, [ensureSynth, waveform]);
 
 
-  const wide = panelWidth >= 500;
-  // Narrow panel: one cluster at a time, behind tabs.
-  const compact = panelWidth > 0 && panelWidth < COMPACT_WIDTH;
-  const showCluster = (tab: PanelTab) => !compact || panelTab === tab;
-  const octaveLabel = `oct ${octaveShift > 0 ? "+" : ""}${octaveShift}`;
+  const wide = panelSize.width >= 500;
+  // Phone-narrow: one deck of tabs above a keybed pinned to the bottom.
+  const compact = panelSize.width > 0 && panelSize.width < COMPACT_WIDTH;
+  // Wide: the meters and scope go beside the knobs rather than under them.
+  const sideReadouts = panelSize.width >= SIDE_READOUTS_WIDTH && (metersOpen || scopeOpen);
   const last = entries[0] ?? null;
   // The bend fader reads out in semitones — the raw 14-bit number is too wide
   // for a column this narrow, and means less.
   const bendSemitones = Math.round(((bendValue - 8192) / 8192) * 2 * 10) / 10;
+  const rangeLabel = `${noteName(kb.lowNote)}–${noteName(kb.highNote)}`;
+  // A windowed keyboard's range is what the octave buttons move, so that's what
+  // the display names; the whole mini keybed transposes, so it's the octave.
+  const octaveLabel = kb.windowed
+    ? rangeLabel
+    : `oct ${octaveShift > 0 ? "+" : ""}${octaveShift}`;
+
+  // One octave control, whichever keyboard is showing: a windowed keyboard
+  // moves its range, the whole mini keybed transposes. Either way it's the keys
+  // on screen that change.
+  const shiftKeys = (dir: 1 | -1) => (kb.windowed ? shiftOctave(dir) : bumpOctave(dir));
+  const canShiftKeys = (dir: 1 | -1) =>
+    kb.windowed
+      ? dir < 0
+        ? kb.lowNote > RANGE_FULL.low
+        : kb.highNote < RANGE_FULL.high
+      : dir < 0
+        ? octaveShift > -3
+        : octaveShift < 3;
 
   // The OLED strip stands in for the status line and the old footer: what the
   // panel is connected to, the last message through it, and the current setup.
@@ -1791,45 +1885,492 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       : status === "ready" && devices.length > 0
         ? "#1d9e75"
         : "#c8a200";
+  const lastSummary = last
+    ? `${last.channel == null ? "--" : `CH${String(last.channel).padStart(2, "0")}`} ${last.type}`
+    : "MPK mini PLUS";
+  const lastDetail = last ? (knobReadout(last) ?? (last.detail || last.bytes)) : "ready";
+  const transport = `▶ ${formatTransport(playPos)} / ${formatTransport(playTotal)}`;
 
-  return (
-    <Chassis containerRef={panelRef}>
-      <BrandBar
-        right={
-          <span
-            title={screenNote}
-            aria-hidden
+  // ---- Panel parts, shared by both layouts --------------------------------
+
+  const led = (
+    <span
+      title={screenNote}
+      role="img"
+      aria-label={screenNote}
+      style={{
+        flex: "0 0 auto",
+        width: 7,
+        height: 7,
+        borderRadius: "50%",
+        background: ledColor,
+        border: `1px solid ${PANEL.shadow}`,
+      }}
+    />
+  );
+
+  const bendFader = (size: number, width?: number) => (
+    <Fader
+      ariaLabel="Pitch bend"
+      value={bendValue}
+      min={0}
+      max={16383}
+      size={size}
+      width={width}
+      disabled={playing}
+      readout={bendSemitones === 0 ? "0" : `${bendSemitones > 0 ? "+" : ""}${bendSemitones.toFixed(1)}`}
+      onChange={sendBend}
+      onCommit={releaseBend}
+    />
+  );
+
+  const modFader = (size: number, width?: number) => (
+    <Fader
+      ariaLabel="Modulation (vibrato) — CC 1"
+      value={modValue}
+      min={0}
+      max={127}
+      size={size}
+      width={width}
+      disabled={playing}
+      readout={String(modValue)}
+      onChange={sendMod}
+    />
+  );
+
+  const stickControl = (size: number) => (
+    <Joystick
+      size={size}
+      x={ccToAxis(stick.x)}
+      y={ccToAxis(stick.y)}
+      disabled={playing}
+      ariaLabel={`Stick — filter cutoff across (CC ${STICK_CC_X}), resonance up (CC ${STICK_CC_Y})`}
+      readout={`${stick.x}·${stick.y}`}
+      onMove={stickMove}
+      onRelease={stickRelease}
+    />
+  );
+
+  // The pads — eight notes on channel 10, from 36 (bank A) or 44 (bank B).
+  const padGrid = (padHeight: number, width: number | string) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, width }}>
+      {[
+        [4, 5, 6, 7],
+        [0, 1, 2, 3],
+      ].map((row, ri) => (
+        <div key={ri} style={{ display: "flex", gap: 3 }}>
+          {row.map((i) => {
+            const note = padBankBase(padBank) + i;
+            const drum = drumForNote(note);
+            return (
+              <Pad
+                key={i}
+                index={i}
+                label={String(i + 1)}
+                name={drum.name}
+                sub={drum.short}
+                active={padHeld.includes(note)}
+                height={padHeight}
+                disabled={playing}
+                onDown={() => padDown(i)}
+                onUp={() => padUp(i)}
+              />
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+
+  // K1–K8, sending CC 70–77 the way the hardware ships — and each one wired to
+  // the synth parameter named under it.
+  const knobGrid = (size: number) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {[
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+      ].map((row, ri) => (
+        <div key={ri} style={{ display: "flex", gap: 4 }}>
+          {row.map((i) => (
+            <Knob
+              key={i}
+              id={KNOB_PARAMS[i].id}
+              name={KNOB_PARAMS[i].name}
+              label={KNOB_PARAMS[i].short}
+              cc={KNOB_CC_BASE + i}
+              value={knobs[i]}
+              size={size}
+              disabled={playing}
+              onChange={(next) => handleKnob(i, next)}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
+  // Filling, the meters sit in the middle of whatever height they're given.
+  const metersPanel = (fill: boolean) => (
+    <Well
+      grow={fill}
+      style={{
+        gap: 3,
+        fontFamily: "monospace",
+        fontSize: 11,
+        padding: "3px 4px",
+        justifyContent: fill ? "center" : undefined,
+      }}
+    >
+      <div style={{ display: "flex", gap: 2 }}>
+        {meters.channels.map((v, i) => (
+          <div
+            key={i}
+            title={`CH${i + 1}`}
             style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: ledColor,
-              border: `1px solid ${PANEL.shadow}`,
+              flex: "1 1 0",
+              height: 12,
+              border: "1px solid #9a9a9a",
+              background: v > 0 ? `rgba(29, 158, 117, ${0.2 + 0.8 * v})` : "#e6e6e6",
             }}
           />
-        }
+        ))}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 9,
+          color: PANEL.dim,
+        }}
+      >
+        <span>CH 1</span>
+        <span>16</span>
+      </div>
+      <MeterBar label="vel" value={meters.velocity} />
+      <MeterBar
+        label={meters.cc == null ? "cc —" : `cc ${meters.cc}`}
+        value={meters.ccValue}
+        hasValue={meters.cc != null}
       />
+    </Well>
+  );
 
-      {/* Too narrow to lay the clusters out side by side: one at a time, and a
-          tab to pick which. */}
-      {compact && (
-        <div style={{ flex: "0 0 auto", display: "flex", gap: 3 }}>
-          {PANEL_TABS.map((t) => (
+  const scopePanel = (height: number | "fill") => (
+    <ScopeView read={readScope} waveform={waveform} playing={playing} height={height} />
+  );
+
+  // The message log. A full row is wider than a phone, so the short form drops
+  // the source and the raw bytes — the Bits view is where the bytes live.
+  const messageLog = (short: boolean) => (
+    <ScrollView
+      style={{
+        flex: "1 1 auto",
+        minHeight: 0,
+        width: "100%",
+        fontFamily: "monospace",
+        fontSize: 11,
+      }}
+    >
+      {entries.length === 0 ? (
+        <div style={{ opacity: 0.6 }}>Waiting for messages…</div>
+      ) : (
+        entries.map((entry) =>
+          short ? (
+            <div
+              key={entry.id}
+              style={{ whiteSpace: "pre", overflow: "hidden", textOverflow: "ellipsis" }}
+            >
+              {entry.clock} {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`} {entry.type.padEnd(14)} {entry.detail}
+            </div>
+          ) : (
+            <div key={entry.id} style={{ whiteSpace: "pre" }}>
+              {entry.clock}  {entry.source.slice(0, 8).padEnd(8)}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
+              <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>
+            </div>
+          ),
+        )
+      )}
+    </ScrollView>
+  );
+
+  const bitsPanel = (grow: boolean) => (
+    <Well
+      grow={grow}
+      style={{ overflow: "auto", fontFamily: "monospace", fontSize: 11, padding: "4px 4px 3px" }}
+    >
+      <BitSpotlight
+        cells={spotlight.cells}
+        empty={spotlight.empty}
+        truncated={spotlight.truncated}
+      />
+    </Well>
+  );
+
+  const keybed = (height: number) => (
+    <div ref={keysWrapRef}>
+      <PlayableKeyboard
+        layout={kb.layout}
+        height={height}
+        held={held}
+        disabled={playing}
+        onNoteOn={keyboardNoteOn}
+        onNoteOff={keyboardNoteOff}
+      />
+    </div>
+  );
+
+  // Only worth saying where there's a computer keyboard to type on.
+  const typingHint = "type A–K (W E T Y U for sharps) · Z / X shifts octave";
+
+  // ---- Phone layout --------------------------------------------------------
+  // The keybed is pinned to the bottom, under the thumbs, and gets a fixed share
+  // of the height. Everything else takes turns in one deck above it, and the
+  // deck's controls grow to fill whatever height it's left with — so the same
+  // layout serves a phone-sized window and a maximised phone alike.
+
+  if (compact) {
+    const keyHeight = clamp(
+      Math.round(panelSize.height * COMPACT_KEY_SHARE),
+      COMPACT_KEY_MIN,
+      COMPACT_KEY_MAX,
+    );
+    const tabs = [
+      ...PANEL_TABS,
+      ...(metersOpen ? [{ id: "meters" as const, label: "Meters" }] : []),
+      ...(scopeOpen ? [{ id: "scope" as const, label: "Scope" }] : []),
+    ];
+    const tab = tabs.some((t) => t.id === panelTab) ? panelTab : "pads";
+
+    // What each tab's controls come to, given the deck's size. The numbers
+    // taken off are the chrome around them: the header row over the pads, the
+    // caption over each wheel, the legend under each control.
+    const deckW = deckSize.width;
+    const deckH = deckSize.height;
+    // The header's button row, and the gap under it.
+    const headerH = 31;
+    const padHeight = clamp(Math.floor((deckH - headerH - 3) / 2), 34, 120);
+    const knobSize = clamp(
+      Math.floor(Math.min(deckW / 4 - 8, (deckH - 2 - 2 * 15) / 2)),
+      30,
+      64,
+    );
+    const faderSize = clamp(deckH - 40, 60, 260);
+    const stickSize = clamp(
+      Math.min(faderSize, deckW - 2 * (COMPACT_FADER_WIDTH + 16) - 24),
+      48,
+      220,
+    );
+    const deckHeader = (legend: string, button: React.ReactNode, buttonWidth: number) => (
+      <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ flex: "1 1 auto", minWidth: 0 }}>
+          <Legend>{legend}</Legend>
+        </span>
+        <div style={{ flex: `0 0 ${buttonWidth}px`, display: "flex" }}>{button}</div>
+      </div>
+    );
+    // Controls that top out before the deck does sit in the middle of what's
+    // left, rather than leaving a gap at the bottom.
+    const deckBody = (children: React.ReactNode) => (
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+        }}
+      >
+        {children}
+      </div>
+    );
+
+    return (
+      <Chassis containerRef={panelRef}>
+        {/* The display, down to one line: the last message through the panel
+            and the status lamp. A load error is the one thing that earns a
+            second line. */}
+        <Well style={{ background: PANEL.canvas, padding: "2px 5px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontFamily: "monospace",
+              fontSize: 11,
+              lineHeight: 1.35,
+              color: PANEL.text,
+              minWidth: 0,
+            }}
+          >
+            <span style={{ whiteSpace: "nowrap" }}>{lastSummary}</span>
+            <span
+              style={{
+                flex: "1 1 auto",
+                minWidth: 0,
+                textAlign: "right",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {playing ? transport : lastDetail}
+            </span>
+            {led}
+          </div>
+          {loadError && (
+            <div
+              style={{
+                fontFamily: "monospace",
+                fontSize: 11,
+                color: "#a80000",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {loadError}
+            </div>
+          )}
+        </Well>
+
+        {/* Widths follow the labels, so six tabs still fit on a phone. */}
+        <div role="tablist" style={{ flex: "0 0 auto", display: "flex", gap: 3 }}>
+          {tabs.map((t) => (
             <PanelButton
               key={t.id}
               label={t.label}
-              active={panelTab === t.id}
+              weight={t.label.length}
+              active={tab === t.id}
               onClick={() => setPanelTab(t.id)}
             />
           ))}
         </div>
-      )}
 
+        <div
+          ref={deckRef}
+          style={{
+            flex: "1 1 0",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+            overflow: "hidden",
+          }}
+        >
+          {tab === "wheels" && (
+            <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", gap: 4 }}>
+              <Cluster label="Bend" style={{ flex: "0 0 auto" }}>
+                {bendFader(faderSize, COMPACT_FADER_WIDTH)}
+              </Cluster>
+              <Cluster label="Mod" style={{ flex: "0 0 auto" }}>
+                {modFader(faderSize, COMPACT_FADER_WIDTH)}
+              </Cluster>
+              <Cluster label="Stick" style={{ flex: "1 1 auto", minWidth: 0 }}>
+                {stickControl(stickSize)}
+              </Cluster>
+            </div>
+          )}
+
+          {/* The pads and what goes with them: Full level over the grid, and
+              the bank switch standing beside it like a ninth, tall pad. */}
+          {tab === "pads" && (
+            <>
+              {deckHeader(
+                `ch ${PAD_CHANNEL} · notes ${padBankBase(padBank)}–${padBankBase(padBank) + PAD_BANK_SIZE - 1}`,
+                <PanelButton
+                  label="Full level"
+                  active={fullLevel}
+                  disabled={playing}
+                  onClick={toggleFullLevel}
+                />,
+                96,
+              )}
+              {deckBody(
+                <div style={{ display: "flex", gap: 3 }}>
+                  <div style={{ flex: "1 1 0", minWidth: 0 }}>{padGrid(padHeight, "100%")}</div>
+                  <BankPad
+                    bank={PAD_BANKS[padBank]}
+                    width={BANK_PAD_WIDTH}
+                    height={padHeight * 2 + 3}
+                    disabled={playing}
+                    onPress={cyclePadBank}
+                  />
+                </div>,
+              )}
+            </>
+          )}
+
+          {tab === "knobs" && deckBody(knobGrid(knobSize))}
+
+          {tab === "log" && (bitsView ? bitsPanel(true) : messageLog(true))}
+
+          {tab === "meters" && metersPanel(false)}
+
+          {tab === "scope" && scopePanel("fill")}
+        </div>
+
+        {/* The octave control, and the two switches for how the keys play:
+            held or latched, and which program. */}
+        <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 3 }}>
+          <PanelButton
+            label="◀"
+            ariaLabel="Keys down an octave"
+            weight={0.6}
+            disabled={!canShiftKeys(-1)}
+            onClick={() => shiftKeys(-1)}
+          />
+          <span
+            style={{
+              flex: "1.1 1 0",
+              minWidth: 0,
+              textAlign: "center",
+              fontSize: 11,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {rangeLabel}
+          </span>
+          <PanelButton
+            label="▶"
+            ariaLabel="Keys up an octave"
+            weight={0.6}
+            disabled={!canShiftKeys(1)}
+            onClick={() => shiftKeys(1)}
+          />
+          <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
+          <PanelButton
+            label="Prog"
+            sub={waveform}
+            weight={1.7}
+            disabled={playing}
+            onClick={cycleProgram}
+          />
+        </div>
+
+        <Well style={{ padding: "4px 4px 3px" }}>
+          {keybed(keyHeight)}
+          {!coarse && (
+            <div style={{ marginTop: 3 }}>
+              <Legend>{typingHint}</Legend>
+            </div>
+          )}
+        </Well>
+      </Chassis>
+    );
+  }
+
+  // ---- Desktop layout ------------------------------------------------------
+
+  return (
+    <Chassis containerRef={panelRef}>
+      <BrandBar right={led} />
+
+      <div style={{ flex: "0 0 auto", display: "flex", gap: 4, minWidth: 0 }}>
       {/* Left to right, the way they sit on the hardware: bend, mod, stick,
           pads, knobs. Wraps onto more lines when the window is narrow. */}
       <div
         style={{
-          flex: "0 0 auto",
+          flex: "0 1 auto",
           display: "flex",
           flexWrap: "wrap",
           alignItems: "stretch",
@@ -1837,109 +2378,53 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           minWidth: 0,
         }}
       >
-        {showCluster("wheels") && (
         <Cluster label="Bend" style={{ flex: "0 0 auto", minWidth: 30 }}>
-          <Fader
-            ariaLabel="Pitch bend"
-            value={bendValue}
-            min={0}
-            max={16383}
-            size={FADER_HEIGHT}
-            disabled={playing}
-            readout={bendSemitones === 0 ? "0" : `${bendSemitones > 0 ? "+" : ""}${bendSemitones.toFixed(1)}`}
-            onChange={sendBend}
-            onCommit={releaseBend}
-          />
+          {bendFader(FADER_HEIGHT)}
         </Cluster>
-        )}
 
-        {showCluster("wheels") && (
         <Cluster label="Mod" style={{ flex: "0 0 auto", minWidth: 30 }}>
-          <Fader
-            ariaLabel="Modulation (vibrato) — CC 1"
-            value={modValue}
-            min={0}
-            max={127}
-            size={FADER_HEIGHT}
-            disabled={playing}
-            readout={String(modValue)}
-            onChange={sendMod}
-          />
+          {modFader(FADER_HEIGHT)}
         </Cluster>
-        )}
 
-        {showCluster("wheels") && (
         <Cluster label="Stick" style={{ flex: "0 0 auto", minWidth: 58 }}>
-          <Joystick
-            size={FADER_HEIGHT - 22}
-            x={ccToAxis(stick.x)}
-            y={ccToAxis(stick.y)}
-            disabled={playing}
-            ariaLabel={`Stick — filter cutoff across (CC ${STICK_CC_X}), resonance up (CC ${STICK_CC_Y})`}
-            readout={`${stick.x}·${stick.y}`}
-            onMove={stickMove}
-            onRelease={stickRelease}
-          />
+          {stickControl(FADER_HEIGHT - 22)}
         </Cluster>
-        )}
 
-        {/* The pads — eight notes on channel 10, from 36 (bank A) or 44 (bank B). */}
-        {showCluster("pads") && (
         <Cluster label={`Pads · bank ${PAD_BANKS[padBank]}`} style={{ flex: "0 1 auto", minWidth: 0 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3, width: 164 }}>
-            {[
-              [4, 5, 6, 7],
-              [0, 1, 2, 3],
-            ].map((row, ri) => (
-              <div key={ri} style={{ display: "flex", gap: 3 }}>
-                {row.map((i) => (
-                  <Pad
-                    key={i}
-                    index={i}
-                    label={String(i + 1)}
-                    name={drumForNote(padBankBase(padBank) + i).name}
-                    sub={drumForNote(padBankBase(padBank) + i).short}
-                    active={padHeld.includes(padBankBase(padBank) + i)}
-                    height={34}
-                    disabled={playing}
-                    onDown={() => padDown(i)}
-                    onUp={() => padUp(i)}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
+          {padGrid(34, 164)}
         </Cluster>
-        )}
 
-        {/* K1–K8, sending CC 70–77 the way the hardware ships — and each one
-            wired to the synth parameter named under it. */}
-        {showCluster("knobs") && (
         <Cluster label="Knobs · CC 70–77" style={{ flex: "0 0 auto" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {[
-              [0, 1, 2, 3],
-              [4, 5, 6, 7],
-            ].map((row, ri) => (
-              <div key={ri} style={{ display: "flex", gap: 4 }}>
-                {row.map((i) => (
-                  <Knob
-                    key={i}
-                    id={KNOB_PARAMS[i].id}
-                    name={KNOB_PARAMS[i].name}
-                    label={KNOB_PARAMS[i].short}
-                    cc={KNOB_CC_BASE + i}
-                    value={knobs[i]}
-                    size={30}
-                    disabled={playing}
-                    onChange={(next) => handleKnob(i, next)}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
+          {knobGrid(30)}
         </Cluster>
-        )}
+      </div>
+
+      {/* With room to spare, the meters and scope sit beside the knobs. They
+          take the row's height rather than setting it — laid out over the
+          space, not in it — so the clusters don't stretch to match them. */}
+      {sideReadouts && (
+        <div style={{ flex: "1 1 0", minWidth: 0, position: "relative" }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", gap: 4 }}>
+            {metersOpen && (
+              <div
+                style={{
+                  flex: scopeOpen ? `0 0 ${SIDE_METERS_WIDTH}px` : "1 1 0",
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                {metersPanel(true)}
+              </div>
+            )}
+            {scopeOpen && (
+              <div style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column" }}>
+                {scopePanel("fill")}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       </div>
 
       {/* The display strip: what's plugged in, the last message through the
@@ -1955,11 +2440,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-            <span style={{ whiteSpace: "nowrap" }}>
-              {last
-                ? `${last.channel == null ? "--" : `CH${String(last.channel).padStart(2, "0")}`} ${last.type}`
-                : "MPK mini PLUS"}
-            </span>
+            <span style={{ whiteSpace: "nowrap" }}>{lastSummary}</span>
             <span
               style={{
                 minWidth: 0,
@@ -1968,7 +2449,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
                 whiteSpace: "nowrap",
               }}
             >
-              {last ? (knobReadout(last) ?? (last.detail || last.bytes)) : "ready"}
+              {lastDetail}
             </span>
           </div>
           <div
@@ -1998,37 +2479,28 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             </span>
             <span>
               {playing
-                ? `▶ ${formatTransport(playPos)} / ${formatTransport(playTotal)}`
+                ? transport
                 : `${entries.length} msg${entries.length >= MAX_ENTRIES ? " max" : ""}`}
             </span>
           </div>
         </div>
       </Well>
 
-      {/* The function buttons. Six across is more than a narrow panel can show
-          without shaving them down to initials, so they break into two rows. */}
-      <div
-        style={{
-          flex: "0 0 auto",
-          display: "flex",
-          flexDirection: compact ? "column" : "row",
-          gap: 3,
-          alignItems: "stretch",
-        }}
-      >
+      {/* The function buttons. */}
+      <div style={{ flex: "0 0 auto", display: "flex", gap: 3, alignItems: "stretch" }}>
         <div style={{ display: "flex", gap: 3, flex: "1 1 auto" }}>
           <PanelButton
             label="Oct −"
-            disabled={playing || octaveShift <= -3}
-            onClick={() => bumpOctave(-1)}
+            disabled={playing || !canShiftKeys(-1)}
+            onClick={() => shiftKeys(-1)}
           />
           <PanelButton
             label="Oct +"
-            disabled={playing || octaveShift >= 3}
-            onClick={() => bumpOctave(1)}
+            disabled={playing || !canShiftKeys(1)}
+            onClick={() => shiftKeys(1)}
           />
           <PanelButton
-            label={wide || compact ? "Full level" : "Full"}
+            label={wide ? "Full level" : "Full"}
             active={fullLevel}
             disabled={playing}
             onClick={toggleFullLevel}
@@ -2037,14 +2509,14 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         <div style={{ display: "flex", gap: 3, flex: "1 1 auto" }}>
           <PanelButton label="Latch" active={latch} disabled={playing} onClick={toggleLatch} />
           <PanelButton
-            label={wide || compact ? "Bank" : "Bk"}
+            label={wide ? "Bank" : "Bk"}
             sub={PAD_BANKS[padBank]}
             disabled={playing}
             onClick={cyclePadBank}
           />
           <PanelButton
             label="Prog"
-            sub={wide || compact ? waveform : waveform.slice(0, 3)}
+            sub={wide ? waveform : waveform.slice(0, 3)}
             weight={1.35}
             disabled={playing}
             onClick={cycleProgram}
@@ -2052,137 +2524,53 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         </div>
       </div>
 
-      {metersOpen && (
-        <Well style={{ gap: 3, fontFamily: "monospace", fontSize: 11, padding: "3px 4px" }}>
-          <div style={{ display: "flex", gap: 2 }}>
-            {meters.channels.map((v, i) => (
-              <div
-                key={i}
-                title={`CH${i + 1}`}
-                style={{
-                  flex: "1 1 0",
-                  height: 12,
-                  border: "1px solid #9a9a9a",
-                  background: v > 0 ? `rgba(29, 158, 117, ${0.2 + 0.8 * v})` : "#e6e6e6",
-                }}
-              />
-            ))}
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 9,
-              color: PANEL.dim,
-            }}
-          >
-            <span>CH 1</span>
-            <span>16</span>
-          </div>
-          <MeterBar label="vel" value={meters.velocity} />
-          <MeterBar
-            label={meters.cc == null ? "cc —" : `cc ${meters.cc}`}
-            value={meters.ccValue}
-            hasValue={meters.cc != null}
-          />
-        </Well>
-      )}
+      {metersOpen && !sideReadouts && metersPanel(false)}
 
-      {scopeOpen && (
-        <ScopeView read={readScope} waveform={waveform} playing={playing} tall={maximized} />
-      )}
+      {scopeOpen && !sideReadouts && scopePanel(maximized ? SCOPE_HEIGHT_FULL : SCOPE_HEIGHT)}
 
       {/* The 37 mini keys, transposed by the Oct buttons. */}
       <Well style={{ padding: "4px 4px 3px" }}>
-        <div style={{ display: "flex", alignItems: "flex-end" }}>
-          <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-            {kb.windowed && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  marginBottom: 3,
-                }}
-              >
-                <div style={{ flex: "0 0 64px", display: "flex" }}>
-                  <PanelButton
-                    label="◀ oct"
-                    disabled={kb.lowNote <= RANGE_FULL.low}
-                    onClick={() => shiftOctave(-1)}
-                  />
-                </div>
-                <span style={{ flex: "1 1 auto", textAlign: "center" }}>
-                  <Legend>
-                    {noteName(kb.lowNote)} – {noteName(kb.highNote)}
-                  </Legend>
-                </span>
-                <div style={{ flex: "0 0 64px", display: "flex" }}>
-                  <PanelButton
-                    label="oct ▶"
-                    disabled={kb.highNote >= RANGE_FULL.high}
-                    onClick={() => shiftOctave(1)}
-                  />
-                </div>
-              </div>
-            )}
-            <div ref={keysWrapRef}>
-              <PlayableKeyboard
-                layout={kb.layout}
-                height={kb.height}
-                held={held}
-                disabled={playing}
-                onNoteOn={keyboardNoteOn}
-                onNoteOff={keyboardNoteOff}
+        {kb.windowed && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 3,
+            }}
+          >
+            <div style={{ flex: "0 0 64px", display: "flex" }}>
+              <PanelButton
+                label="◀ oct"
+                disabled={!canShiftKeys(-1)}
+                onClick={() => shiftOctave(-1)}
               />
             </div>
-            <div style={{ marginTop: 3 }}>
-              <Legend>
-                {noteName(kb.lowNote)}–{noteName(kb.highNote)} · click, or type A–K (W E T Y U for
-                sharps) · Z / X shifts octave
-              </Legend>
+            <span style={{ flex: "1 1 auto", textAlign: "center" }}>
+              <Legend>{rangeLabel}</Legend>
+            </span>
+            <div style={{ flex: "0 0 64px", display: "flex" }}>
+              <PanelButton
+                label="oct ▶"
+                disabled={!canShiftKeys(1)}
+                onClick={() => shiftOctave(1)}
+              />
             </div>
           </div>
+        )}
+        {keybed(kb.height)}
+        <div style={{ marginTop: 3 }}>
+          <Legend>
+            {coarse ? rangeLabel : `${rangeLabel} · click, or ${typingHint}`}
+          </Legend>
         </div>
       </Well>
 
-      {(!bitsView || maximized) && (
-        <ScrollView
-          style={{
-            flex: "1 1 auto",
-            minHeight: 0,
-            width: "100%",
-            fontFamily: "monospace",
-            fontSize: 11,
-          }}
-        >
-          {entries.length === 0 ? (
-            <div style={{ opacity: 0.6 }}>Waiting for messages…</div>
-          ) : (
-            entries.map((entry) => (
-              <div key={entry.id} style={{ whiteSpace: "pre" }}>
-                {entry.clock}  {entry.source.slice(0, 8).padEnd(8)}  {entry.channel === null ? "  --" : `CH${String(entry.channel).padStart(2, "0")}`}  {entry.type.padEnd(18)}{entry.detail}
-                <span style={{ opacity: 0.55 }}>{"   "}{entry.bytes}</span>
-              </div>
-            ))
-          )}
-        </ScrollView>
-      )}
+      {(!bitsView || maximized) && messageLog(false)}
 
       {/* Bits view: swapped in for the log in a normal window; a strip below it
           when maximised, where there's room for everything. */}
-      {bitsView && (
-        <Well
-          grow={!maximized}
-          style={{ overflow: "auto", fontFamily: "monospace", fontSize: 11, padding: "4px 4px 3px" }}
-        >
-          <BitSpotlight
-            cells={spotlight.cells}
-            empty={spotlight.empty}
-            truncated={spotlight.truncated}
-          />
-        </Well>
-      )}
+      {bitsView && bitsPanel(!maximized)}
     </Chassis>
   );
 });

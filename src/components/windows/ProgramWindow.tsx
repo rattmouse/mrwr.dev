@@ -93,6 +93,7 @@ export default function ProgramWindow({
   const dndRef = useRef<DndWindowHandle>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
+  const midiViewMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [strudelPlaying, setStrudelPlaying] = useState(false);
   const [strudelInSync, setStrudelInSync] = useState(false);
@@ -105,6 +106,7 @@ export default function ProgramWindow({
   const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
   const [contentModalOpen, setContentModalOpen] = useState(false);
   const [midiFileOpen, setMidiFileOpen] = useState(false);
+  const [midiViewOpen, setMidiViewOpen] = useState(false);
   const [midiSaveAsOpen, setMidiSaveAsOpen] = useState(false);
   const [midiSaveAsTop, setMidiSaveAsTop] = useState(0);
   const [midiMetersOpen, setMidiMetersOpen] = useState(false);
@@ -232,6 +234,7 @@ export default function ProgramWindow({
     if (id !== "midi") {
       setMidiFileOpen(false);
       setMidiSaveAsOpen(false);
+      setMidiViewOpen(false);
       return;
     }
     const handleMouseDown = (event: MouseEvent) => {
@@ -240,6 +243,9 @@ export default function ProgramWindow({
       if (!(midiFileMenuRef.current?.contains(target) ?? false)) {
         setMidiFileOpen(false);
         setMidiSaveAsOpen(false);
+      }
+      if (!(midiViewMenuRef.current?.contains(target) ?? false)) {
+        setMidiViewOpen(false);
       }
     };
     document.addEventListener("mousedown", handleMouseDown);
@@ -517,12 +523,13 @@ export default function ProgramWindow({
             disabled={midiPlaying}
             aria-label="File"
             title="File"
-            onClick={() =>
+            onClick={() => {
+              setMidiViewOpen(false);
               setMidiFileOpen((prev) => {
                 setMidiSaveAsOpen(false);
                 return !prev;
-              })
-            }
+              });
+            }}
           >
             File
           </Button>
@@ -651,6 +658,78 @@ export default function ProgramWindow({
             </div>
           )}
         </div>
+        {/* View: the panel's optional readouts, each ticked while it's showing. */}
+        <div ref={midiViewMenuRef} style={{ position: "relative", display: "inline-block" }}>
+          <Button
+            variant="menu"
+            size="sm"
+            active={midiViewOpen}
+            aria-label="View"
+            title="View"
+            onClick={() => {
+              setMidiFileOpen(false);
+              setMidiSaveAsOpen(false);
+              setMidiViewOpen((prev) => !prev);
+            }}
+          >
+            View
+          </Button>
+          {midiViewOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% - 2px)",
+                left: 0,
+                zIndex: 1000,
+                width: "max-content",
+              }}
+              onMouseLeave={() => setMidiViewOpen(false)}
+            >
+              <MenuList style={{ marginTop: 0 }}>
+                {[
+                  { label: "Meters", title: "Activity meters", checked: midiMetersOpen },
+                  {
+                    label: "Scope",
+                    title: "Waveform and frequency of the sound playing",
+                    checked: midiScopeOpen,
+                  },
+                ].map((item) => (
+                  <MenuListItem
+                    key={item.label}
+                    size="sm"
+                    role="menuitemcheckbox"
+                    aria-checked={item.checked}
+                    title={item.title}
+                    onClick={() => {
+                      if (item.label === "Meters") midiRef.current?.toggleMeters();
+                      else midiRef.current?.toggleScope();
+                      setMidiViewOpen(false);
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 12,
+                        marginRight: 6,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flex: "0 0 12px",
+                      }}
+                    >
+                      {item.checked && (
+                        <svg width="8" height="8" viewBox="0 0 8 8" role="presentation">
+                          <path d="M0 4l1-1 2 2 4-4 1 1-5 5z" fill="currentColor" />
+                        </svg>
+                      )}
+                    </span>
+                    <span style={{ flex: "1 1 auto" }}>{item.label}</span>
+                  </MenuListItem>
+                ))}
+              </MenuList>
+            </div>
+          )}
+        </div>
         <Button
           size="sm"
           style={{ fontWeight: "bold" }}
@@ -670,24 +749,6 @@ export default function ProgramWindow({
           onClick={() => midiRef.current?.stop()}
         >
           Stop
-        </Button>
-        <Button
-          size="sm"
-          style={{ fontWeight: "bold" }}
-          title="Activity meters"
-          active={midiMetersOpen}
-          onClick={() => midiRef.current?.toggleMeters()}
-        >
-          Meters
-        </Button>
-        <Button
-          size="sm"
-          style={{ fontWeight: "bold" }}
-          title="Waveform and frequency of the sound playing"
-          active={midiScopeOpen}
-          onClick={() => midiRef.current?.toggleScope()}
-        >
-          Scope
         </Button>
         <input
           ref={midiFileInputRef}
