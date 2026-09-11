@@ -7,7 +7,6 @@ import {
   MenuList,
   MenuListItem,
   ScrollView,
-  TextInput,
 } from "react95";
 import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/IssuesTreeView";
 import ChangesTreeView, { ChangesTreeViewHandle } from "@/components/changes/ChangesTreeView";
@@ -16,6 +15,8 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import DndWindow, { DndWindowHandle } from "@/components/windows/DndWindow";
+import NotepadWindow, { NotepadWindowHandle } from "@/components/windows/NotepadWindow";
+import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import strudelSongs from "@/data/strudelSongs.json";
@@ -41,12 +42,13 @@ const PAINT_COLORS = [
 const PAINT_SIZES = [2, 6, 14] as const;
 
 
-// Hand the browser a Blob to save. First (and only) file download in the app —
-// nothing here touches the network.
-function downloadBlob(data: string | Uint8Array, filename: string, mime: string) {
-  const part: BlobPart =
-    typeof data === "string" ? data : (data.slice().buffer as ArrayBuffer);
-  const blob = new Blob([part], { type: mime });
+// Hand the browser a file to save — midi.exe's, Notepad's and Paint's Save all
+// land here. Nothing touches the network.
+function downloadBlob(data: string | Uint8Array | Blob, filename: string, mime?: string) {
+  const blob =
+    data instanceof Blob
+      ? data
+      : new Blob([typeof data === "string" ? data : (data.slice().buffer as ArrayBuffer)], { type: mime });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -91,6 +93,9 @@ export default function ProgramWindow({
   const midiRef = useRef<MidiWindowHandle>(null);
   const paintRef = useRef<PaintWindowHandle>(null);
   const dndRef = useRef<DndWindowHandle>(null);
+  const notepadRef = useRef<NotepadWindowHandle>(null);
+  const notepadFileInputRef = useRef<HTMLInputElement | null>(null);
+  const paintFileInputRef = useRef<HTMLInputElement | null>(null);
   const fileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiFileMenuRef = useRef<HTMLDivElement | null>(null);
   const midiViewMenuRef = useRef<HTMLDivElement | null>(null);
@@ -159,7 +164,7 @@ export default function ProgramWindow({
               : id === "dnd" ? 520
                 : 300;
   const normalWidth =
-    id === "changes" ? 320 : id === "paint" ? 360 : id === "midi" ? 560 : id === "dnd" ? 560 : undefined;
+    id === "changes" ? 320 : id === "paint" ? 410 : id === "midi" ? 560 : id === "dnd" ? 560 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -261,7 +266,39 @@ export default function ProgramWindow({
   }, [id]);
 
   const toolbar =
-    id === "issues" ? (
+    id === "notepad" ? (
+      <>
+        <FileMenu
+          items={[
+            { label: "New", title: "Start a blank page", onClick: () => notepadRef.current?.newFile() },
+            {
+              label: <>Open&hellip;</>,
+              title: "Open a text file from your computer",
+              onClick: () => notepadFileInputRef.current?.click(),
+            },
+            {
+              label: "Save",
+              title: "Download this page as a text file",
+              onClick: () => {
+                const file = notepadRef.current?.save();
+                if (file) downloadBlob(file.blob, file.name);
+              },
+            },
+          ]}
+        />
+        <input
+          ref={notepadFileInputRef}
+          type="file"
+          accept=".txt,.md,.csv,.json,.log,text/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void notepadRef.current?.openFile(file);
+          }}
+        />
+      </>
+    ) : id === "issues" ? (
       <>
         <Button variant="menu" size="sm" onClick={() => issuesTreeRef.current?.expandOpen()} disabled={contentModalOpen}>
           ⚠️
@@ -766,6 +803,37 @@ export default function ProgramWindow({
       </>
     ) : id === "paint" ? (
       <>
+        <FileMenu
+          items={[
+            { label: "New", title: "Start a blank sheet", onClick: () => paintRef.current?.newFile() },
+            {
+              label: <>Open&hellip;</>,
+              title: "Open a picture from your computer",
+              onClick: () => paintFileInputRef.current?.click(),
+            },
+            {
+              label: "Save",
+              title: "Download this sheet as a PNG",
+              onClick: () => {
+                void paintRef.current?.save().then((file) => {
+                  if (file) downloadBlob(file.blob, file.name);
+                });
+              },
+            },
+          ]}
+        />
+        <input
+          ref={paintFileInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void paintRef.current?.openFile(file);
+          }}
+        />
+        <span aria-hidden style={{ display: "inline-block", width: 6, flex: "0 0 auto" }} />
         {PAINT_COLORS.map((swatch) => (
           <button
             key={swatch}
@@ -901,20 +969,7 @@ export default function ProgramWindow({
         </div>
       )}
 
-      {id === "notepad" && (
-        <div style={{ flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0 }}>
-          <TextInput
-            multiline
-            style={{
-              width: "100%",
-              height: "100%",
-              boxSizing: "border-box",
-              minWidth: 0,
-              minHeight: 0,
-            }}
-          />
-        </div>
-      )}
+      {id === "notepad" && <NotepadWindow ref={notepadRef} />}
 
       {id === "issues" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
