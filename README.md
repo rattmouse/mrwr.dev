@@ -1,19 +1,19 @@
 # mrwr.dev
 
-My personal site — `mrwr` are my initials, `dev` is my profession.
+![mrwr.dev](docs/mrwr.dev.png)
 
-A Windows-95-style desktop in the browser, built with Next.js and React and
-deployed on DigitalOcean.
+my website
+- mrwr are my initials
+- dev is my profession
 
-## Credits
+## credits
+- ui created with [react95](https://react95.io/) - https://react95.io/
+- music from [strudel.cc](https://strudel.cc) - https://strudel.cc
+- built with [Next.js](https://nextjs.org/) & [React](https://react.dev/) - https://nextjs.org/ and https://react.dev/
+- deployed on [DigitalOcean](https://www.digitalocean.com/) - https://www.digitalocean.com/
+- some help from [Chat GPT](https://chatgpt.com/) - https://chatgpt.com/
+- and a lot of help from [Codex](https://chatgpt.com/codex/) - https://chatgpt.com/codex/
+- and even more help from [Claude](https://claude.ai/) - https://claude.ai/
 
-- UI from [react95](https://react95.io/)
-- Music from [strudel.cc](https://strudel.cc)
-- Built with [Next.js](https://nextjs.org/) and [React](https://react.dev/)
-- Deployed on [DigitalOcean](https://www.digitalocean.com/)
-- Written with a lot of help from [Claude](https://claude.ai/), and some from
-  [Codex](https://chatgpt.com/codex/) and [ChatGPT](https://chatgpt.com/)
-
-## Complaints
-
-[Open an issue](https://github.com/rattmouse/mrwr.dev/issues).
+## file complaint
+add github issue to file complaint
