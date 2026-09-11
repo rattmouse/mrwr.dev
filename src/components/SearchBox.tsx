@@ -6,7 +6,7 @@ import styled from "styled-components";
 
 import { Z } from "@/constants/zIndex";
 import { useSearchPlayback } from "@/components/common/SearchPlayback";
-import { SEARCH_PROMPT_HOST, type SearchEntryLine } from "@/lib/searchPlayback";
+import type { SearchEntryLine } from "@/lib/searchPlayback";
 import type { SearchHistorySession } from "@/lib/searchHistory.types";
 import { formatRelativeCompact } from "@/lib/relativeTime";
 
@@ -74,8 +74,10 @@ const When = styled.span<{ $active: boolean }>`
   color: ${({ $active }) => ($active ? "#ffe9a8" : "#a06a00")};
 `;
 
+// Shrink but don't grow, so the caret after it trails the text instead of
+// being pushed to the row's right edge.
 const QueryText = styled.span`
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -103,7 +105,7 @@ function HistoryRow({ session, active, onHover, onPick }: HistoryRowProps) {
   const entries = useMemo(() => toPlaybackEntries(session), [session]);
   const frame = useSearchPlayback(entries);
   const text = frame?.text ?? headline(session);
-  const when = frame?.when ?? "";
+  const when = frame?.when ?? formatRelativeCompact(session.startedAt);
   const caretVisible = frame?.caretVisible ?? false;
 
   return (
@@ -119,14 +121,9 @@ function HistoryRow({ session, active, onHover, onPick }: HistoryRowProps) {
       title={session.flagged ? `blocked · ${session.categories.join(", ") || "flagged"}` : headline(session)}
     >
       {session.flagged ? <Warn aria-hidden>⚠️</Warn> : null}
-      <When $active={active}>{`@[${when}]`}</When>
-      <QueryText>
-        <span style={{ color: active ? "#cfe0ff" : "#0057d8" }}>os</span>
-        {"@"}
-        <span style={{ color: active ? "#ffc4e2" : "#a00055" }}>{SEARCH_PROMPT_HOST}</span>
-        {`: ${text}`}
-      </QueryText>
-      <span aria-hidden style={{ flex: "0 0 auto", opacity: caretVisible ? 1 : 0 }}>
+      <When $active={active}>{when}</When>
+      <QueryText>{text}</QueryText>
+      <span aria-hidden style={{ flex: "0 0 auto", marginLeft: -4, opacity: caretVisible ? 1 : 0 }}>
         ▮
       </span>
     </Row>
@@ -135,9 +132,11 @@ function HistoryRow({ session, active, onHover, onPick }: HistoryRowProps) {
 
 type SearchBoxProps = {
   history: SearchHistorySession[];
+  /** Picking a past search hands it here, with the text its row shows; the desktop decides where it opens. */
+  onOpen?: (session: SearchHistorySession, text: string) => void;
 };
 
-export default function SearchBox({ history }: SearchBoxProps) {
+export default function SearchBox({ history, onOpen }: SearchBoxProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -203,9 +202,11 @@ export default function SearchBox({ history }: SearchBoxProps) {
   };
 
   const pick = (session: SearchHistorySession) => {
-    setQuery(headline(session));
     setOpen(false);
     setActiveIndex(-1);
+    // Let go of the search box so typing lands in whatever opens, not here.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    onOpen?.(session, headline(session));
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {

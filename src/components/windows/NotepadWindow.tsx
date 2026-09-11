@@ -9,16 +9,23 @@ export type NotepadWindowHandle = {
   save: () => { blob: Blob; name: string };
 };
 
+export type NotepadDoc = { text: string; name: string };
+
+type NotepadWindowProps = {
+  /** A document handed in from elsewhere (e.g. a past search); replaces the page like File → Open. */
+  incoming?: NotepadDoc | null;
+  /** Called once `incoming` is on the page, so the caller can drop it. */
+  onIncomingApplied?: () => void;
+};
+
 const STORAGE_KEY = "mrwr:notepad";
 const UNTITLED = "untitled.txt";
 
-type Stored = { text: string; name: string };
-
-function loadStored(): Stored {
+function loadStored(): NotepadDoc {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { text: "", name: UNTITLED };
-    const parsed = JSON.parse(raw) as Partial<Stored>;
+    const parsed = JSON.parse(raw) as Partial<NotepadDoc>;
     return {
       text: typeof parsed.text === "string" ? parsed.text : "",
       name: typeof parsed.name === "string" && parsed.name ? parsed.name : UNTITLED,
@@ -28,7 +35,7 @@ function loadStored(): Stored {
   }
 }
 
-function saveStored(stored: Stored) {
+function saveStored(stored: NotepadDoc) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   } catch {
@@ -41,7 +48,10 @@ function saveStored(stored: Stored) {
  * window, refreshing, or shutting down doesn't wipe it. File → Open reads a
  * text file off disk; Save hands it back as a download.
  */
-const NotepadWindow = forwardRef<NotepadWindowHandle>(function NotepadWindow(_props, ref) {
+const NotepadWindow = forwardRef<NotepadWindowHandle, NotepadWindowProps>(function NotepadWindow(
+  { incoming, onIncomingApplied },
+  ref,
+) {
   const [text, setText] = useState("");
   const [name, setName] = useState(UNTITLED);
   const [loaded, setLoaded] = useState(false);
@@ -58,6 +68,14 @@ const NotepadWindow = forwardRef<NotepadWindowHandle>(function NotepadWindow(_pr
   useEffect(() => {
     if (loaded) saveStored({ text, name });
   }, [loaded, text, name]);
+
+  // Wait for the stored page to load first, or it would land on top of this.
+  useEffect(() => {
+    if (!loaded || !incoming) return;
+    setText(incoming.text);
+    setName(incoming.name);
+    onIncomingApplied?.();
+  }, [loaded, incoming, onIncomingApplied]);
 
   useImperativeHandle(
     ref,

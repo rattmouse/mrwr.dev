@@ -211,9 +211,11 @@ function MenuLevel({ items, onLeafClick, depth = 0 }: MenuLevelProps) {
 export default function StartMenu({
   openWindow,
   searchHistory = [],
+  onOpenSearch,
 }: {
   openWindow: (id: WindowId) => void;
   searchHistory?: SearchHistorySession[];
+  onOpenSearch?: (session: SearchHistorySession, text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -317,7 +319,7 @@ export default function StartMenu({
           )}
         </div>
 
-        <SearchBox history={searchHistory} />
+        <SearchBox history={searchHistory} onOpen={onOpenSearch} />
       </Toolbar>
     </AppBar>
   );

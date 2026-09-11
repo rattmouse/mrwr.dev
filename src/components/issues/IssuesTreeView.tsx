@@ -2,8 +2,10 @@
 
 import React, {
     forwardRef,
+    useEffect,
     useImperativeHandle,
     useMemo,
+    useRef,
     useState,
 } from "react";
 import { GroupBox, TreeLeaf } from "react95";
@@ -19,6 +21,7 @@ import {
     type SearchEntryLine,
 } from "@/lib/searchPlayback";
 import { formatRelativeCompact, replaceIsoDateTimesWithRelative } from "@/lib/relativeTime";
+import type { SearchIssueLink } from "@/lib/searchHistory.types";
 
 import styled from "styled-components";
 
@@ -283,13 +286,53 @@ function normalizeIssues(raw: unknown): Issue[] {
         });
 }
 
+// Tree node ids — shared by the tree builder and revealIssue() so the two can't drift.
+const groupNodeId = (issue: Issue) => (issue.state === "OPEN" ? "issues:open" : "issues:closed");
+const issueNodeId = (issue: Issue, idx: number) => `issue:${issue.state}:${issue.number ?? idx + 1}`;
+const commentNodeId = (issueId: string, cIdx: number, c: IssueComment) =>
+    `${issueId}:comment:${cIdx}:${c.id ?? "noid"}`;
+
+// Comments in the order the tree shows them.
+function sortedComments(issue: Issue): IssueComment[] {
+    return (issue.comments ?? [])
+        .slice()
+        .filter((c) => (c.body ?? "").trim() || c.createdAt || c.author?.login) // optional: drop fully-empty shells
+        .sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
+}
+
+/**
+ * The expanded/selected ids that open the tree on one issue — on the given
+ * comment, or on the issue body when there's no comment id (or it's gone).
+ * Null if the issue isn't in issues.json.
+ */
+function revealIssue(issues: Issue[], target: SearchIssueLink): { expanded: string[]; selected: string } | null {
+    const idx = issues.findIndex((i) => i.number === target.number);
+    if (idx < 0) return null;
+    const issue = issues[idx];
+    const issueId = issueNodeId(issue, idx);
+    const path = [groupNodeId(issue), issueId];
+
+    const comments = sortedComments(issue);
+    const cIdx = target.commentId ? comments.findIndex((c) => c.id === target.commentId) : -1;
+    if (cIdx >= 0) {
+        const commentId = commentNodeId(issueId, cIdx, comments[cIdx]);
+        // A lone comment gets a "comment" node with the text one level down;
+        // several sit under a shared "comments" node.
+        return comments.length === 1
+            ? { expanded: [...path, commentId], selected: `${commentId}:detail` }
+            : { expanded: [...path, `${issueId}:comments`], selected: commentId };
+    }
+
+    return { expanded: path, selected: (issue.body ?? "").trim() ? `${issueId}:body` : issueId };
+}
+
 function buildIssuesTree(issues: Issue[], onOpenImage: (url: string) => void): TreeLeaf<string>[] {
     const open = issues.filter((i) => i.state === "OPEN");
     const closed = issues.filter((i) => i.state === "CLOSED");
 
     const issueNode = (issue: Issue, idx: number): TreeLeaf<string> => {
         const n = issue.number ?? idx + 1;
-        const issueId = `issue:${issue.state}:${n}`;
+        const issueId = issueNodeId(issue, idx);
 
         return {
             id: issueId,
@@ -328,11 +371,7 @@ function buildIssuesTree(issues: Issue[], onOpenImage: (url: string) => void): T
                     });
                 }
 
-                // Normalize/sort comments
-                const comments = (issue.comments ?? [])
-                    .slice()
-                    .filter((c) => (c.body ?? "").trim() || c.createdAt || c.author?.login) // optional: drop fully-empty shells
-                    .sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
+                const comments = sortedComments(issue);
 
                 // Helper to format a comment label consistently
                 const formatCommentLabel = (c: IssueComment) => {
@@ -357,12 +396,12 @@ function buildIssuesTree(issues: Issue[], onOpenImage: (url: string) => void): T
                     const c = comments[0];
 
                     nodes.push({
-                        id: `${issueId}:comment:0:${c.id ?? "noid"}`,
+                        id: commentNodeId(issueId, 0, c),
                         icon: <>💬</>,
                         label: "comment",
                         items: [
                             {
-                                id: `${issueId}:comment:0:${c.id ?? "noid"}:detail`,
+                                id: `${commentNodeId(issueId, 0, c)}:detail`,
                                 label: formatCommentLabel(c),
                             },
                         ],
@@ -374,7 +413,7 @@ function buildIssuesTree(issues: Issue[], onOpenImage: (url: string) => void): T
                         label: "comments",
                         icon: <>💬</>,
                         items: comments.map((c, cIdx) => ({
-                            id: `${issueId}:comment:${cIdx}:${c.id ?? "noid"}`,
+                            id: commentNodeId(issueId, cIdx, c),
                             label: formatCommentLabel(c),
                         })),
                     });
@@ -403,6 +442,63 @@ function buildIssuesTree(issues: Issue[], onOpenImage: (url: string) => void): T
     ];
 }
 
+// Module-level on purpose: a styled component made inside render is a new
+// component type every render, which remounts the whole tree (and loses its
+// scroll position) each time.
+const TreeContainer = styled.div`
+    /* left justify */
+    text-align: left;
+
+    .tree-label {
+        text-align: left;
+        display: block;
+    }
+
+    .search-line {
+        text-align: left;
+        /* issue #29: no word wrap — long lines run on and the
+           browser pane scrolls sideways, like Notepad with Word
+           Wrap off. "pre" (not "nowrap") keeps the search-playback
+           indentation and newlines intact. */
+        white-space: pre;
+        display: block;
+        width: 100%;
+    }
+
+    .search-line-with-gutter {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.2em;
+    }
+
+    .body-inline-icon-slot {
+        width: 1.2em;
+        display: inline-flex;
+        justify-content: center;
+        align-items: flex-start;
+        flex: 0 0 1.2em;
+    }
+
+    .search-line-text {
+        display: block;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    .body-inline-icon {
+        display: inline-flex;
+        align-items: flex-start;
+        justify-content: center;
+        width: 1.1em;
+        line-height: 1;
+        margin-left: -0.45em;
+    }
+
+    li {
+        text-align: left;
+    }
+`;
+
 export type IssuesTreeViewHandle = {
     expandAll: () => void;
     collapseAll: () => void;
@@ -424,6 +520,10 @@ type Props = {
     modalHideTitleBar?: boolean;
     initialSelected?: string;
     initialExpanded?: string[];
+    /** Open the tree on this issue (and comment), select it and scroll to it. */
+    reveal?: SearchIssueLink | null;
+    /** Called once `reveal` has been applied, so the caller can drop it. */
+    onRevealed?: () => void;
 };
 
 const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
@@ -440,6 +540,8 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             modalHideTitleBar = false,
             initialSelected = "issues:open",
             initialExpanded = ["issues:open"],
+            reveal,
+            onRevealed,
         },
         ref
     ) {
@@ -466,6 +568,29 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
 
         const [selected, setSelected] = useState<string[]>([initialSelected]);
         const [expanded, setExpanded] = useState<string[]>(initialExpanded);
+        const treeRef = useRef<HTMLDivElement | null>(null);
+        // The node a reveal wants scrolled into view, once it's on screen.
+        const scrollTargetRef = useRef<string | null>(null);
+
+        useEffect(() => {
+            if (!reveal) return;
+            const path = revealIssue(issues, reveal);
+            if (path) {
+                setExpanded(path.expanded);
+                setSelected([path.selected]);
+                scrollTargetRef.current = path.selected;
+            }
+            onRevealed?.();
+        }, [reveal, issues, onRevealed]);
+
+        // Scroll only once the render showing the reveal has landed. On mount
+        // this effect also runs in the same pass as the one above, before the
+        // tree has re-rendered, so check that the target is actually selected.
+        useEffect(() => {
+            if (!scrollTargetRef.current || selected[0] !== scrollTargetRef.current) return;
+            scrollTargetRef.current = null;
+            treeRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "start" });
+        }, [selected, expanded]);
 
         useImperativeHandle(
             ref,
@@ -480,63 +605,9 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
             [allIds, openIds, closedIds, selected, initialSelected]
         );
 
-        const TreeContainer = styled.div`
-            /* left justify */
-            text-align: left;
-
-            .tree-label {
-                text-align: left;
-                display: block;
-            }
-
-            .search-line {
-                text-align: left;
-                /* issue #29: no word wrap — long lines run on and the
-                   browser pane scrolls sideways, like Notepad with Word
-                   Wrap off. "pre" (not "nowrap") keeps the search-playback
-                   indentation and newlines intact. */
-                white-space: pre;
-                display: block;
-                width: 100%;
-            }
-
-            .search-line-with-gutter {
-                display: flex;
-                align-items: flex-start;
-                gap: 0.2em;
-            }
-
-            .body-inline-icon-slot {
-                width: 1.2em;
-                display: inline-flex;
-                justify-content: center;
-                align-items: flex-start;
-                flex: 0 0 1.2em;
-            }
-
-            .search-line-text {
-                display: block;
-                min-width: 0;
-                flex: 1 1 auto;
-            }
-
-            .body-inline-icon {
-                display: inline-flex;
-                align-items: flex-start;
-                justify-content: center;
-                width: 1.1em;
-                line-height: 1;
-                margin-left: -0.45em;
-            }
-
-            li {
-                text-align: left;
-            }
-        `;
-
         type PatchedTreeViewProps = {
             tree?: TreeLeaf<string>[];
-            selected?: string[];
+            selected?: string;
             expanded?: string[];
             onNodeSelect?: (event: unknown, idOrIds: unknown) => void;
             onNodeToggle?: (event: unknown, ids: string[]) => void;
@@ -544,11 +615,12 @@ const IssuesTreeView = forwardRef<IssuesTreeViewHandle, Props>(
         const PatchedTreeView = TreeView as unknown as React.ComponentType<PatchedTreeViewProps>;
 
         const content = (
-            <div style={{ overflow: "auto", padding: 2 }}>
+            <div ref={treeRef} style={{ overflow: "auto", padding: 2 }}>
                 <TreeContainer>
                     <PatchedTreeView
                         tree={tree}
-                        selected={selected}
+                        // The tree matches one id (`selected === item.id`), not an array.
+                        selected={selected[0]}
                         expanded={expanded}
                         onNodeSelect={(_event: unknown, idOrIds: unknown) => {
                             const next = normalizeSelected(idOrIds, selected[0] ?? initialSelected);

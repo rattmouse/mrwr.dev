@@ -17,6 +17,13 @@ export type SearchHistoryEntry = {
   categories?: string[];
 };
 
+/** Where a search ended up: the issue whose body or comment quotes its keystroke log. */
+export type SearchIssueLink = {
+  number: number;
+  /** Set when the log is in a comment rather than the issue body. */
+  commentId?: string;
+};
+
 export type SearchHistorySession = {
   /** Stable id: `${browserSession}:${firstEntryTimestamp}`. */
   id: string;
@@ -28,4 +35,6 @@ export type SearchHistorySession = {
   /** Union of every flagged entry's categories, deduped. */
   categories: string[];
   entries: SearchHistoryEntry[];
+  /** Resolved at build time from issues.json; absent if the search never became an issue. */
+  issue?: SearchIssueLink;
 };

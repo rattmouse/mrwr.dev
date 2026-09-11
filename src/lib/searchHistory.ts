@@ -1,12 +1,28 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { SearchHistoryEntry, SearchHistorySession } from "@/lib/searchHistory.types";
+import type {
+  SearchHistoryEntry,
+  SearchHistorySession,
+  SearchIssueLink,
+} from "@/lib/searchHistory.types";
 
 // Read at build time only. Missing/empty/corrupt file -> [] so `next dev` and a
 // plain `next build` work before the first refresh-search-history.sh run, the
 // same way the site tolerates a stale issues.json.
 const DATA_PATH = resolve(process.cwd(), "src/data/search-history.json");
+const ISSUES_PATH = resolve(process.cwd(), "src/data/issues.json");
+
+// The `@ <ISO>` stamp on each line of a keystroke log quoted into an issue.
+const LOG_STAMP = /@\s*(\d{4}-\d{2}-\d{2}T[^\s]+)/g;
+
+function readJson(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -74,26 +90,71 @@ function normalizeSession(raw: unknown): SearchHistorySession | null {
   };
 }
 
+// One issue body or comment that quotes a keystroke log.
+type LogQuote = { link: SearchIssueLink; atMs: number; stamps: Set<string> };
+
+// A search that became an issue has its keystroke log (`- 'query' @ <ISO> +Nms`)
+// quoted in the issue body or a comment. Collect every such quote so a session
+// can find its way back there.
+function collectLogQuotes(): LogQuote[] {
+  const quotes: LogQuote[] = [];
+  const issues = readJson(ISSUES_PATH);
+  if (!Array.isArray(issues)) return quotes;
+
+  const add = (text: unknown, createdAt: unknown, link: SearchIssueLink) => {
+    if (typeof text !== "string") return;
+    const stamps = new Set(Array.from(text.matchAll(LOG_STAMP), (m) => m[1]));
+    if (stamps.size === 0) return;
+    const atMs = typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
+    quotes.push({ link, atMs: Number.isFinite(atMs) ? atMs : Number.POSITIVE_INFINITY, stamps });
+  };
+
+  for (const raw of issues) {
+    if (!raw || typeof raw !== "object") continue;
+    const issue = raw as Record<string, unknown>;
+    const number = issue.number;
+    if (typeof number !== "number") continue;
+
+    add(issue.body, issue.createdAt, { number });
+    if (!Array.isArray(issue.comments)) continue;
+    for (const comment of issue.comments) {
+      if (!comment || typeof comment !== "object") continue;
+      const c = comment as Record<string, unknown>;
+      add(c.body, c.createdAt, typeof c.id === "string" ? { number, commentId: c.id } : { number });
+    }
+  }
+  return quotes;
+}
+
+// The same log can be quoted in more than one place (e.g. pasted into a
+// meta-issue as an example). Take the quote with the most of this session's
+// keystrokes, then the earliest — where the search was first filed.
+function findIssue(session: SearchHistorySession, quotes: LogQuote[]): SearchIssueLink | undefined {
+  let best: LogQuote | undefined;
+  let bestHits = 0;
+  for (const quote of quotes) {
+    const hits = session.entries.filter((e) => quote.stamps.has(e.at)).length;
+    if (hits > bestHits || (hits > 0 && hits === bestHits && best && quote.atMs < best.atMs)) {
+      best = quote;
+      bestHits = hits;
+    }
+  }
+  return best?.link;
+}
+
 export function getSearchHistory(): SearchHistorySession[] {
-  let text: string;
-  try {
-    text = readFileSync(DATA_PATH, "utf8");
-  } catch {
-    return [];
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return [];
-  }
-
+  const parsed = readJson(DATA_PATH);
   if (!Array.isArray(parsed)) return [];
 
   const sessions = parsed
     .map(normalizeSession)
     .filter((s): s is SearchHistorySession => s !== null);
+
+  const quotes = collectLogQuotes();
+  for (const session of sessions) {
+    const link = findIssue(session, quotes);
+    if (link) session.issue = link;
+  }
 
   // Newest first.
   sessions.sort((a, b) => {
