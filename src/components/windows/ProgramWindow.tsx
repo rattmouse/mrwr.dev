@@ -157,14 +157,14 @@ export default function ProgramWindow({
 
   const normalHeight =
     id === "welcome" ? 160
-      : id === "changes" ? 360
+      : id === "changes" ? 420
         : id === "music" ? 220
           : id === "midi" ? 480
             : id === "paint" ? 320
               : id === "dnd" ? 520
                 : 300;
   const normalWidth =
-    id === "changes" ? 320 : id === "paint" ? 410 : id === "midi" ? 560 : id === "dnd" ? 560 : undefined;
+    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "dnd" ? 560 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
