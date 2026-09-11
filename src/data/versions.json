@@ -11,7 +11,8 @@
       "issues": [12],
       "changes": [
         "Notepad and Paint remember what you left in them — closing the window, refreshing or shutting down no longer wipes the page — and both have a File menu to start fresh, open a file from your computer, or save your work as a download",
-        "This window is easier to read: every change gets its own bullet with room around it, each version shows its name, and older versions fold down to one line — click one to open it"
+        "This window is easier to read: every change gets its own bullet with room around it, each version shows its name, and older versions fold down to one line — click one to open it",
+        "Past searches that shouldn't be on show can be taken out of the search box's history, and they stay out after every update"
       ]
     },
     {

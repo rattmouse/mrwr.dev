@@ -14,7 +14,10 @@ Orientation notes for working in this repo.
   deal: gitignored, build-time only, refreshed by
   `scripts/content/refresh-search-history.sh` — which `deploy.sh` also runs
   before every build. It pulls the prod search-log archive over ssh; a failure
-  is non-fatal (ships an empty history).
+  is non-fatal (ships an empty history). It also pulls the hide list
+  (`$PROD_BASE/shared/search-history-hidden.json`, edited with
+  `scripts/content/hide-search-history.sh`) and leaves those sessions out. The
+  list lives on prod, not in the repo, so it applies whichever machine deploys.
 - `src/data/projects.json` + `public/projects/remote/` (GitHub descriptions and
   README images for the Projects window) are the same deal again: gitignored,
   build-time only, refreshed by `scripts/content/refresh-projects.sh` (also run

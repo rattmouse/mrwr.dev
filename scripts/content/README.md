@@ -122,6 +122,26 @@ scripts/content/refresh-search-history.sh --since 2026-08-01
 scripts/content/refresh-search-history.sh --max-sessions 100
 ```
 
+### `hide-search-history.sh` — keep a session out of the dropdown
+
+Because the history file is rebuilt before every deploy, deleting a session from
+it by hand doesn't stick. Hide it instead: the session id (the `id` field in
+`search-history.json`) goes into a hide list on prod,
+`$PROD_BASE/shared/search-history-hidden.json`, next to the archive.
+`refresh-search-history.sh` fetches that list along with the archive and leaves
+those sessions out, so they stay hidden whichever machine deploys. If the
+archive is reachable but the hide list isn't, it ships an empty history rather
+than resurface them. `add` also strips the session from the local file right
+away. The archive itself is never touched, so `search-to-issue.sh` still sees
+hidden sessions.
+
+```
+scripts/content/hide-search-history.sh list
+scripts/content/hide-search-history.sh add '<session-id>' ...
+scripts/content/hide-search-history.sh remove '<session-id>' ...   # back on next refresh
+scripts/content/hide-search-history.sh --file ./hidden.json list    # local list, no ssh
+```
+
 ### Malicious searches
 
 `search-guard.js` (repo root, next to `server.js`) classifies a query as
