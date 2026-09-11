@@ -1,6 +1,6 @@
 "use client";
 
-import React, { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { TextInput } from "react95";
 
 export type NotepadWindowHandle = {
@@ -9,16 +9,29 @@ export type NotepadWindowHandle = {
   save: () => { blob: Blob; name: string };
 };
 
+export type NotepadDoc = { text: string; name: string };
+
+/**
+ * Text handed in from elsewhere (e.g. a past search). Replaces the page like
+ * File → Open, or with `append`, goes on a new line at the end and keeps the
+ * page's name.
+ */
+export type NotepadIncoming = NotepadDoc & { append?: boolean };
+
+type NotepadWindowProps = {
+  incoming?: NotepadIncoming | null;
+  /** Called once `incoming` is on the page, so the caller can drop it. */
+  onIncomingApplied?: () => void;
+};
+
 const STORAGE_KEY = "mrwr:notepad";
 const UNTITLED = "untitled.txt";
 
-type Stored = { text: string; name: string };
-
-function loadStored(): Stored {
+function loadStored(): NotepadDoc {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { text: "", name: UNTITLED };
-    const parsed = JSON.parse(raw) as Partial<Stored>;
+    const parsed = JSON.parse(raw) as Partial<NotepadDoc>;
     return {
       text: typeof parsed.text === "string" ? parsed.text : "",
       name: typeof parsed.name === "string" && parsed.name ? parsed.name : UNTITLED,
@@ -28,7 +41,7 @@ function loadStored(): Stored {
   }
 }
 
-function saveStored(stored: Stored) {
+function saveStored(stored: NotepadDoc) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   } catch {
@@ -41,7 +54,10 @@ function saveStored(stored: Stored) {
  * window, refreshing, or shutting down doesn't wipe it. File → Open reads a
  * text file off disk; Save hands it back as a download.
  */
-const NotepadWindow = forwardRef<NotepadWindowHandle>(function NotepadWindow(_props, ref) {
+const NotepadWindow = forwardRef<NotepadWindowHandle, NotepadWindowProps>(function NotepadWindow(
+  { incoming, onIncomingApplied },
+  ref,
+) {
   const [text, setText] = useState("");
   const [name, setName] = useState(UNTITLED);
   const [loaded, setLoaded] = useState(false);
@@ -58,6 +74,30 @@ const NotepadWindow = forwardRef<NotepadWindowHandle>(function NotepadWindow(_pr
   useEffect(() => {
     if (loaded) saveStored({ text, name });
   }, [loaded, text, name]);
+
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const scrollToEndRef = useRef(false);
+
+  // Wait for the stored page to load first, or it would land on top of this.
+  useEffect(() => {
+    if (!loaded || !incoming) return;
+    if (incoming.append) {
+      setText((prev) => (prev && !prev.endsWith("\n") ? `${prev}\n${incoming.text}` : prev + incoming.text));
+      scrollToEndRef.current = true;
+    } else {
+      setText(incoming.text);
+      setName(incoming.name);
+    }
+    onIncomingApplied?.();
+  }, [loaded, incoming, onIncomingApplied]);
+
+  // After an append renders, scroll the page down to show it.
+  useEffect(() => {
+    if (!scrollToEndRef.current) return;
+    scrollToEndRef.current = false;
+    const textarea = wrapperRef.current?.querySelector("textarea");
+    if (textarea) textarea.scrollTop = textarea.scrollHeight;
+  }, [text]);
 
   useImperativeHandle(
     ref,
@@ -76,7 +116,7 @@ const NotepadWindow = forwardRef<NotepadWindowHandle>(function NotepadWindow(_pr
   );
 
   return (
-    <div style={{ flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0 }}>
+    <div ref={wrapperRef} style={{ flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0 }}>
       <TextInput
         multiline
         value={text}

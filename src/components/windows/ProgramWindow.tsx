@@ -15,10 +15,11 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import DndWindow, { DndWindowHandle } from "@/components/windows/DndWindow";
-import NotepadWindow, { NotepadWindowHandle } from "@/components/windows/NotepadWindow";
+import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
+import type { SearchIssueLink } from "@/lib/searchHistory.types";
 import strudelSongs from "@/data/strudelSongs.json";
 
 const SONG_ICON_FILES = [
@@ -63,6 +64,10 @@ type ProgramWindowProps = {
   id: ProgramWindowId;
   layout: Layout;
   versions: VersionEntry[];
+  notepadDoc?: NotepadIncoming | null;
+  onNotepadDocApplied?: () => void;
+  issueReveal?: SearchIssueLink | null;
+  onIssueRevealed?: () => void;
   onClose: () => void;
   onMinimize: () => void;
   onRestore: () => void;
@@ -73,6 +78,10 @@ export default function ProgramWindow({
   id,
   layout,
   versions,
+  notepadDoc,
+  onNotepadDocApplied,
+  issueReveal,
+  onIssueRevealed,
   onClose,
   onMinimize,
   onRestore,
@@ -969,7 +978,9 @@ export default function ProgramWindow({
         </div>
       )}
 
-      {id === "notepad" && <NotepadWindow ref={notepadRef} />}
+      {id === "notepad" && (
+        <NotepadWindow ref={notepadRef} incoming={notepadDoc} onIncomingApplied={onNotepadDocApplied} />
+      )}
 
       {id === "issues" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
@@ -984,6 +995,8 @@ export default function ProgramWindow({
               modalFakePreviewOnly={useFakePreviewOnly}
               openImagesInNewTab={openImagesInNewTab}
               modalHideTitleBar={modalHideTitleBar}
+              reveal={issueReveal}
+              onRevealed={onIssueRevealed}
             />
           </ScrollView>
         </div>
