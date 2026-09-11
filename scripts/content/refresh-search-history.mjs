@@ -26,6 +26,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
 
+// Sessions on the hide list (--hidden; see hide-search-history.sh) never make it
+// into the file.
+import { loadHiddenIds } from "./hide-search-history.mjs";
+
 const require = createRequire(import.meta.url);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "../..");
@@ -47,10 +51,11 @@ function warn(msg) {
 }
 
 function parseArgs(argv) {
-  const args = { records: "", since: "", maxSessions: DEFAULT_MAX_SESSIONS, idleGap: DEFAULT_IDLE_GAP_S };
+  const args = { records: "", hidden: "", since: "", maxSessions: DEFAULT_MAX_SESSIONS, idleGap: DEFAULT_IDLE_GAP_S };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--records" && argv[i + 1]) { args.records = argv[++i]; continue; }
+    if (arg === "--hidden" && argv[i + 1]) { args.hidden = argv[++i]; continue; }
     if (arg === "--since" && argv[i + 1]) { args.since = argv[++i]; continue; }
     if (arg === "--idle-gap" && argv[i + 1]) {
       const n = Number.parseInt(argv[++i], 10);
@@ -203,8 +208,22 @@ function main() {
     return 0;
   }
 
-  const sessions = group(records, args.idleGap)
-    .map(toSession)
+  // Fail closed: if the hide list can't be read, ship nothing rather than
+  // resurface sessions that were meant to stay hidden.
+  let hiddenIds = new Set();
+  if (args.hidden) {
+    try {
+      hiddenIds = loadHiddenIds(args.hidden);
+    } catch (err) {
+      warn(`could not read hide list ${args.hidden}: ${err.message}; writing []`);
+      writeFileSync(OUT_PATH, "[]\n");
+      return 0;
+    }
+  }
+
+  const grouped = group(records, args.idleGap).map(toSession);
+  const visible = grouped.filter((s) => !hiddenIds.has(s.id));
+  const sessions = visible
     .sort((a, b) => {
       const av = parseIsoMs(a.startedAt);
       const bv = parseIsoMs(b.startedAt);
@@ -217,7 +236,7 @@ function main() {
   const flagged = sessions.filter((s) => s.flagged).length;
   process.stderr.write(
     `refresh-search-history: ${records.length} records -> ${sessions.length} sessions ` +
-      `(${flagged} flagged) -> ${OUT_PATH}\n`
+      `(${flagged} flagged, ${grouped.length - visible.length} hidden) -> ${OUT_PATH}\n`
   );
   return 0;
 }
