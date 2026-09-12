@@ -12,10 +12,11 @@ FROM docker.io/library/node:22-bookworm-slim
 # git      — deploy.sh checks the working tree is clean and on main
 # openssh-client + rsync — how deploy.sh reaches prod
 # ca-certificates + curl — npm registry, GitHub, the health check
+# python3  — scripts/content/search_to_issue.py, the search-triage tool
 # jq       — handy inside the container when poking at the json data files
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      git openssh-client rsync ca-certificates curl jq tini \
+      git openssh-client rsync ca-certificates curl python3 jq tini \
  && rm -rf /var/lib/apt/lists/*
 
 # The GitHub CLI, pinned. refresh-issues.sh and link-prs.mjs both shell out
