@@ -22,6 +22,10 @@ it to the machine was the problem:
 The image pins Node 22 and a current `gh`, so any machine with Podman can
 build and deploy this identically, regardless of what it has installed.
 
+**New to this? Start with [USAGE.md](USAGE.md)** — the same setup written as
+step-by-step instructions, with a troubleshooting section and a cheat sheet.
+This file is the reference for how it works and why.
+
 ## Quick start
 
 ```

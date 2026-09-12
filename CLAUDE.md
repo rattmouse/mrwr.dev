@@ -4,7 +4,8 @@ Orientation notes for working in this repo.
 
 ## Containers (Podman)
 
-- The build/deploy toolchain is containerised — see `containers/README.md`.
+- The build/deploy toolchain is containerised — see `containers/README.md`
+  for how it works and `containers/USAGE.md` for step-by-step instructions.
   `containers/ci.sh` is the front end: `dev` (dev server on :3000), `ci`
   (refresh + install + lint + build, the pre-PR check), `deploy`, `shell`,
   `exec`. Also as npm scripts: `container:dev`, `container:ci`,
