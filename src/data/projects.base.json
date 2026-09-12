@@ -10,6 +10,16 @@
     "thumb": "/projects/thumbs/cairn.webp"
   },
   {
+    "slug": "midi-scope",
+    "name": "midi-scope",
+    "kind": "MIDI analyser & tone generator",
+    "blurb": "A live MIDI analyser — a waveform scope, pitch detection against any reference tuning, and a GPU spectrogram you fly through in 3D — with a tone generator you play from the on-screen keys, the pads, or your controller's knobs.",
+    "built": "TypeScript · Web MIDI · Web Audio · WebGL2",
+    "closedSource": true,
+    "thumb": "/projects/thumbs/midi-scope.webp",
+    "shot": "/midi-scope.png"
+  },
+  {
     "slug": "mrwr-dev",
     "name": "mrwr.dev",
     "kind": "this website",
