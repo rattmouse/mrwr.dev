@@ -2,11 +2,35 @@
 
 Orientation notes for working in this repo.
 
+## Containers (Podman)
+
+- The build/deploy toolchain is containerised — see `containers/README.md`
+  for how it works and `containers/USAGE.md` for step-by-step instructions.
+  `containers/ci.sh` is the front end: `dev` (dev server on :3000), `ci`
+  (refresh + install + lint + build, the pre-PR check), `deploy`, `shell`,
+  `exec`. Also as npm scripts: `container:dev`, `container:ci`,
+  `container:deploy`.
+- **Prefer the container over the host toolchain on Linux.** Falcon's system
+  Node is 18 (Next 16 needs ≥ 20.9) and its apt `gh` is 2.45, too old for the
+  `stateReason` and `closingIssuesReferences` fields the content scripts ask
+  GitHub for. The image pins Node 22 and a current `gh`, so a build there
+  actually works and matches what gets deployed.
+- Rootless, `--userns=keep-id`, repo bind-mounted at `/workspace` — output
+  lands in your tree owned by you. `node_modules`, `.next` and the npm cache
+  live in named volumes so the container never collides with a host install.
+- `ci` runs eslint report-only (full output to the gitignored
+  `.deploy/lint.txt`) because the tree already has ~6,100 findings. The build
+  is the gate, and it type-checks.
+- `~/.ssh` goes in read-only and is copied into the container's own HOME;
+  GitHub auth is passed as `GH_TOKEN` from the host's keyring. Don't mount
+  `~/.config/gh` — a copied tokenless `hosts.yml` makes `gh auth status` fail.
+
 ## Deploying
 
 - **"Deploy" means `main`, fast-forwarded to `origin`** — not the current feature
-  branch. Ship with `npm run deploy` (`scripts/deploy/deploy.sh`); see
-  `scripts/deploy/README.md`.
+  branch. Ship with `npm run deploy` (`scripts/deploy/deploy.sh`), or
+  `npm run container:deploy` to run that same script inside the container; see
+  `scripts/deploy/README.md` and `containers/README.md`.
 - `src/data/issues.json` is gitignored and read **only at build time**. The site
   never calls GitHub (or anything else) at runtime. `scripts/deploy/deploy.sh`
   runs `scripts/content/refresh-issues.sh` before every build to refresh it.
