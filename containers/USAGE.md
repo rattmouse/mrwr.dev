@@ -1,7 +1,8 @@
 # Using the containers, step by step
 
-A manual for driving the Podman setup by hand. `README.md` next to this file
-explains how it's built and why; this one is just "what do I type".
+A manual for driving the Podman setup by hand — what to actually type. The
+background on how the image is built and why it exists lives outside the repo
+now, in the project notes.
 
 Everything below is run from the repo root, as your normal user. Nothing here
 needs `sudo` — it's all rootless.

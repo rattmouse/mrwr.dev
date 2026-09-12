@@ -4,9 +4,8 @@ Orientation notes for working in this repo.
 
 ## Containers (Podman)
 
-- The build/deploy toolchain is containerised — see `containers/README.md`
-  for how it works and `containers/USAGE.md` for step-by-step instructions.
-  `containers/ci.sh` is the front end: `dev` (dev server on :3000), `ci`
+- The build/deploy toolchain is containerised — see `containers/USAGE.md`
+  for step-by-step instructions. `containers/ci.sh` is the front end: `dev` (dev server on :3000), `ci`
   (refresh + install + lint + build, the pre-PR check), `deploy`, `shell`,
   `exec`. Also as npm scripts: `container:dev`, `container:ci`,
   `container:deploy`.
@@ -30,7 +29,7 @@ Orientation notes for working in this repo.
 - **"Deploy" means `main`, fast-forwarded to `origin`** — not the current feature
   branch. Ship with `npm run deploy` (`scripts/deploy/deploy.sh`), or
   `npm run container:deploy` to run that same script inside the container; see
-  `scripts/deploy/README.md` and `containers/README.md`.
+  `scripts/deploy/README.md` and `containers/USAGE.md`.
 - `src/data/issues.json` is gitignored and read **only at build time**. The site
   never calls GitHub (or anything else) at runtime. `scripts/deploy/deploy.sh`
   runs `scripts/content/refresh-issues.sh` before every build to refresh it.
