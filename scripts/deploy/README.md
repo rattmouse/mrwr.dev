@@ -10,6 +10,13 @@ then run these scripts from Kubuntu to actually test-build and deploy. Any
 machine with Node, npm, ssh, and rsync can run them, though — nothing here
 is Kubuntu-specific.
 
+**In a container instead:** `npm run container:deploy` runs `deploy.sh`
+below, unchanged, inside a Podman container that carries its own Node 22 and
+`gh`. That's the easier path on a machine whose own toolchain is too old to
+build the app — which is every Linux box here with a system Node 18. Same
+releases, same health check, same rollback; the container only supplies the
+toolchain and the credentials. See `containers/README.md`.
+
 ## How it works
 
 ```

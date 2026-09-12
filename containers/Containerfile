@@ -1,0 +1,49 @@
+# One image, two roles: the dev container you work in and the deploy
+# container that ships to prod. Same toolchain for both, on purpose — what
+# builds here is exactly what gets deployed, and neither depends on
+# whatever Node/gh the host happens to have. (Falcon's system node is 18,
+# too old for Next 16, and its apt gh is 2.45, too old for the
+# `stateReason` field scripts/content/refresh-issues.sh asks GitHub for.)
+#
+# Build it with: containers/ci.sh image
+
+FROM docker.io/library/node:22-bookworm-slim
+
+# git      — deploy.sh checks the working tree is clean and on main
+# openssh-client + rsync — how deploy.sh reaches prod
+# ca-certificates + curl — npm registry, GitHub, the health check
+# jq       — handy inside the container when poking at the json data files
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      git openssh-client rsync ca-certificates curl jq tini \
+ && rm -rf /var/lib/apt/lists/*
+
+# The GitHub CLI, pinned. refresh-issues.sh and link-prs.mjs both shell out
+# to it, and it must be new enough to understand `stateReason`.
+ARG GH_VERSION=2.100.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    curl -fsSL -o /tmp/gh.tar.gz \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz"; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${arch}"; \
+    gh --version
+
+# The node:22 image already has a `node` user at uid 1000, which lines up
+# with the host user under `podman run --userns=keep-id` — so files the
+# container writes into the bind-mounted repo (out/, src/data/*.json) come
+# out owned by you, not by root.
+WORKDIR /workspace
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NEXT_TELEMETRY_DISABLED=1
+
+USER node
+
+# tini reaps `next dev`'s children so `podman stop` is clean.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["bash"]
