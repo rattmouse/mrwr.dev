@@ -184,6 +184,11 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
 ) {
   const [roster, setRoster] = useState<Roster>([]);
   const [draft, setDraft] = useState<Character>(() => freshCharacter());
+  // Unsaved edits to party members who aren't on the sheet right now, by id,
+  // so clicking between characters never throws work away.
+  const [stash, setStash] = useState<Record<string, Character>>({});
+  // A new, never-saved character set aside while a party member is on the sheet.
+  const [pending, setPending] = useState<Character | null>(null);
   const [loaded, setLoaded] = useState(false);
   // When the current party walks off, or null while there is no party.
   const [departsAt, setDepartsAt] = useState<number | null>(null);
@@ -244,6 +249,7 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
       : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     setDeparting({ members: roster, from });
     setRoster([]);
+    setStash({});
     setDeparted(true);
   }, [roster]);
 
@@ -272,6 +278,22 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
     setDraft((prev) => ({ ...prev, ...changes }));
   }, []);
 
+  // Put someone else on the sheet, setting the current sheet's edits aside
+  // (and picking up any that were set aside for them).
+  const select = (c: Character) => {
+    if (c.id === draft.id) return;
+    const fromPending = pending?.id === c.id;
+    if (!isSaved) setPending(draft);
+    else if (fromPending) setPending(null);
+    setStash((prev) => {
+      const next = { ...prev };
+      if (isSaved && isDirty) next[draft.id] = draft;
+      delete next[c.id];
+      return next;
+    });
+    setDraft(fromPending ? c : (stash[c.id] ?? c));
+  };
+
   const setScore = (ability: Ability, value: number) => {
     const clamped = Math.max(1, Math.min(30, Math.round(value)));
     setDraft((prev) => ({ ...prev, scores: { ...prev.scores, [ability]: clamped } }));
@@ -280,7 +302,11 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
   useImperativeHandle(
     ref,
     () => ({
-      newCharacter: () => setDraft(freshCharacter()),
+      newCharacter: () => {
+        if (isSaved && isDirty) setStash((prev) => ({ ...prev, [draft.id]: draft }));
+        setPending(null);
+        setDraft(freshCharacter());
+      },
       rollScores: () => setDraft((prev) => ({ ...prev, scores: rollAllScores() })),
       save: () => {
         const trimmed = { ...draft, name: draft.name.trim() || randomName() };
@@ -296,12 +322,25 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
         const idx = roster.findIndex((c) => c.id === draft.id);
         if (idx === -1) return;
         const next = roster.filter((c) => c.id !== draft.id);
+        const neighbour = next[Math.min(idx, next.length - 1)];
         setRoster(next);
-        setDraft(next[Math.min(idx, next.length - 1)] ?? freshCharacter());
+        if (neighbour) {
+          setDraft(stash[neighbour.id] ?? neighbour);
+          setStash((prev) => {
+            const rest = { ...prev };
+            delete rest[draft.id];
+            delete rest[neighbour.id];
+            return rest;
+          });
+        } else {
+          setDraft(pending ?? freshCharacter());
+          setPending(null);
+          setStash({});
+        }
       },
       depart,
     }),
-    [draft, roster, depart],
+    [draft, roster, depart, isSaved, isDirty, stash, pending],
   );
 
   const hp = hitPoints(draft);
@@ -339,7 +378,7 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
                   key={c.id}
                   role="option"
                   aria-selected={selected}
-                  onClick={() => setDraft(c)}
+                  onClick={() => select(c)}
                   style={{
                     padding: "2px 6px",
                     cursor: "pointer",
@@ -357,6 +396,7 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
                     style={{ display: "inline-block", verticalAlign: "-3px", marginRight: 5 }}
                   />
                   {c.name}
+                  {(selected ? isDirty : c.id in stash) && " *"}
                   <span style={{ opacity: 0.75 }}>
                     {" · "}
                     {c.cls} {c.level}
@@ -364,28 +404,35 @@ const DndWindow = forwardRef<DndWindowHandle, DndWindowProps>(function DndWindow
                 </div>
               );
             })}
-            {!isSaved && (
-              <div
-                role="option"
-                aria-selected
-                style={{
-                  padding: "2px 6px",
-                  background: "#000080",
-                  color: "#ffffff",
-                  fontStyle: "italic",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                <DndPortrait
-                  character={draft}
-                  size={16}
-                  style={{ display: "inline-block", verticalAlign: "-3px", marginRight: 5 }}
-                />
-                {draft.name.trim() || "unnamed"} (unsaved)
-              </div>
-            )}
+            {(isSaved ? [pending] : [pending, draft]).map((c) => {
+              if (!c) return null;
+              const selected = c.id === draft.id;
+              return (
+                <div
+                  key={c.id}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => select(c)}
+                  style={{
+                    padding: "2px 6px",
+                    cursor: selected ? "default" : "pointer",
+                    background: selected ? "#000080" : "transparent",
+                    color: selected ? "#ffffff" : "inherit",
+                    fontStyle: "italic",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  <DndPortrait
+                    character={c}
+                    size={16}
+                    style={{ display: "inline-block", verticalAlign: "-3px", marginRight: 5 }}
+                  />
+                  {c.name.trim() || "unnamed"} (unsaved)
+                </div>
+              );
+            })}
           </div>
         </ScrollView>
         {countdown && (
