@@ -58,19 +58,23 @@ export default function DesktopWindow({
   const MIN_W = 220;
   const MIN_H = 130;
 
-  // In the normal layout the window is centred with a transform. The first drag
-  // — of the title bar or of the resize grip — freezes it to an explicit
-  // top-left + size so the corner pulls and the window moves naturally; this
-  // override is cleared whenever the layout changes or a different window takes
-  // over the frame, so positions and sizes never persist.
-  const [box, setBox] = useState<
-    { left: number; top: number; width: number; height: number } | null
-  >(null);
+  // In the normal layout the window is centred with a transform. The first
+  // finished drag — of the title bar or of the resize grip — freezes it to an
+  // explicit top-left + size; this override is cleared whenever the layout
+  // changes or a different window takes over the frame, so positions and sizes
+  // never persist.
+  type Box = { left: number; top: number; width: number; height: number };
+  const [box, setBox] = useState<Box | null>(null);
+  // Like Windows 95, a drag doesn't move the window itself: a dotted outline
+  // follows the pointer and the window jumps there when you let go. Escape (or a
+  // cancelled pointer) drops the outline and leaves the window where it was.
+  const [ghost, setGhost] = useState<Box | null>(null);
   const gripRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setBox(null);
+    setGhost(null);
   }, [layout, title, normalWidth, normalHeight]);
 
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -80,84 +84,84 @@ export default function DesktopWindow({
   // strand it there.
   const KEEP_ON_SCREEN = 60;
 
+  const trackOutline = (
+    e: React.PointerEvent<HTMLDivElement>,
+    frame: HTMLElement,
+    cursor: string,
+    place: (base: Box, dx: number, dy: number) => Box,
+  ) => {
+    e.preventDefault();
+
+    const rect = frame.getBoundingClientRect();
+    const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let latest: Box | null = null;
+
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = cursor;
+
+    const onMove = (ev: PointerEvent) => {
+      latest = place(base, ev.clientX - startX, ev.clientY - startY);
+      setGhost(latest);
+    };
+    const finish = (commit: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKey);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+      setGhost(null);
+      if (commit && latest) setBox(latest);
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") finish(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKey);
+  };
+
   const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isMax || isDocked || controlsDisabled) return;
     // The title-bar controls are buttons first and drag handles never.
     if ((e.target as HTMLElement).closest("button")) return;
     const frame = headerRef.current?.parentElement;
     if (!frame) return;
-    e.preventDefault();
 
-    const rect = frame.getBoundingClientRect();
-    const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-    const startX = e.clientX;
-    const startY = e.clientY;
-    setBox(base);
-
-    const prevUserSelect = document.body.style.userSelect;
-    const prevCursor = document.body.style.cursor;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
-
-    const onMove = (ev: PointerEvent) => {
+    trackOutline(e, frame, "grabbing", (base, dx, dy) => {
       const minLeft = KEEP_ON_SCREEN - base.width;
       const maxLeft = window.innerWidth - KEEP_ON_SCREEN;
       const headerH = headerRef.current?.offsetHeight ?? 30;
       const maxTop = window.innerHeight - headerH;
-      setBox({
+      return {
         ...base,
-        left: clamp(base.left + (ev.clientX - startX), minLeft, maxLeft),
-        top: clamp(base.top + (ev.clientY - startY), TASKBAR_H, maxTop),
-      });
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      document.body.style.userSelect = prevUserSelect;
-      document.body.style.cursor = prevCursor;
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+        left: clamp(base.left + dx, minLeft, maxLeft),
+        top: clamp(base.top + dy, TASKBAR_H, maxTop),
+      };
+    });
   };
 
   const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isMax || isDocked || controlsDisabled) return;
     const frame = gripRef.current?.parentElement;
     if (!frame) return;
-    e.preventDefault();
 
-    const rect = frame.getBoundingClientRect();
-    const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-    const startX = e.clientX;
-    const startY = e.clientY;
-    setBox(base);
-
-    const prevUserSelect = document.body.style.userSelect;
-    const prevCursor = document.body.style.cursor;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "nwse-resize";
-
-    const onMove = (ev: PointerEvent) => {
+    trackOutline(e, frame, "nwse-resize", (base, dx, dy) => {
       const maxW = Math.max(MIN_W, window.innerWidth - base.left - GAP);
       const maxH = Math.max(MIN_H, window.innerHeight - base.top - GAP);
-      setBox({
+      return {
         ...base,
-        width: clamp(base.width + (ev.clientX - startX), MIN_W, maxW),
-        height: clamp(base.height + (ev.clientY - startY), MIN_H, maxH),
-      });
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      document.body.style.userSelect = prevUserSelect;
-      document.body.style.cursor = prevCursor;
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+        width: clamp(base.width + dx, MIN_W, maxW),
+        height: clamp(base.height + dy, MIN_H, maxH),
+      };
+    });
   };
 
   const NORMAL_W = normalWidth;
@@ -238,6 +242,30 @@ export default function DesktopWindow({
   const showResizeGrip = isDraggable;
 
   return (
+    <>
+    {ghost && (
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: ghost.left,
+          top: ghost.top,
+          width: ghost.width,
+          height: ghost.height,
+          zIndex: Z.WINDOW + 1,
+          pointerEvents: "none",
+          boxSizing: "border-box",
+          padding: 3,
+          // A hollow frame of 1px checkerboard, inverted against whatever is
+          // underneath — the old XOR drag rectangle.
+          background: "repeating-conic-gradient(#fff 0 25%, transparent 0 50%) 0 0 / 2px 2px",
+          mixBlendMode: "difference",
+          WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+          WebkitMaskComposite: "xor",
+          mask: "linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0)",
+        }}
+      />
+    )}
     <Window style={style}>
       <WindowHeader
         ref={headerRef}
@@ -351,5 +379,6 @@ export default function DesktopWindow({
         />
       )}
     </Window>
+    </>
   );
 }
