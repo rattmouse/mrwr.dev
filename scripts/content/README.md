@@ -152,3 +152,50 @@ in history); this generator re-derives the tags at build time and adds a
 `displayQuery` — a defanged, render-safe version the dropdown plays back instead
 of the raw payload. `deploy.sh` copies `search-guard.js` into the prod release
 bundle alongside `server.js`.
+
+## The Collections window
+
+Everything the Collections window shows lives under `public/collections/`, which
+is gitignored in full — the album covers, the Bluesky picklists behind Paintings
+and Songs, and the Pokémon cards below. Nothing there is committed; each machine
+keeps its own.
+
+### `refresh-pokemon-cards.sh` — pull the card collection out of card-binder
+
+Builds the **Cards** tab, the one the window opens on. The collection itself
+lives in the [card-binder](../../../card-binder) app's SQLite file — one
+`inventory_item` row per card, finish and condition, pointing at a `card_print`
+with its name, set, number, rarity and scans. This script opens that database
+**read-only**, takes the most valuable cards, downloads their scans into
+`public/collections/cards/`, and writes the tiles to
+`public/collections/cards.json`.
+
+```
+scripts/content/refresh-pokemon-cards.sh                 # top 48 cards
+scripts/content/refresh-pokemon-cards.sh --limit 100
+scripts/content/refresh-pokemon-cards.sh --all
+scripts/content/refresh-pokemon-cards.sh --db /path/to/binder.db
+```
+
+The binder is expected next to this repo (`../card-binder/binder.db`);
+`CARD_BINDER_DB` or `--db` points somewhere else. Needs Node 22+ for the
+built-in `node:sqlite`.
+
+Market prices decide the order but are never shown — the binder is a sell-side
+ledger and the site is not a price list. Each card's caption is its name and
+number over its set and rarity, plus `×N` when more than one is owned.
+
+Two scans come down per card: the full one the maximized window shows, and a
+thumbnail for the tile scattered across the desktop. They are copied locally
+rather than hotlinked so the site still calls nothing at runtime. **Watch the
+size** — a card is about 600KB of PNG, so the default 48 is ~38MB and `--all`
+(around 500 cards) would be well over 300MB shipped to prod on the next deploy.
+
+Unlike the issue, project and search-history refreshes this is **not** wired into
+`deploy.sh` — the collection only changes when you scan something new, so run it
+by hand and the downloaded scans serve every build after that. Scans left over
+from a longer previous run are cleaned up each time.
+
+Card art is © Pokémon / Nintendo / Creatures / GAME FREAK; the scans come from
+the binder's own image host, and neither the binder nor this site is affiliated
+with them.
