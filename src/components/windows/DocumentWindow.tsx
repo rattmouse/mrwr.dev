@@ -17,7 +17,7 @@ type DocumentWindowProps = {
   onToggleMaximize: () => void;
 };
 
-type CollectionCategory = "albums" | "paintings" | "songs";
+type CollectionCategory = "albums" | "paintings" | "songs" | "cards";
 
 type AlbumCover = {
   title: string;
@@ -40,12 +40,18 @@ const ALBUM_COVERS: AlbumCover[] = [
 const EMPTY_ALBUM: AlbumCover = { title: "no albums found", artist: "collections/content.json", image: null };
 const EMPTY_PAINTING: AlbumCover = { title: "no paintings found", artist: "collections/paintings.json", image: null };
 const EMPTY_SONG: AlbumCover = { title: "no songs found", artist: "collections/songs.json", image: null };
+const EMPTY_CARD: AlbumCover = { title: "no cards found", artist: "collections/cards.json", image: null };
 const BLUESKY_ACTOR = "mrwr.dev";
 // Hand-picked Bluesky post lists (gitignored, like content.json). Each is a JSON
 // array of post links — https://bsky.app/profile/<handle>/post/<rkey> — in the
 // order they should appear. The window pulls the images out of those posts.
 const PAINTINGS_PICKLIST = "/collections/paintings.json";
 const SONGS_PICKLIST = "/collections/songs.json";
+// Pokémon cards, scraped off artofpkm.com and copied into public/collections/
+// by scripts/content/refresh-pokemon-cards.sh. Gitignored and local, like the
+// album covers — no runtime call goes out for these.
+const CARDS_FILE = "/collections/cards.json";
+const CARDS_IMAGE_DIR = "/collections/cards";
 const MAX_PICKED = 72;
 const FEED_PAGES = 4;
 // Pointer travel (px) before a press on a tile counts as a drag rather than a tap.
@@ -69,6 +75,11 @@ function shuffleAlbums(input: AlbumCover[]): AlbumCover[] {
 
 function getSizedCover(image: string | null, size: "low" | "normal" | "high"): string | null {
   if (!image) return null;
+  // Card scans are downloaded in two sizes side by side: a thumbnail for the
+  // scattered tiles and the full scan for the frame.
+  if (image.includes(`${CARDS_IMAGE_DIR}/`)) {
+    return size === "low" ? image.replace(/-large\.(\w+)$/, "-small.$1") : image;
+  }
   if (image.includes("/feed_fullsize/")) {
     return size === "low" ? image.replace("/feed_fullsize/", "/feed_thumbnail/") : image;
   }
@@ -88,6 +99,22 @@ function normalizeAlbumsPayload(payload: unknown): AlbumCover[] {
       image: typeof entry.image === "string" && entry.image.trim() ? entry.image.trim() : null,
     }))
     .filter((entry) => entry.title.length > 0 && entry.artist.length > 0);
+}
+
+// Card tiles are written by scripts/content/refresh-pokemon-cards.mjs: a title,
+// a credit line, a local image path and the scan's own aspect ratio. Unlike an
+// album, a card with no credit still belongs on the shelf.
+function normalizeCardsPayload(payload: unknown): AlbumCover[] {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+    .map((entry) => ({
+      title: typeof entry.title === "string" ? entry.title.trim() : "",
+      artist: typeof entry.artist === "string" ? entry.artist.trim() : "",
+      image: typeof entry.image === "string" && entry.image.trim() ? entry.image.trim() : null,
+      aspect: typeof entry.aspect === "number" && entry.aspect > 0 ? entry.aspect : undefined,
+    }))
+    .filter((entry) => entry.title.length > 0 && entry.image !== null);
 }
 
 type BlueskyImage = { thumb?: unknown; thumbnail?: unknown; fullsize?: unknown; alt?: unknown; aspectRatio?: unknown };
@@ -242,6 +269,14 @@ function fitBox(size: number, aspect: number | undefined): { w: number; h: numbe
   return a >= 1 ? { w: size, h: Math.round(size / a) } : { w: Math.round(size * a), h: size };
 }
 
+// Largest box of the given aspect ratio that fits inside `room` — how the
+// maximized frame grows to whatever space the window actually has.
+function fitWithin(room: { w: number; h: number }, aspect: number | undefined): { w: number; h: number } {
+  const a = aspect && aspect > 0 ? aspect : 1;
+  const w = Math.min(room.w, room.h * a);
+  return { w: Math.round(w), h: Math.round(w / a) };
+}
+
 export default function DocumentWindow({
   id,
   layout,
@@ -251,7 +286,7 @@ export default function DocumentWindow({
   onToggleMaximize,
 }: DocumentWindowProps) {
   const [activeAlbum, setActiveAlbum] = useState(0);
-  const [category, setCategory] = useState<CollectionCategory>("albums");
+  const [category, setCategory] = useState<CollectionCategory>("cards");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const title =
@@ -266,13 +301,14 @@ export default function DocumentWindow({
             : "projects.txt";
   const titleIcon = id === "collections" ? "../w98_collections_cards.ico" : "../w95_default.ico";
   const emptyEntry =
-    category === "paintings" ? EMPTY_PAINTING : category === "songs" ? EMPTY_SONG : EMPTY_ALBUM;
+    category === "paintings"
+      ? EMPTY_PAINTING
+      : category === "songs"
+        ? EMPTY_SONG
+        : category === "cards"
+          ? EMPTY_CARD
+          : EMPTY_ALBUM;
   const album = albums[activeAlbum] ?? emptyEntry;
-  const albumSize = layout === "maximized" ? 280 : 144;
-  // The centre frame and the scattered tiles take each picture's own
-  // proportions when we know them (paintings), so nothing gets cropped. Album
-  // covers have no aspect data and stay square.
-  const { w: frameWidth, h: frameHeight } = fitBox(albumSize, album.aspect);
   const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
   const iconSize = layout === "maximized" ? 58 : 42;
   // In the normal (small) window the tiles are flung across the whole desktop
@@ -283,6 +319,23 @@ export default function DocumentWindow({
   const collectionsRootRef = useRef<HTMLDivElement | null>(null);
   const [albumsSceneSize, setAlbumsSceneSize] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  // The centre frame and the scattered tiles take each picture's own
+  // proportions when we know them (cards, paintings), so nothing gets cropped.
+  // Album covers have no aspect data and stay square.
+  //
+  // Maximized, the frame takes all the room the scene has, less a band wide
+  // enough for the tiles to scatter into — any tighter and the scatter's own
+  // clamp would start dropping tiles on top of the picture. Until the scene has
+  // been measured it falls back to the fixed size the window opens at.
+  const framePadding = iconSize + 32;
+  const frameRoom =
+    layout === "maximized" && albumsSceneSize.width > 0 && albumsSceneSize.height > 0
+      ? {
+          w: Math.max(280, albumsSceneSize.width - framePadding * 2),
+          h: Math.max(280, albumsSceneSize.height - framePadding),
+        }
+      : { w: layout === "maximized" ? 280 : 144, h: layout === "maximized" ? 280 : 144 };
+  const { w: frameWidth, h: frameHeight } = fitWithin(frameRoom, album.aspect);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
   const [albumTilePositions, setAlbumTilePositions] = useState<AlbumTilePosition[]>([]);
   const draggingAlbumIndexRef = useRef<number | null>(null);
@@ -369,6 +422,18 @@ export default function DocumentWindow({
       return Promise.all(shuffled.map(resolveCover));
     }
 
+    // Cards are already resolved on disk — the refresh script did the scraping
+    // and the downloading, so there is nothing to look up here.
+    async function loadCards(): Promise<AlbumCover[]> {
+      try {
+        const response = await fetch(CARDS_FILE, { cache: "no-store" });
+        if (!response.ok) return [];
+        return normalizeCardsPayload((await response.json()) as unknown);
+      } catch {
+        return [];
+      }
+    }
+
     // Paintings and Songs both come from a hand-picked list of Bluesky posts.
     // Walk the author feed (a few pages if needed) collecting the picked posts,
     // then emit their images in picklist order.
@@ -416,7 +481,9 @@ export default function DocumentWindow({
             ? await loadPickedPosts(PAINTINGS_PICKLIST)
             : category === "songs"
               ? await loadPickedPosts(SONGS_PICKLIST)
-              : await loadAlbumsSource();
+              : category === "cards"
+                ? await loadCards()
+                : await loadAlbumsSource();
         if (!cancelled) setAlbums(next);
       } catch (error) {
         console.error("Failed to load collection tiles:", error);
@@ -449,12 +516,23 @@ export default function DocumentWindow({
     return () => window.removeEventListener("resize", update);
   }, [id]);
 
-  // The centre picture frame's footprint, read without a dependency so a change
-  // of the active picture's shape does not re-trigger a full re-scatter.
-  const frameSizeRef = useRef({ w: frameWidth, h: frameHeight });
+  // How much room the centre frame needs for *any* picture in the current set,
+  // not just the one on show. Reserving the union means switching to a
+  // differently shaped picture never lands it underneath the tiles, and the
+  // scatter can stay out of the selection's way — it is read from a ref so a
+  // plain selection never re-triggers a full re-scatter.
+  const frameReserveRef = useRef({ w: frameWidth, h: frameHeight });
   useEffect(() => {
-    frameSizeRef.current = { w: frameWidth, h: frameHeight };
-  }, [frameWidth, frameHeight]);
+    let w = frameWidth;
+    let h = frameHeight;
+    for (const entry of albums) {
+      const box = fitWithin(frameRoom, entry.aspect);
+      w = Math.max(w, box.w);
+      h = Math.max(h, box.h);
+    }
+    frameReserveRef.current = { w, h };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albums, frameRoom.w, frameRoom.h, frameWidth, frameHeight]);
 
   // Where the tiles live, in the coordinate space of their container. Desktop
   // mode: a fixed portal pinned to the viewport origin. Window mode: the scene
@@ -494,7 +572,7 @@ export default function DocumentWindow({
       if (r) avoid.push({ x: r.left - 28, y: r.top - 52, w: r.width + 56, h: r.height + 76 });
     } else {
       // Keep tiles off the centre frame, but never so wide there is nowhere left.
-      const frame = frameSizeRef.current;
+      const frame = frameReserveRef.current;
       const avoidW = Math.min(frame.w + 16, Math.max(0, width - iconSize * 2 - 24));
       const avoidH = Math.min(frame.h + 16, Math.max(0, height - iconSize - 16));
       avoid.push({ x: (width - avoidW) / 2, y: (height - avoidH) / 2, w: avoidW, h: avoidH });
@@ -705,6 +783,7 @@ export default function DocumentWindow({
         >
           <div style={{ alignSelf: "stretch", display: "flex", gap: 4 }}>
             {([
+              { value: "cards", label: "Cards" },
               { value: "albums", label: "Albums" },
               { value: "paintings", label: "Paintings" },
               { value: "songs", label: "Songs" },
@@ -722,7 +801,15 @@ export default function DocumentWindow({
           </div>
 
           <GroupBox
-            label={category === "paintings" ? "paints.gif" : category === "songs" ? "songs.gif" : "albums.gif"}
+            label={
+              category === "paintings"
+                ? "paints.gif"
+                : category === "songs"
+                  ? "songs.gif"
+                  : category === "cards"
+                    ? "cards.gif"
+                    : "albums.gif"
+            }
             style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}
           >
             <div

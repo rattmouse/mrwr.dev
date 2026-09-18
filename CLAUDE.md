@@ -47,6 +47,16 @@ Orientation notes for working in this repo.
   by `deploy.sh`). `src/lib/projects.ts` merges them over the committed
   fallbacks in `src/data/projects.base.json`; a failure is non-fatal. `server.js` flags malicious queries via
   `search-guard.js` (repo root); `deploy.sh` ships that file with `server.js`.
+- `public/collections/` (everything the Collections window shows) is gitignored
+  in full and read only at build time: the album covers, the Bluesky picklists
+  behind Paintings and Songs, and — for the Cards tab, the one the window opens
+  on — `cards.json` + `public/collections/cards/`, written by
+  `scripts/content/refresh-pokemon-cards.sh`. That one reads the **card-binder**
+  app's SQLite collection (`../card-binder/binder.db`, read-only; needs Node 22+
+  for `node:sqlite`), takes the most valuable cards and copies their scans
+  locally rather than hotlinking. `deploy.sh` does **not** run it — the
+  collection only changes when you scan something new, so run it by hand. Mind
+  the size: the default 48 cards is ~38MB, and `--all` would be 300MB+.
 - `search-sessions.js` (repo root, also shipped by `deploy.sh`) holds the
   session-grouping heuristics shared by `refresh-search-history.mjs` and
   `server.js`. At runtime `server.js` buffers keystroke records per browser
