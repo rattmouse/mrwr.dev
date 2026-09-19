@@ -6,14 +6,20 @@ import DndPortrait, { portraitSprite, portraitWidth } from "@/components/windows
 import FloatingPanel from "@/components/windows/FloatingPanel";
 import PartyPanel from "@/components/windows/PartyPanel";
 import { WALK_MS, WALK_STAGGER_MS, type Character } from "@/lib/dnd";
+import { NO_LIGHTS, type FrameLights } from "@/components/windows/FrameLights";
 import { emojiSprite } from "@/lib/emojiSprite";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
 import { useParty } from "@/lib/useParty";
 
 export type PanelId = "palette" | "motion" | "readout" | "frame" | "party";
 
-/** What the Frame panel is doing to the window around this one: 0–1 of warp. */
-export type FrameSettings = { melt: number };
+/**
+ * What the Frame panel is doing to the window around this one: 0–1 of warp,
+ * and whatever it has done to the frame's lights.
+ */
+export type FrameSettings = { melt: number; lights: FrameLights };
+
+export const NO_FRAME: FrameSettings = { melt: 0, lights: NO_LIGHTS };
 
 const PANELS: { id: PanelId; label: string; title: string; width: number }[] = [
   { id: "palette", label: "Palette", title: "Palette", width: 258 },
@@ -128,7 +134,12 @@ const deepen = (hex: string, amount: number) => {
  */
 type InterfaceWindowProps = {
   frame: FrameSettings;
-  onFrameChange: (frame: FrameSettings) => void;
+  /**
+   * Change part of what the Frame panel is doing. It is a patch rather than a
+   * whole settings object so that two controls firing before a re-render — the
+   * warp and the lights, say — cannot each write back the other's old value.
+   */
+  onFrameChange: (patch: Partial<FrameSettings>) => void;
 };
 
 export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindowProps) {
@@ -195,8 +206,33 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
   );
   const closePanel = useCallback((id: PanelId) => setStack((prev) => prev.filter((p) => p !== id)), []);
 
+  // The tool windows can borrow the desktop's frame — border and title bar, and
+  // no more of it than that. interface.exe is a modern window in old dressing;
+  // this is the same joke told about its panels, and the switch is below.
+  const [dressPanels, setDressPanels] = useState(false);
+
+  // Where each tool window was last put down. A panel you close and open again
+  // comes back where you left it; the slot below is only ever the opening
+  // position for one that has not been moved yet. Like the rest of this
+  // window's state it lasts as long as the window does.
+  const [spots, setSpots] = useState<Partial<Record<PanelId, { x: number; y: number }>>>({});
+  const rememberSpot = useCallback(
+    (id: PanelId, at: { x: number; y: number }) => setSpots((prev) => ({ ...prev, [id]: at })),
+    [],
+  );
+
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setSettings((prev) => ({ ...prev, [key]: value }));
+
+  // Turning Colour up from nothing lights the frame and sets it moving, rather
+  // than handing back a frame that is lit but stone still and looks broken.
+  const setLights = (patch: Partial<FrameLights>) =>
+    onFrameChange({
+      lights:
+        patch.colour !== undefined && patch.colour > 0 && frame.lights.colour === 0
+          ? { colour: patch.colour, cycle: 0.4, pulse: 0.35, strobe: 0 }
+          : { ...frame.lights, ...patch },
+    });
 
   // With a node picked, the Palette's controls work on that one; with nothing
   // picked they work on the crowd, exactly as they did before. The controls
@@ -227,8 +263,12 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
 
   // The sprite sheet is fetched the first time the canvas actually wants guys —
   // whether that is the whole crowd or a single node told to be one.
+  // Party members are painted figures whatever the crowd has been set to, so
+  // anyone on the roster wants the sheet as much as a canvas full of guys does.
   const wantsGuys =
-    settings.shape === "guys" || Object.values(overrides).some((o) => o.shape === "guys");
+    settings.shape === "guys" ||
+    party.roster.length > 0 ||
+    Object.values(overrides).some((o) => o.shape === "guys");
   useEffect(() => {
     if (!wantsGuys || guysRef.current) return;
     let cancelled = false;
@@ -436,7 +476,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
           partyPosRef.current.set(node.charId, { x: node.x, y: node.y });
 
           const h = heightOf(node);
-          const sprite = portraitSprite(member);
+          const sprite = portraitSprite(member, toneOf(accent), sheet);
           if (sprite) {
             const w = portraitWidth(h);
             ctx.save();
@@ -680,10 +720,14 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
             key={id}
             title={panel.title}
             width={panel.width}
-            initial={initialSpot(slot, panel.width)}
+            initial={spots[id] ?? initialSpot(slot, panel.width)}
             stackIndex={index}
             onFocus={() => focusPanel(id)}
             onClose={() => closePanel(id)}
+            dressed={dressPanels}
+            lights={frame.lights}
+            melt={frame.melt}
+            onMoved={(at) => rememberSpot(id, at)}
           >
             {id === "palette" && (
               <>
@@ -786,6 +830,17 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
                 <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
                   Everything here works on the window around this one, not on the canvas.
                 </p>
+                <Field label="Tool windows">
+                  <Segmented
+                    options={[
+                      { label: "Modern", value: "modern" },
+                      { label: "Framed", value: "framed" },
+                    ]}
+                    value={dressPanels ? "framed" : "modern"}
+                    accent={settings.accent}
+                    onChange={(value) => setDressPanels(value === "framed")}
+                  />
+                </Field>
                 <Slider
                   label="Warp"
                   value={Math.round(frame.melt * 100)}
@@ -798,18 +853,58 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
                 <button
                   type="button"
                   onClick={() => onFrameChange({ melt: 0 })}
-                  style={{
-                    cursor: "pointer",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255, 255, 255, 0.16)",
-                    background: "rgba(255, 255, 255, 0.06)",
-                    color: "#e8ecf4",
-                    font: "inherit",
-                    fontSize: 12,
-                    padding: "8px 0",
-                  }}
+                  style={panelButton}
                 >
                   Straighten up
+                </button>
+
+                {/* Colour is the master switch — with it down the other three
+                    have nothing to work on, so they are dimmed rather than
+                    left looking broken. */}
+                <Slider
+                  label="Colour"
+                  value={Math.round(frame.lights.colour * 100)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  accent={settings.accent}
+                  onChange={(v) => setLights({ colour: v / 100 })}
+                />
+                <div style={{ display: "grid", gap: 7, opacity: frame.lights.colour > 0 ? 1 : 0.4 }}>
+                  <Slider
+                    label="Cycle"
+                    value={Math.round(frame.lights.cycle * 100)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setLights({ cycle: v / 100 })}
+                  />
+                  <Slider
+                    label="Pulse"
+                    value={Math.round(frame.lights.pulse * 100)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setLights({ pulse: v / 100 })}
+                  />
+                  <Slider
+                    label="Strobe"
+                    value={Math.round(frame.lights.strobe * 100)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setLights({ strobe: v / 100 })}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onFrameChange({ lights: NO_LIGHTS })}
+                  style={panelButton}
+                >
+                  Lights out
                 </button>
               </>
             )}
@@ -876,7 +971,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
                   }}
                 >
                   <div style={{ animation: "party-bob 160ms steps(1) infinite alternate" }}>
-                    <DndPortrait character={c} size={48} />
+                    <DndPortrait character={c} size={48} tint={settings.accent} />
                   </div>
                 </div>
               );
@@ -888,9 +983,21 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
   );
 }
 
+const panelButton: React.CSSProperties = {
+  cursor: "pointer",
+  borderRadius: 8,
+  border: "1px solid rgba(255, 255, 255, 0.16)",
+  background: "rgba(255, 255, 255, 0.06)",
+  color: "#e8ecf4",
+  font: "inherit",
+  fontSize: 12,
+  padding: "8px 0",
+};
+
 // Each panel has its own slot down the right edge of the desktop, so opening two
-// at once never lands one on top of the other and a panel you close and reopen
-// comes back where you expect it. After that they go wherever you drag them.
+// at once never lands one on top of the other. This is only where a panel that
+// has never been dragged opens: once it has been moved, the window remembers
+// the spot and gives it back on every reopen.
 function initialSpot(slot: number, width: number) {
   if (typeof window === "undefined") return { x: 420, y: 96 };
   const step = Math.max(120, Math.min(200, (window.innerHeight - 100) / PANELS.length));
@@ -949,8 +1056,8 @@ function Scope({
         {character
           ? `${character.name} is on the sheet — the Party panel dresses them`
           : selected
-            ? "Editing one node"
-            : "Click a node to edit just that one"}
+            ? "Selected node in edit"
+            : "Select a node to edit"}
         {!selected && !character && edited > 0 ? ` · ${edited} edited` : ""}
       </span>
       {selected && hasOverride && (

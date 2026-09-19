@@ -110,7 +110,7 @@ export default function PartyPanel({ party, accent, onPick }: PartyPanelProps) {
           title={listGear(draft)}
           style={{ border: EDGE, borderRadius: 7, padding: 3, background: "#000", flex: "0 0 auto" }}
         >
-          <DndPortrait character={draft} size={58} />
+          <DndPortrait character={draft} size={58} tint={accent} />
         </div>
         <div style={{ flex: "1 1 auto", minWidth: 0, display: "grid", gap: 5 }}>
           <input
@@ -249,7 +249,7 @@ function Row({
         overflow: "hidden",
       }}
     >
-      <DndPortrait character={character} size={17} style={{ flex: "0 0 auto" }} />
+      <DndPortrait character={character} size={17} tint={accent} style={{ flex: "0 0 auto" }} />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
         {character.name.trim() || "unnamed"}
         {marked && " *"}

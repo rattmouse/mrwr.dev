@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Anchor,
   Button,
@@ -14,7 +14,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
-import InterfaceWindow, { FrameSettings } from "@/components/windows/InterfaceWindow";
+import InterfaceWindow, { NO_FRAME, FrameSettings } from "@/components/windows/InterfaceWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
@@ -133,7 +133,11 @@ export default function ProgramWindow({
   // inside the window's content. It is only ever handed to the frame while
   // interface.exe is the program on screen, and it lasts as long as this window
   // does — closing it puts the frame back together.
-  const [frame, setFrame] = useState<FrameSettings>({ melt: 0 });
+  const [frame, setFrame] = useState<FrameSettings>(NO_FRAME);
+  const patchFrame = useCallback(
+    (patch: Partial<FrameSettings>) => setFrame((prev) => ({ ...prev, ...patch })),
+    [],
+  );
 
   const title =
     id === "notepad"
@@ -918,6 +922,7 @@ export default function ProgramWindow({
       onToggleMaximize={onToggleMaximize}
       controlsDisabled={contentModalOpen}
       melt={id === "interface" ? frame.melt : undefined}
+      lights={id === "interface" ? frame.lights : undefined}
       toolbar={toolbar}
     >
       {id === "welcome" && (
@@ -1004,7 +1009,7 @@ export default function ProgramWindow({
         <PaintWindow ref={paintRef} color={paintColor} brushSize={paintBrush} />
       )}
 
-      {id === "interface" && <InterfaceWindow frame={frame} onFrameChange={setFrame} />}
+      {id === "interface" && <InterfaceWindow frame={frame} onFrameChange={patchFrame} />}
     </DesktopWindow>
   );
 }

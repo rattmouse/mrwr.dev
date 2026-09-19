@@ -1,18 +1,26 @@
 "use client";
 
-import React from "react";
+import React, { useId } from "react";
 import type { Character } from "@/lib/dnd";
+import { GUYS_SHEET, guyBounds, tintGuys, type GuySheet } from "@/lib/guys";
 
 /**
- * A 24×31 pixel "loadout" tile in the spirit of a 1995 inventory screen — no
- * person, just what they wear, laid out like an armour stand: head, chest,
- * hands, legs, feet, with their held item beside it, all standing on a ground
- * line. Class picks what's in each slot (plate, robe, hood, sandals…), race
- * picks the colours it's all made in (steel and blue, bronze and rust…) and
- * how tall the stand is — a short race's pieces sit closer together and the
- * whole kit is drawn smaller, a tall race's spread out and fill the tile — and
- * alignment picks the backdrop: good/neutral/evil is the hue,
- * lawful/neutral/chaotic is the pattern (bricks / dither / diagonals).
+ * A 24×31 pixel tile in the spirit of a 1995 inventory screen — and the same
+ * tile the party walks around interface.exe's canvas wearing. One of the little
+ * painted figures from that canvas' crowd stands on it, dressed head to toe in
+ * pixel gear: head, chest, hands, legs, feet, with their held item beside them.
+ *
+ * Class picks what's in each slot (plate, robe, hood, sandals…) and an empty
+ * slot simply leaves the figure bare there. Race picks the colours the gear is
+ * made in (steel and blue, bronze and rust…) and how tall the figure stands —
+ * a short race's pieces sit closer together and the whole kit is drawn smaller,
+ * a tall race's spread out and fill the tile. Alignment lights a glow behind
+ * them: good/neutral/evil is the hue, lawful/neutral/chaotic is the shape — a
+ * tight steady halo, a soft one, or a ragged restless aura.
+ *
+ * The figure itself is not coloured here. It is tinted with whatever the
+ * Palette is set to, exactly like the rest of the crowd, so a party member is
+ * one more guy on the canvas rather than a species of their own.
  */
 
 const W = 24;
@@ -52,7 +60,8 @@ function slotBoxes(gap: number): Record<Slot, Box[]> & { item: Box } {
     item: { x: 17, y: chestY + 1, w: 7, h: 7 },
   };
 }
-const KIT_W = 24; // stand (16) + gap (1) + item (7)
+const STAND_W = 16; // the figure and what it wears; the held item sits to its right
+const KIT_W = STAND_W + 1 + 7; // stand + gap + item
 
 // Race sets the palette everything is made in: the metal and the cloth.
 type Material = { metal: string; metalShade: string; cloth: string; clothShade: string; name: string };
@@ -170,24 +179,68 @@ const LOADOUTS: Record<string, Loadout> = {
 };
 const DEFAULT_LOADOUT = LOADOUTS.Fighter;
 
-const MOOD_COLOURS: Record<"good" | "neutral" | "evil", [string, string]> = {
-  good: ["#87ceeb", "#b8e4ff"],
-  neutral: ["#a0a0a0", "#c0c0c0"],
-  evil: ["#301040", "#501860"],
+// Alignment is a light behind the figure rather than wallpaper behind a stand.
+// Good/neutral/evil is the hue; these are saturated enough to read on a pale
+// canvas surface as well as a dark one, since the tile is drawn on both.
+const GLOW_COLOURS: Record<"good" | "neutral" | "evil", [number, number, number]> = {
+  good: [127, 212, 255],
+  neutral: [168, 174, 192],
+  evil: [194, 75, 224],
 };
 
-function backdropAt(alignment: string, x: number, y: number): string {
-  const mood = alignment.endsWith("Good") ? "good" : alignment.endsWith("Evil") ? "evil" : "neutral";
-  const [a, b] = MOOD_COLOURS[mood];
-  if (alignment.startsWith("Lawful")) {
-    // Bricks: mortar every fourth row, joints staggered.
-    if (y % 4 === 0) return a;
-    return (x + (y >> 2) * 2) % 4 === 0 ? a : b;
+type Order = "lawful" | "neutral" | "chaotic";
+
+/**
+ * Lawful keeps its light close, bright and even; chaotic throws it wide and
+ * lets the edge wander. The further a glow reaches the fainter it burns, or the
+ * chaotic ones would swamp the figure standing in them.
+ */
+const GLOW_SHAPE: Record<Order, { radius: number; falloff: number; peak: number }> = {
+  lawful: { radius: 0.8, falloff: 2.4, peak: 0.86 },
+  neutral: { radius: 1, falloff: 1.7, peak: 0.72 },
+  chaotic: { radius: 1.2, falloff: 1.5, peak: 0.6 },
+};
+
+function moodOf(alignment: string): "good" | "neutral" | "evil" {
+  return alignment.endsWith("Good") ? "good" : alignment.endsWith("Evil") ? "evil" : "neutral";
+}
+
+function orderOf(alignment: string): Order {
+  return alignment.startsWith("Lawful") ? "lawful" : alignment.startsWith("Chaotic") ? "chaotic" : "neutral";
+}
+
+/**
+ * How brightly the glow burns at one pixel: 0 for bare tile, up to GLOW_PEAK
+ * at its heart. The glow is squashed vertically so it hugs a standing figure,
+ * and brightens along the ground line, where the light pools at their feet.
+ */
+function glowAt(
+  alignment: string,
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  spread: number,
+): number {
+  const order = orderOf(alignment);
+  const dx = x - cx;
+  const dy = (y - cy) * 1.25;
+  let dist = Math.sqrt(dx * dx + dy * dy);
+  const { radius, falloff, peak } = GLOW_SHAPE[order];
+  if (order === "chaotic") {
+    // Two harmonics of the angle alone: the edge comes out lobed and frayed
+    // rather than striped, which is what mixing x and y into it would give.
+    const angle = Math.atan2(dy, dx);
+    dist += Math.sin(angle * 5) * 1.3 + Math.sin(angle * 9 + 1.7) * 0.9;
   }
-  if (alignment.startsWith("Chaotic")) {
-    return (x + y) % 4 < 2 ? a : b;
-  }
-  return (x + y) % 2 === 0 ? a : b;
+  const reach = Math.max(1, spread * radius);
+  const lit = Math.pow(Math.max(0, 1 - dist / reach), falloff) * peak;
+  return Math.min(peak, y === GROUND_Y ? lit * 1.5 : lit);
+}
+
+function glowInk(alignment: string, alpha: number): string {
+  const [r, g, b] = GLOW_COLOURS[moodOf(alignment)];
+  return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
 }
 
 function inkFor(ch: string, m: Material): string | null {
@@ -235,26 +288,59 @@ export function describeKit(character: Pick<Character, "race" | "cls">): string 
 export function listGear(character: Pick<Character, "race" | "cls">): string {
   const kit = LOADOUTS[character.cls] ?? DEFAULT_LOADOUT;
   return [kit.head, kit.chest, kit.hands, kit.legs, kit.feet, kit.item]
-    .map((p) => p?.name ?? "—")
+    .map((p) => p?.name ?? "bare")
     .join(" · ");
 }
 
-type PortraitProps = {
-  character: Pick<Character, "race" | "cls" | "alignment">;
-  /** Rendered size in CSS px; the art is square. */
-  size?: number;
-  style?: React.CSSProperties;
+/** The palette's own first accent, for a caller with nothing to say about it. */
+const DEFAULT_TINT = "#5eead4";
+
+/**
+ * Which figure of the sheet a character is. Stable per race/class/alignment, so
+ * the same kind of adventurer is always the same person, and two of them are
+ * only twins if they really are the same build.
+ */
+function poseOf(character: Pick<Character, "race" | "cls" | "alignment">): number {
+  const key = `${character.race}|${character.cls}|${character.alignment}`;
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return Math.abs(h) % GUYS_SHEET.count;
+}
+
+type Placed = { x: number; y: number; fill: string };
+
+type Composition = {
+  /** The alignment glow — only the pixels it actually lights. */
+  glow: Placed[];
+  /** Where the painted figure stands, and the patch of sheet it is cut from. */
+  figure: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+  };
+  /** The gear, scaled to the figure and laid over it. */
+  gear: Placed[];
 };
 
-/** The tile as a W×H grid of colours — what both the SVG and the canvas draw. */
-function portraitGrid(character: Pick<Character, "race" | "cls" | "alignment">): string[][] {
+/**
+ * The whole tile worked out once — glow behind, figure, gear in front — so the
+ * SVG in the Party panel and the canvas sprite on interface.exe draw the same
+ * picture by the same numbers.
+ */
+function compose(character: Pick<Character, "race" | "cls" | "alignment">): Composition {
   const material = MATERIALS[character.race] ?? DEFAULT_MATERIAL;
   const kit = LOADOUTS[character.cls] ?? DEFAULT_LOADOUT;
   const t = tallness(character.race);
   const boxes = slotBoxes(Math.round(t * MAX_GAP));
   const kitRows = boxes.feet[0].y + boxes.feet[0].h;
 
-  // Compose the kit at full size on a transparent sheet (null = see-through).
+  // Compose the gear at full size on a transparent sheet (null = see-through).
+  // It is layered over the figure, so anything left null shows bare skin.
   const sheet: (string | null)[][] = [];
   for (let y = 0; y < SHEET; y++) sheet.push(new Array<string | null>(KIT_W).fill(null));
 
@@ -268,21 +354,10 @@ function portraitGrid(character: Pick<Character, "race" | "cls" | "alignment">):
     }
   };
 
-  // An empty slot gets a dotted outline, like an inventory screen's empty box.
-  const outline = (box: Box) => {
-    for (let gy = 0; gy < box.h; gy++) {
-      for (let gx = 0; gx < box.w; gx++) {
-        const edge = gy === 0 || gy === box.h - 1 || gx === 0 || gx === box.w - 1;
-        if (edge && (gx + gy) % 2 === 0) sheet[box.y + gy][box.x + gx] = "#202020";
-      }
-    }
-  };
-
+  // An empty slot is not drawn at all — a bare head, bare hands, bare feet.
   const place = (slot: Slot, piece: Piece | null) => {
-    boxes[slot].forEach((box, i) => {
-      if (piece) blit(piece, box, i === 1);
-      else outline(box);
-    });
+    if (!piece) return;
+    boxes[slot].forEach((box, i) => blit(piece, box, i === 1));
   };
   place("head", kit.head);
   place("chest", kit.chest);
@@ -291,41 +366,76 @@ function portraitGrid(character: Pick<Character, "race" | "cls" | "alignment">):
   place("feet", kit.feet);
   blit(kit.item, boxes.item, false);
 
-  // Backdrop, then the kit shrunk by race height (nearest neighbour, so it
-  // stays chunky), centred and standing on the ground line.
-  const grid: string[][] = [];
-  for (let y = 0; y < H; y++) {
-    grid.push([]);
-    for (let x = 0; x < W; x++) grid[y].push(y === GROUND_Y ? "#202020" : backdropAt(character.alignment, x, y));
-  }
+  // The kit is shrunk by race height (nearest neighbour, so it stays chunky),
+  // centred and standing on the ground line.
   const scale = MIN_SCALE + (1 - MIN_SCALE) * t;
   const drawW = Math.max(1, Math.round(KIT_W * scale));
   const drawH = Math.max(1, Math.round(kitRows * scale));
   const ox = Math.floor((W - drawW) / 2);
   const oy = GROUND_Y - drawH;
+
+  // The figure fills the stand; the held item hangs in the column to its right,
+  // so the glow and the body both centre on the stand rather than on the tile.
+  //
+  // It is the figure's ink that is fitted to the stand, not its cell — crown of
+  // the head at the top of the head slot, soles on the ground line — so the
+  // boots land on his feet however much blank cell he was packed with. That
+  // stretches a stooped pose to the same height as an upright one, which is the
+  // point: how tall he stands is the race's business, set by drawH above.
+  const standW = (drawW * STAND_W) / KIT_W;
+  const ink = guyBounds(poseOf(character));
+  const figureW = Math.max(1, (drawH * ink.w) / ink.h);
+  const figure = {
+    x: ox + standW / 2 - figureW / 2,
+    y: oy,
+    w: figureW,
+    h: drawH,
+    sx: ink.x,
+    sy: ink.y,
+    sw: ink.w,
+    sh: ink.h,
+  };
+
+  const cx = ox + standW / 2;
+  const cy = oy + drawH * 0.55;
+  const spread = 6 + drawH * 0.18;
+  const glow: Placed[] = [];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const alpha = glowAt(character.alignment, x, y, cx, cy, spread);
+      if (alpha > 0.01) glow.push({ x, y, fill: glowInk(character.alignment, alpha) });
+    }
+  }
+
+  const gear: Placed[] = [];
   for (let y = 0; y < drawH; y++) {
     const sy = Math.min(kitRows - 1, Math.floor(((y + 0.5) / drawH) * kitRows));
     for (let x = 0; x < drawW; x++) {
       const sx = Math.min(KIT_W - 1, Math.floor(((x + 0.5) / drawW) * KIT_W));
       const ink = sheet[sy][sx];
-      if (ink) grid[oy + y][ox + x] = ink;
+      if (ink) gear.push({ x: ox + x, y: oy + y, fill: ink });
     }
   }
 
-  return grid;
+  return { glow, figure, gear };
 }
 
 const sprites = new Map<string, HTMLCanvasElement>();
 
 /**
  * The same tile as a one-pixel-per-pixel canvas, for the crowd on interface.exe's
- * canvas — a party member is a drawImage a frame rather than 744 rects. Cached
- * per look, since two Human Fighters of the same alignment are the same picture.
+ * canvas — a party member is a drawImage a frame rather than a few hundred rects.
+ * Cached per look, since two Human Fighters of the same alignment in the same
+ * palette are the same picture. Without the sheet loaded yet the glow and the
+ * gear are drawn anyway; the figure joins them the moment it arrives, under a
+ * key of its own.
  */
 export function portraitSprite(
   character: Pick<Character, "race" | "cls" | "alignment">,
+  tint: string,
+  sheet: GuySheet | null,
 ): HTMLCanvasElement | null {
-  const key = `${character.race}|${character.cls}|${character.alignment}`;
+  const key = `${character.race}|${character.cls}|${character.alignment}|${tint}|${sheet ? "guy" : "bare"}`;
   const cached = sprites.get(key);
   if (cached) return cached;
   if (typeof document === "undefined") return null;
@@ -336,12 +446,30 @@ export function portraitSprite(
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  const grid = portraitGrid(character);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      ctx.fillStyle = grid[y][x];
-      ctx.fillRect(x, y, 1, 1);
-    }
+  const { glow, figure, gear } = compose(character);
+  for (const { x, y, fill } of glow) {
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, 1, 1);
+  }
+  if (sheet) {
+    // The figure is a photograph of a painting, so it is allowed to resample
+    // smoothly on the way down; the gear over it stays hard-edged.
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(
+      tintGuys(sheet, tint),
+      figure.sx,
+      figure.sy,
+      figure.sw,
+      figure.sh,
+      figure.x,
+      figure.y,
+      figure.w,
+      figure.h,
+    );
+  }
+  for (const { x, y, fill } of gear) {
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, 1, 1);
   }
 
   sprites.set(key, canvas);
@@ -351,16 +479,23 @@ export function portraitSprite(
 /** How wide the tile is for a given height, so callers keep it in proportion. */
 export const portraitWidth = (height: number) => Math.round((height * W) / H);
 
-export default function DndPortrait({ character, size = 72, style }: PortraitProps) {
-  const material = MATERIALS[character.race] ?? DEFAULT_MATERIAL;
-  const grid = portraitGrid(character);
+type PortraitProps = {
+  character: Pick<Character, "race" | "cls" | "alignment">;
+  /** Rendered size in CSS px; the art is square. */
+  size?: number;
+  /** What to paint the figure itself — the Palette's colour, as for the crowd. */
+  tint?: string;
+  style?: React.CSSProperties;
+};
 
-  const pixels: React.ReactNode[] = [];
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      pixels.push(<rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={grid[y][x]} />);
-    }
-  }
+export default function DndPortrait({ character, size = 72, tint = DEFAULT_TINT, style }: PortraitProps) {
+  // React's generated ids contain colons, which a url(#…) reference can't take.
+  const tintId = `guy-tint-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+
+  const material = MATERIALS[character.race] ?? DEFAULT_MATERIAL;
+  const { glow, figure, gear } = compose(character);
+  const scaleX = figure.w / figure.sw;
+  const scaleY = figure.h / figure.sh;
 
   return (
     <svg
@@ -372,7 +507,37 @@ export default function DndPortrait({ character, size = 72, style }: PortraitPro
       aria-label={`${material.name} kit: ${listGear(character)}; ${describeHeight(character.race)} tall; ${character.alignment}`}
       style={{ display: "block", flex: "0 0 auto", ...style }}
     >
-      {pixels}
+      <defs>
+        {/* Recolour the painted ink by its alpha, the way tintGuys does on
+            canvas. The region is the figure's own rectangle, which both keeps
+            the filter cheap and crops the sheet down to the one cell. */}
+        <filter
+          id={tintId}
+          filterUnits="userSpaceOnUse"
+          x={figure.x}
+          y={figure.y}
+          width={figure.w}
+          height={figure.h}
+        >
+          <feFlood floodColor={tint} result="ink" />
+          <feComposite in="ink" in2="SourceGraphic" operator="in" />
+        </filter>
+      </defs>
+      {glow.map(({ x, y, fill }) => (
+        <rect key={`g${x}-${y}`} x={x} y={y} width={1} height={1} fill={fill} />
+      ))}
+      <image
+        href={GUYS_SHEET.src}
+        x={figure.x - figure.sx * scaleX}
+        y={figure.y - figure.sy * scaleY}
+        width={GUYS_SHEET.width * scaleX}
+        height={GUYS_SHEET.height * scaleY}
+        preserveAspectRatio="none"
+        filter={`url(#${tintId})`}
+      />
+      {gear.map(({ x, y, fill }) => (
+        <rect key={`k${x}-${y}`} x={x} y={y} width={1} height={1} fill={fill} />
+      ))}
     </svg>
   );
 }

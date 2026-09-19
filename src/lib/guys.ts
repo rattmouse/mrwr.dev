@@ -8,6 +8,39 @@ export type GuySheet = {
   count: number;
 };
 
+/**
+ * The sheet's geometry, straight from the manifest — enough to crop one figure
+ * out of it (in CSS or SVG) without waiting for the image itself to load.
+ */
+export const GUYS_SHEET = {
+  src: manifest.sheet,
+  cellWidth: manifest.cellWidth,
+  cellHeight: manifest.cellHeight,
+  columns: manifest.columns,
+  count: manifest.count,
+  width: manifest.columns * manifest.cellWidth,
+  height: Math.ceil(manifest.count / manifest.columns) * manifest.cellHeight,
+  /** Per figure, where its ink sits inside its own cell: [x, y, w, h]. */
+  cells: manifest.cells as [number, number, number, number][],
+};
+
+/**
+ * One figure's ink, in sheet pixels — the rectangle to cut, rather than the
+ * whole cell. Cells are sized to the tallest guy and everyone is centred in
+ * theirs, so cutting the cell leaves a short figure floating in blank space
+ * with his feet nowhere near the bottom of it.
+ */
+export function guyBounds(pose: number): { x: number; y: number; w: number; h: number } {
+  const index = ((pose % GUYS_SHEET.count) + GUYS_SHEET.count) % GUYS_SHEET.count;
+  const [x, y, w, h] = GUYS_SHEET.cells[index] ?? [0, 0, GUYS_SHEET.cellWidth, GUYS_SHEET.cellHeight];
+  return {
+    x: (index % GUYS_SHEET.columns) * GUYS_SHEET.cellWidth + x,
+    y: Math.floor(index / GUYS_SHEET.columns) * GUYS_SHEET.cellHeight + y,
+    w,
+    h,
+  };
+}
+
 let pending: Promise<GuySheet | null> | null = null;
 
 /**
