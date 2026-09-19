@@ -28,3 +28,12 @@ body { margin: 0; }
 .ui-range::-moz-range-track {
   background: transparent;
 }
+
+/* Collections' tiles are icons, not pictures to be carried off: without this
+   the browser lets you drag a card straight out of the page (and Safari needs
+   the property as well as the draggable="false" attribute). */
+.no-drag {
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
