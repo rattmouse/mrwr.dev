@@ -3,7 +3,7 @@
 import React from "react";
 
 /**
- * The lights interface.exe's Frame panel can put on the window around it: the
+ * The lights party.webp's Frame panel can put on the window around it: the
  * title bar and the frame's halo run through the spectrum, breathe in and out,
  * and flash. Nothing in here touches the window's contents — it is the chrome
  * that lights up, the way a machine in a shop window does.

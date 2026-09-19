@@ -48,7 +48,7 @@ Orientation notes for working in this repo.
   fallbacks in `src/data/projects.base.json`; a failure is non-fatal. `server.js` flags malicious queries via
   `search-guard.js` (repo root); `deploy.sh` ships that file with `server.js`.
 - `public/guys/guys.webp` + `src/data/guys.json` (the little painted figures
-  interface.exe draws in place of its dots) are the exception to all of the
+  party.webp draws in place of its dots) are the exception to all of the
   above: they are **committed**, not gitignored, and no deploy step regenerates
   them. `scripts/content/make-guys-sprites.mjs` (`npm run guys:sprites`) cuts
   them out of the photograph at `public/guys.webp` — an unevenly lit photo of a

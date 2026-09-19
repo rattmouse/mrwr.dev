@@ -14,7 +14,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
-import InterfaceWindow, { NO_FRAME, FrameSettings } from "@/components/windows/InterfaceWindow";
+import PartyWindow, { NO_FRAME, FrameSettings } from "@/components/windows/PartyWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
@@ -128,10 +128,10 @@ export default function ProgramWindow({
   const [midiHasMessages, setMidiHasMessages] = useState(false);
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
   const [paintBrush, setPaintBrush] = useState<number>(6);
-  // interface.exe reaches back out through its Frame panel and works on the
+  // party.webp reaches back out through its Frame panel and works on the
   // window around it, so the melt lives out here with the frame rather than
   // inside the window's content. It is only ever handed to the frame while
-  // interface.exe is the program on screen, and it lasts as long as this window
+  // party.webp is the program on screen, and it lasts as long as this window
   // does — closing it puts the frame back together.
   const [frame, setFrame] = useState<FrameSettings>(NO_FRAME);
   const patchFrame = useCallback(
@@ -152,7 +152,7 @@ export default function ProgramWindow({
               ? "midi.exe"
               : id === "paint"
                 ? "paint.exe"
-                : id === "interface"
+                : id === "party"
                   ? "party.webp"
                   : "mrwr.dev";
   const titleIcon =
@@ -168,7 +168,7 @@ export default function ProgramWindow({
               ? "../w98_music.ico"
               : id === "paint"
                 ? "../w95_paint.ico"
-                : id === "interface"
+                : id === "party"
                   ? "../w98_file_eye.ico"
                   : "../w98_repl.ico";
 
@@ -178,10 +178,10 @@ export default function ProgramWindow({
         : id === "music" ? 220
           : id === "midi" ? 480
             : id === "paint" ? 320
-              : id === "interface" ? 460
+              : id === "party" ? 460
                 : 300;
   const normalWidth =
-    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "interface" ? 560 : undefined;
+    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -921,8 +921,8 @@ export default function ProgramWindow({
       onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
       controlsDisabled={contentModalOpen}
-      melt={id === "interface" ? frame.melt : undefined}
-      lights={id === "interface" ? frame.lights : undefined}
+      melt={id === "party" ? frame.melt : undefined}
+      lights={id === "party" ? frame.lights : undefined}
       toolbar={toolbar}
     >
       {id === "welcome" && (
@@ -1009,7 +1009,7 @@ export default function ProgramWindow({
         <PaintWindow ref={paintRef} color={paintColor} brushSize={paintBrush} />
       )}
 
-      {id === "interface" && <InterfaceWindow frame={frame} onFrameChange={patchFrame} />}
+      {id === "party" && <PartyWindow frame={frame} onFrameChange={patchFrame} />}
     </DesktopWindow>
   );
 }

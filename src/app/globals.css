@@ -1,7 +1,7 @@
 html, body { height: 100%; }
 body { margin: 0; }
 
-/* interface.exe's floating panels: a flat modern slider, since the thumb can
+/* party.webp's floating panels: a flat modern slider, since the thumb can
    only be reached from a stylesheet. */
 .ui-range::-webkit-slider-thumb {
   -webkit-appearance: none;

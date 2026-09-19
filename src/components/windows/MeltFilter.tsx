@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { loadMeltNoise } from "@/lib/meltNoise";
 
 /**
- * The filter that pulls a window out of true — interface.exe's Frame panel
+ * The filter that pulls a window out of true — party.webp's Frame panel
  * points the window's `filter` at it and dials `amount` up.
  *
  * It lives outside the frame it distorts, because a filter cannot be defined

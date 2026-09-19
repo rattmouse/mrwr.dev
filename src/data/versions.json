@@ -3,6 +3,25 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "5.0",
+      "era": "claude",
+      "name": "Party 2.0",
+      "date": "2026-09-19",
+      "summary": "A crowd on a canvas, and a party that walks out into it.",
+      "issues": [],
+      "changes": [
+        "Party 2.0 (party.webp) sits under Toys: an old-fashioned frame around a modern one, with a drifting crowd on a canvas that reaches for your pointer and a row of buttons above it — Palette, Motion, Readout and Frame — that each open a small tool window you can drag anywhere on the desktop, floating above the window that opened it",
+        "Party 2.0's Frame tool bends the window it sits in — turn Warp up and the whole frame goes soft and pulls out of true, title bar, borders and all, with its corners rounding off as it goes; Straighten up puts it back",
+        "Party 2.0's canvas is a crowd rather than a scattering of dots: every point is one of a set of little painted figures, walking about in whatever colour the palette is set to — and the Palette tool can swap the whole crowd for rats, for mice, or back to plain dots",
+        "Anyone in that crowd can be picked out of it: click a figure on Party 2.0's canvas and a dashed ring marks it, after which the Palette's colour and shape dress that one alone — one rat among the walkers, or a single point left as a dot — with Reset putting it back in step, and a click on empty canvas handing the Palette back to everybody",
+        "The old Party (dnd.exe) has moved inside: the roster and the character sheet are one more of Party 2.0's floating tools, and everyone you Save walks out onto the canvas to drift with the crowd under their own name — click one out there and their sheet comes up, and when the party's ten minutes are up they set off across the desktop from wherever they were standing",
+        "A character is a person now rather than an empty suit of armour: each one is one of the little painted figures from Party 2.0's crowd, wearing their own gear and bare at the head, hands or feet where they carry none — and since it is the same figure, it takes its colour from the Palette like everybody else. Alignment is a glow behind them instead of patterned wallpaper: its hue tells good from evil, and its shape tells lawful from chaotic, from a tight steady halo to a wide, frayed one",
+        "Party 2.0's Frame tool can light the window up as well as bend it: Colour puts the frame and its title bar into the spectrum at once, and Cycle, Pulse and Strobe set it walking round the colours, breathing in and out, and flashing — Lights out puts it back. The strobe will not go past three flashes a second however far you push it, and anyone whose machine is set to prefer less movement gets the colour holding still instead",
+        "The Frame tool can also hand Party 2.0's own tool windows the desktop's frame: switch Tool windows from Modern to Framed and the Palette, Motion, Readout, Frame and Party panels each come up in a Windows 95 border and title bar, while the sliders, swatches and readouts inside them stay exactly as modern as they were. A panel wearing the frame does whatever the frame does — it lights up on the same beat and warps out of true along with it",
+        "Party 2.0 remembers where you put its tool windows: drag the Palette, or any of the others, somewhere that suits you and closing it and opening it again brings it back to that spot rather than to the edge it started at. Each panel is remembered separately, and one you have never moved still opens in its own slot"
+      ]
+    },
+    {
       "version": "4.9",
       "era": "claude",
       "name": "Save & read",
@@ -18,16 +37,7 @@
         "Party (dnd.exe) no longer throws away a half-finished sheet when you click another character — your edits wait for you, marked with a *, until you come back and Save",
         "Moving or resizing a window works the old way now — a dotted outline follows your pointer and the window jumps there when you let go, and Escape leaves it where it was",
         "Collections now opens on a Cards tab holding the Pokémon card collection — each card shows its number, its set and how rare it is — and the cards scatter across the desktop like the albums and paintings do",
-        "Maximizing Collections now shows whatever you have picked as big as the window will allow, rather than a stamp in the middle of it",
-        "A new window, Interface, sits under Programs › Tools: an old-fashioned frame around a modern one, with a drifting crowd on a canvas that reaches for your pointer and a row of buttons above it — Palette, Motion, Readout and Frame — that each open a small tool window you can drag anywhere on the desktop, floating above the window that opened it",
-        "Interface's Frame tool bends the window it sits in — turn Warp up and the whole frame goes soft and pulls out of true, title bar, borders and all, with its corners rounding off as it goes; Straighten up puts it back",
-        "Interface's canvas is a crowd rather than a scattering of dots: every point is one of a set of little painted figures, walking about in whatever colour the palette is set to — and the Palette tool can swap the whole crowd for rats, for mice, or back to plain dots",
-        "Anyone in that crowd can be picked out of it: click a figure on Interface's canvas and a dashed ring marks it, after which the Palette's colour and shape dress that one alone — one rat among the walkers, or a single point left as a dot — with Reset putting it back in step, and a click on empty canvas handing the Palette back to everybody",
-        "Party has moved inside Interface, which now answers to party.webp under Toys: the roster and the character sheet are one more of its floating tools, and everyone you Save walks out onto the canvas to drift with the crowd under their own name — click one out there and their sheet comes up, and when the party's ten minutes are up they set off across the desktop from wherever they were standing",
-        "A character in Party is a person now rather than an empty suit of armour: each one is one of the little painted figures from Interface's crowd, wearing their own gear and bare at the head, hands or feet where they carry none — and since it is the same figure, it takes its colour from the Palette like everybody else. Alignment is a glow behind them instead of patterned wallpaper: its hue tells good from evil, and its shape tells lawful from chaotic, from a tight steady halo to a wide, frayed one",
-        "Interface's Frame tool can light the window up as well as bend it: Colour puts the frame and its title bar into the spectrum at once, and Cycle, Pulse and Strobe set it walking round the colours, breathing in and out, and flashing — Lights out puts it back. The strobe will not go past three flashes a second however far you push it, and anyone whose machine is set to prefer less movement gets the colour holding still instead",
-        "The Frame tool can also hand Interface's own tool windows the desktop's frame: switch Tool windows from Modern to Framed and the Palette, Motion, Readout, Frame and Party panels each come up in a Windows 95 border and title bar, while the sliders, swatches and readouts inside them stay exactly as modern as they were. A panel wearing the frame does whatever the frame does — it lights up on the same beat and warps out of true along with it",
-        "Interface remembers where you put its tool windows: drag the Palette, or any of the others, somewhere that suits you and closing it and opening it again brings it back to that spot rather than to the edge it started at. Each panel is remembered separately, and one you have never moved still opens in its own slot"
+        "Maximizing Collections now shows whatever you have picked as big as the window will allow, rather than a stamp in the middle of it"
       ]
     },
     {

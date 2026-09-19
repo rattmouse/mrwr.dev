@@ -40,7 +40,7 @@ type PartyPanelProps = {
 /**
  * The Party tool window: the roster on the left of the canvas' crowd, the sheet
  * below it, and the five things you can do to a character. Everyone saved here
- * walks out onto interface.exe's canvas and drifts with the rest of them.
+ * walks out onto party.webp's canvas and drifts with the rest of them.
  *
  * The controls are the panel's own rather than the desktop's Windows 95 ones —
  * this window floats above the frame, and everything up here is modern.

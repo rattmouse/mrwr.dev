@@ -28,7 +28,7 @@ type DesktopWindowProps = {
   controlsDisabled?: boolean;
   /**
    * 0–1: pulls the whole frame out of true, corners first — driven by
-   * interface.exe's Frame panel.
+   * party.webp's Frame panel.
    */
   melt?: number;
   /**

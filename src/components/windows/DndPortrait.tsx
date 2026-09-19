@@ -6,7 +6,7 @@ import { GUYS_SHEET, guyBounds, tintGuys, type GuySheet } from "@/lib/guys";
 
 /**
  * A 24×31 pixel tile in the spirit of a 1995 inventory screen — and the same
- * tile the party walks around interface.exe's canvas wearing. One of the little
+ * tile the party walks around party.webp's canvas wearing. One of the little
  * painted figures from that canvas' crowd stands on it, dressed head to toe in
  * pixel gear: head, chest, hands, legs, feet, with their held item beside them.
  *
@@ -329,7 +329,7 @@ type Composition = {
 
 /**
  * The whole tile worked out once — glow behind, figure, gear in front — so the
- * SVG in the Party panel and the canvas sprite on interface.exe draw the same
+ * SVG in the Party panel and the canvas sprite on party.webp draw the same
  * picture by the same numbers.
  */
 function compose(character: Pick<Character, "race" | "cls" | "alignment">): Composition {
@@ -423,7 +423,7 @@ function compose(character: Pick<Character, "race" | "cls" | "alignment">): Comp
 const sprites = new Map<string, HTMLCanvasElement>();
 
 /**
- * The same tile as a one-pixel-per-pixel canvas, for the crowd on interface.exe's
+ * The same tile as a one-pixel-per-pixel canvas, for the crowd on party.webp's
  * canvas — a party member is a drawImage a frame rather than a few hundred rects.
  * Cached per look, since two Human Fighters of the same alignment in the same
  * palette are the same picture. Without the sheet loaded yet the glow and the

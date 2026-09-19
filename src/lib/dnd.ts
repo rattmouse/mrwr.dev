@@ -1,4 +1,4 @@
-// The party interface.exe keeps: the character shape, the pick-lists the sheet
+// The roster party.webp keeps: the character shape, the pick-lists the sheet
 // and the portrait both read from, the dice that roll one up, and the roster's
 // own little store.
 
