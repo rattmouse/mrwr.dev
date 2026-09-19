@@ -47,6 +47,13 @@ Orientation notes for working in this repo.
   by `deploy.sh`). `src/lib/projects.ts` merges them over the committed
   fallbacks in `src/data/projects.base.json`; a failure is non-fatal. `server.js` flags malicious queries via
   `search-guard.js` (repo root); `deploy.sh` ships that file with `server.js`.
+- `public/guys/guys.webp` + `src/data/guys.json` (the little painted figures
+  interface.exe draws in place of its dots) are the exception to all of the
+  above: they are **committed**, not gitignored, and no deploy step regenerates
+  them. `scripts/content/make-guys-sprites.mjs` (`npm run guys:sprites`) cuts
+  them out of the photograph at `public/guys.webp` — an unevenly lit photo of a
+  painted sheet, so the cutting is tuned by eye once rather than run in every
+  visitor's browser. Re-run it only if that photograph changes.
 - `public/collections/` (everything the Collections window shows) is gitignored
   in full and read only at build time: the album covers, the Bluesky picklists
   behind Paintings and Songs, and — for the Cards tab, the one the window opens

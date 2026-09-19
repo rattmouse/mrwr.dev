@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Toolbar, Window, WindowContent, WindowHeader } from "react95";
 import { Z } from "@/constants/zIndex";
+import MeltFilter from "@/components/windows/MeltFilter";
 import { Layout } from "@/components/windows/windowTypes";
 
 type DesktopWindowProps = {
@@ -24,6 +25,11 @@ type DesktopWindowProps = {
   onRestore: () => void;
   onToggleMaximize: () => void;
   controlsDisabled?: boolean;
+  /**
+   * 0–1: pulls the whole frame out of true, corners first — driven by
+   * interface.exe's Frame panel.
+   */
+  melt?: number;
   toolbar?: React.ReactNode;
   children: React.ReactNode;
 };
@@ -47,6 +53,7 @@ export default function DesktopWindow({
   onRestore,
   onToggleMaximize,
   controlsDisabled = false,
+  melt,
   toolbar,
   children,
 }: DesktopWindowProps) {
@@ -174,6 +181,22 @@ export default function DesktopWindow({
   const normalLeft = normalPosition === "topRightQuadrantCenter" ? "75vw" : "50%";
   const normalTop = normalPosition === "topRightQuadrantCenter" ? `calc(25vh + ${TASKBAR_H / 2}px)` : `calc(50% + ${TASKBAR_H / 2}px)`;
   const outline = Math.max(0, Math.min(1, effectOutline));
+  // A melting frame loses its corners before it loses its edges, and the whole
+  // thing warps out of true — the window stops being a rectangle rather than
+  // growing something off the bottom of one.
+  const meltAmount = Math.max(0, Math.min(1, melt ?? 0));
+  const meltFilterId = "melt-warp";
+  const meltRadius =
+    meltAmount > 0
+      ? [
+          Math.round(meltAmount * 7),
+          Math.round(meltAmount * 12),
+          Math.round(meltAmount * 34),
+          Math.round(meltAmount * 22),
+        ]
+          .map((r) => `${r}px`)
+          .join(" ")
+      : undefined;
   const frameShadow =
     outline > 0
       ? `0 0 ${5 + 12 * outline}px rgba(0, 255, 186, ${0.2 + 0.28 * outline}), 0 0 0 1px rgba(0, 255, 186, ${0.25 + 0.5 * outline})`
@@ -233,6 +256,9 @@ export default function DesktopWindow({
             boxShadow: frameShadow,
           };
 
+  if (meltRadius) style.borderRadius = meltRadius;
+  if (meltAmount > 0) style.filter = `url(#${meltFilterId})`;
+
   // The grip lives in its own corner gutter so it never lands on a scrollbar or
   // content edge. The gutter tracks the layout only (not controlsDisabled) so
   // toggling the title-bar controls doesn't reflow the window body.
@@ -243,6 +269,7 @@ export default function DesktopWindow({
 
   return (
     <>
+    {meltAmount > 0 && <MeltFilter id={meltFilterId} amount={meltAmount} />}
     {ghost && (
       <div
         aria-hidden
