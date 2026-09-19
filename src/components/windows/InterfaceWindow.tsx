@@ -828,7 +828,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
             {id === "frame" && (
               <>
                 <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
-                  Everything here works on the window around this one, not on the canvas.
+                  Edit parent window frame.
                 </p>
                 <Field label="Tool windows">
                   <Segmented
