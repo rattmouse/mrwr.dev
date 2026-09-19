@@ -338,6 +338,10 @@ export default function DocumentWindow({
   const { w: frameWidth, h: frameHeight } = fitWithin(frameRoom, album.aspect);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
   const [albumTilePositions, setAlbumTilePositions] = useState<AlbumTilePosition[]>([]);
+  // Stacking order, like windows on the desktop: whatever you touched last sits
+  // on top of everything, and stays there once you let go.
+  const [albumTileStack, setAlbumTileStack] = useState<number[]>([]);
+  const albumTileStackTopRef = useRef(1);
   const draggingAlbumIndexRef = useRef<number | null>(null);
   const draggingOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -597,6 +601,10 @@ export default function DocumentWindow({
 
     setActiveAlbum(nearest);
     setAlbumTilePositions(scattered);
+    // A fresh scatter deals the pile again: everything flat, the one the window
+    // is showing on top.
+    albumTileStackTopRef.current = 1;
+    setAlbumTileStack(scattered.map((_, index) => (index === nearest ? 1 : 0)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     albums,
@@ -641,6 +649,13 @@ export default function DocumentWindow({
     const field = getScatterField();
 
     setActiveAlbum(index);
+    albumTileStackTopRef.current += 1;
+    const top = albumTileStackTopRef.current;
+    setAlbumTileStack((prev) => {
+      const next = prev.length === albums.length ? prev.slice() : albums.map(() => 0);
+      next[index] = top;
+      return next;
+    });
 
     draggingAlbumIndexRef.current = index;
     draggedRef.current = false;
@@ -720,7 +735,7 @@ export default function DocumentWindow({
           opacity: isActive ? 1 : 0.8,
           outline: isActive ? "1px solid #0b5ad4" : "none",
           transform: `rotate(${pos.rot}deg)`,
-          zIndex: isActive ? 3 : 2,
+          zIndex: 2 + (albumTileStack[index] ?? 0),
           cursor: isDraggingThis ? "grabbing" : "grab",
           touchAction: "none",
           userSelect: "none",
@@ -737,6 +752,11 @@ export default function DocumentWindow({
           <img
             src={miniImage}
             alt=""
+            // A tile is an icon, not a picture to be carried off: without this
+            // the browser hands you the card as a draggable image the moment
+            // you pick it up, ghost and all, instead of just moving it.
+            draggable={false}
+            className="no-drag"
             style={{
               width: "100%",
               height: "100%",
@@ -852,6 +872,8 @@ export default function DocumentWindow({
                       <img
                         src={albumImage}
                         alt={`${album.title} cover`}
+                        draggable={false}
+                        className="no-drag"
                         style={{
                           width: "100%",
                           height: "100%",
