@@ -3,7 +3,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Toolbar, Window, WindowContent, WindowHeader } from "react95";
 import { Z } from "@/constants/zIndex";
-import MeltFilter from "@/components/windows/MeltFilter";
+import MeltFilter, { MELT_FILTER_ID, meltStyle } from "@/components/windows/MeltFilter";
+import FrameLightsStyle, { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
 import { Layout } from "@/components/windows/windowTypes";
 
 type DesktopWindowProps = {
@@ -30,6 +31,11 @@ type DesktopWindowProps = {
    * interface.exe's Frame panel.
    */
   melt?: number;
+  /**
+   * Colour, breath and flash on the frame's own chrome — also the Frame
+   * panel's doing. Undefined, or dark, leaves it as plain Windows 95.
+   */
+  lights?: FrameLights;
   toolbar?: React.ReactNode;
   children: React.ReactNode;
 };
@@ -54,6 +60,7 @@ export default function DesktopWindow({
   onToggleMaximize,
   controlsDisabled = false,
   melt,
+  lights,
   toolbar,
   children,
 }: DesktopWindowProps) {
@@ -185,22 +192,16 @@ export default function DesktopWindow({
   // thing warps out of true — the window stops being a rectangle rather than
   // growing something off the bottom of one.
   const meltAmount = Math.max(0, Math.min(1, melt ?? 0));
-  const meltFilterId = "melt-warp";
-  const meltRadius =
-    meltAmount > 0
-      ? [
-          Math.round(meltAmount * 7),
-          Math.round(meltAmount * 12),
-          Math.round(meltAmount * 34),
-          Math.round(meltAmount * 22),
-        ]
-          .map((r) => `${r}px`)
-          .join(" ")
-      : undefined;
   const frameShadow =
     outline > 0
       ? `0 0 ${5 + 12 * outline}px rgba(0, 255, 186, ${0.2 + 0.28 * outline}), 0 0 0 1px rgba(0, 255, 186, ${0.25 + 0.5 * outline})`
       : undefined;
+
+  // The lit frame's halo is one more shadow on the same box, so it stacks with
+  // whatever the effect outline is already casting rather than replacing it.
+  const isLit = framesLit(lights);
+  const light = isLit && lights ? lightStyles(lights) : null;
+  const boxShadow = [frameShadow, light?.frame.boxShadow].filter(Boolean).join(", ") || undefined;
 
   const style: React.CSSProperties = isMax
     ? {
@@ -212,7 +213,7 @@ export default function DesktopWindow({
         zIndex: Z.WINDOW,
         display: "flex",
         flexDirection: "column",
-        boxShadow: frameShadow,
+        boxShadow,
       }
     : isDocked
       ? {
@@ -224,7 +225,7 @@ export default function DesktopWindow({
           zIndex: Z.WINDOW,
           display: "flex",
           flexDirection: "column",
-          boxShadow: frameShadow,
+          boxShadow,
         }
       : box
         ? {
@@ -236,7 +237,7 @@ export default function DesktopWindow({
             zIndex: Z.WINDOW,
             display: "flex",
             flexDirection: "column",
-            boxShadow: frameShadow,
+            boxShadow,
           }
         : {
             position: "absolute",
@@ -253,11 +254,10 @@ export default function DesktopWindow({
             zIndex: Z.WINDOW,
             display: "flex",
             flexDirection: "column",
-            boxShadow: frameShadow,
+            boxShadow,
           };
 
-  if (meltRadius) style.borderRadius = meltRadius;
-  if (meltAmount > 0) style.filter = `url(#${meltFilterId})`;
+  Object.assign(style, meltStyle(meltAmount));
 
   // The grip lives in its own corner gutter so it never lands on a scrollbar or
   // content edge. The gutter tracks the layout only (not controlsDisabled) so
@@ -269,7 +269,8 @@ export default function DesktopWindow({
 
   return (
     <>
-    {meltAmount > 0 && <MeltFilter id={meltFilterId} amount={meltAmount} />}
+    {meltAmount > 0 && <MeltFilter id={MELT_FILTER_ID} amount={meltAmount} />}
+    {isLit && lights && <FrameLightsStyle lights={lights} />}
     {ghost && (
       <div
         aria-hidden
@@ -304,6 +305,7 @@ export default function DesktopWindow({
           flex: "0 0 auto",
           cursor: isDraggable ? "grab" : undefined,
           touchAction: isDraggable ? "none" : undefined,
+          ...light?.header,
         }}
       >
         <span

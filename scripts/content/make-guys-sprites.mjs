@@ -108,8 +108,25 @@ async function main() {
     cellHeight: Math.round(cellH * SHIP_SCALE),
     columns: cols,
     count: figures.length,
+    // Where the ink actually sits inside its cell, [x, y, w, h] in shipped
+    // pixels. Cells are all the size of the biggest figure and each guy is
+    // centred in his own, so a short one is adrift in a lot of nothing —
+    // anything that has to stand him on a line (the Party portrait does)
+    // needs to know where his feet are.
+    cells: figures.map((f) => [
+      Math.round(Math.round((cellW - f.w) / 2) * SHIP_SCALE),
+      Math.round(Math.round((cellH - f.h) / 2) * SHIP_SCALE),
+      Math.round(f.w * SHIP_SCALE),
+      Math.round(f.h * SHIP_SCALE),
+    ]),
   };
-  await writeFile(MANIFEST_OUT, `${JSON.stringify(manifest, null, 2)}\n`);
+  // One cell per line — 76 four-number arrays exploded over 456 lines is not a
+  // file anybody wants to scroll past.
+  const json = JSON.stringify(manifest, null, 2).replace(
+    /\[\s+(\d+),\s+(\d+),\s+(\d+),\s+(\d+)\s+\]/g,
+    "[$1, $2, $3, $4]",
+  );
+  await writeFile(MANIFEST_OUT, `${json}\n`);
 
   console.log(
     `${figures.length} guys → ${SHEET_OUT} (${shipW}×${shipH}, cell ${Math.round(cellW * SHIP_SCALE)}×${Math.round(cellH * SHIP_SCALE)})`,

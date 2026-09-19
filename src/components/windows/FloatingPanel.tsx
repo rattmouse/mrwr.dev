@@ -2,6 +2,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Button, Window, WindowHeader } from "react95";
+import { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
+import { meltStyle } from "@/components/windows/MeltFilter";
 import { Z } from "@/constants/zIndex";
 
 const TASKBAR_H = 50;
@@ -16,6 +19,21 @@ export type FloatingPanelProps = {
   stackIndex: number;
   onFocus: () => void;
   onClose: () => void;
+  /**
+   * Put the tool window in the same frame the desktop's programs wear — border
+   * and title bar both. Only the frame: what sits inside it stays modern.
+   */
+  dressed?: boolean;
+  /** The frame's lights, so a dressed panel lights up on the same beat as it does. */
+  lights?: FrameLights;
+  /** 0–1 of the frame's warp, so a dressed panel goes out of true along with it. */
+  melt?: number;
+  /**
+   * Where the panel ended up after a drag. The window that opened it keeps
+   * these, so closing a panel and opening it again brings it back where it was
+   * left rather than back to the slot it started in.
+   */
+  onMoved?: (at: { x: number; y: number }) => void;
   children: React.ReactNode;
 };
 
@@ -25,6 +43,13 @@ export type FloatingPanelProps = {
  * paints over the window that opened it. Unlike the Windows 95 frames, it moves
  * live under the pointer rather than trailing a dotted outline: the chrome in
  * here is modern, so the handling is too.
+ *
+ * `dressed` puts it in the desktop's own frame — the 95 border and title bar,
+ * square corners, control button and all — and stops at the frame: the sliders,
+ * swatches and readouts inside it stay modern whichever frame is around them.
+ * The window it came out of is the same trick in reverse, and the toggle for it
+ * is in that window's Frame panel. A panel wearing the frame does whatever the
+ * frame does — it lights up with it, and it warps with it.
  */
 export default function FloatingPanel({
   title,
@@ -33,6 +58,10 @@ export default function FloatingPanel({
   stackIndex,
   onFocus,
   onClose,
+  dressed = false,
+  lights,
+  melt = 0,
+  onMoved,
   children,
 }: FloatingPanelProps) {
   const [pos, setPos] = useState(initial);
@@ -87,8 +116,12 @@ export default function FloatingPanel({
     const prevSelect = document.body.style.userSelect;
     document.body.style.userSelect = "none";
 
+    // Where the drag has got to, kept alongside the state so that finishing can
+    // report the landing spot without waiting for a render to read it back.
+    let latest = base;
     const onMove = (ev: PointerEvent) => {
-      setPos(clampToDesktop(base.x + ev.clientX - startX, base.y + ev.clientY - startY));
+      latest = clampToDesktop(base.x + ev.clientX - startX, base.y + ev.clientY - startY);
+      setPos(latest);
     };
     const finish = (commit: boolean) => {
       window.removeEventListener("pointermove", onMove);
@@ -97,7 +130,12 @@ export default function FloatingPanel({
       window.removeEventListener("keydown", onKey);
       document.body.style.userSelect = prevSelect;
       setDragging(false);
-      if (!commit) setPos(base);
+      if (!commit) {
+        setPos(base);
+        return;
+      }
+      // A click on the title bar that never moved is not worth remembering.
+      if (latest.x !== base.x || latest.y !== base.y) onMoved?.(latest);
     };
     const onUp = () => finish(true);
     const onCancel = () => finish(false);
@@ -115,33 +153,20 @@ export default function FloatingPanel({
   // of the server-rendered page.
   if (typeof document === "undefined") return null;
 
-  return createPortal(
-    <section
-      ref={panelRef}
-      onPointerDown={onFocus}
-      style={{
-        position: "fixed",
-        left: pos.x,
-        top: pos.y,
-        width,
-        maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
-        zIndex: Z.FLOATING + stackIndex,
-        boxSizing: "border-box",
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "rgba(18, 20, 27, 0.86)",
-        backdropFilter: "blur(14px)",
-        WebkitBackdropFilter: "blur(14px)",
-        border: "1px solid rgba(255, 255, 255, 0.12)",
-        boxShadow: dragging
-          ? "0 24px 60px rgba(0, 0, 0, 0.55)"
-          : "0 12px 32px rgba(0, 0, 0, 0.4)",
-        color: "#e8ecf4",
-        font: "13px/1.45 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
-        transition: dragging ? undefined : "box-shadow 140ms ease",
-      }}
-    >
-      <header
+  // Its own soft edge, worn only when it is not in the desktop's frame.
+  const softSkin: React.CSSProperties = {
+    borderRadius: 12,
+    overflow: "hidden",
+    background: "rgba(18, 20, 27, 0.86)",
+    backdropFilter: "blur(14px)",
+    WebkitBackdropFilter: "blur(14px)",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    boxShadow: dragging ? "0 24px 60px rgba(0, 0, 0, 0.55)" : "0 12px 32px rgba(0, 0, 0, 0.4)",
+    transition: dragging ? undefined : "box-shadow 140ms ease",
+  };
+
+  const softHeader = (
+    <header
         onPointerDown={startDrag}
         style={{
           display: "flex",
@@ -196,9 +221,73 @@ export default function FloatingPanel({
             <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
-      </header>
+    </header>
+  );
 
-      <div style={{ padding: 13, display: "flex", flexDirection: "column", gap: 13 }}>{children}</div>
+  const body = (
+    <div style={{ padding: 13, display: "flex", flexDirection: "column", gap: 13 }}>{children}</div>
+  );
+
+  // Dressed, the 95 frame is the whole of the borrowed costume — and it is lit
+  // exactly as the window's own is, or a panel sitting on a flashing desktop
+  // would be the one dead thing on it. Inside, the panel keeps its own dark
+  // interior: nothing in here turns into a grey dialog.
+  const light = dressed && framesLit(lights) && lights ? lightStyles(lights) : null;
+
+  const framed = (
+    <Window
+      style={{
+        width: "100%",
+        padding: 2,
+        boxShadow: light?.frame.boxShadow,
+        ...(dressed ? meltStyle(melt) : null),
+      }}
+    >
+      <WindowHeader
+        onPointerDown={startDrag}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          cursor: dragging ? "grabbing" : "grab",
+          touchAction: "none",
+          ...light?.header,
+        }}
+      >
+        <span>{title}</span>
+        <Button square size="sm" onClick={onClose} aria-label={`Close ${title}`}>
+          <span className="close-icon" />
+        </Button>
+      </WindowHeader>
+      <div style={{ overflow: "hidden", background: "#12141b" }}>{body}</div>
+    </Window>
+  );
+
+  return createPortal(
+    <section
+      ref={panelRef}
+      onPointerDown={onFocus}
+      style={{
+        position: "fixed",
+        left: pos.x,
+        top: pos.y,
+        width,
+        maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
+        zIndex: Z.FLOATING + stackIndex,
+        boxSizing: "border-box",
+        color: "#e8ecf4",
+        font: "13px/1.45 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
+        ...(dressed ? null : softSkin),
+      }}
+    >
+      {dressed ? (
+        framed
+      ) : (
+        <>
+          {softHeader}
+          {body}
+        </>
+      )}
     </section>,
     document.body,
   );

@@ -13,6 +13,23 @@ import { loadMeltNoise } from "@/lib/meltNoise";
  * everything inside a filter's region is re-rasterised whenever anything in the
  * filtered element repaints, and this one contains an animating canvas.
  */
+/** One filter serves the whole desktop, so anything that melts melts alike. */
+export const MELT_FILTER_ID = "melt-warp";
+
+/**
+ * What a melting frame wears: corners going soft at different rates, and the
+ * displacement filter itself. The tool panels borrow this from the window when
+ * they are wearing its frame, so the whole set warps together.
+ */
+export function meltStyle(amount: number): React.CSSProperties {
+  const melt = Math.max(0, Math.min(1, amount));
+  if (melt <= 0) return {};
+  return {
+    borderRadius: [7, 12, 34, 22].map((r) => `${Math.round(melt * r)}px`).join(" "),
+    filter: `url(#${MELT_FILTER_ID})`,
+  };
+}
+
 export function MeltFilter({ id, amount }: { id: string; amount: number }) {
   // Soft at first — a frame that has only just gone warm should waver, not
   // dissolve.
