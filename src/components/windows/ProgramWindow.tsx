@@ -15,6 +15,7 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import DndWindow, { DndWindowHandle } from "@/components/windows/DndWindow";
+import InterfaceWindow, { FrameSettings } from "@/components/windows/InterfaceWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
@@ -130,6 +131,12 @@ export default function ProgramWindow({
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
   const [paintBrush, setPaintBrush] = useState<number>(6);
   const [dndState, setDndState] = useState({ saved: false, dirty: true, count: 0 });
+  // interface.exe reaches back out through its Frame panel and works on the
+  // window around it, so the melt lives out here with the frame rather than
+  // inside the window's content. It is only ever handed to the frame while
+  // interface.exe is the program on screen, and it lasts as long as this window
+  // does — closing it puts the frame back together.
+  const [frame, setFrame] = useState<FrameSettings>({ melt: 0 });
 
   const title =
     id === "notepad"
@@ -146,6 +153,8 @@ export default function ProgramWindow({
                 ? "paint.exe"
                 : id === "dnd"
                   ? "dnd.exe"
+                  : id === "interface"
+                    ? "interface.exe"
         : "mrwr.dev";
   const titleIcon =
     id === "welcome"
@@ -162,7 +171,9 @@ export default function ProgramWindow({
                 ? "../w95_paint.ico"
                 : id === "dnd"
                   ? "../w98_file_eye.ico"
-                  : "../w98_repl.ico";
+                  : id === "interface"
+                    ? "../w95_default.ico"
+                    : "../w98_repl.ico";
 
   const normalHeight =
     id === "welcome" ? 160
@@ -171,9 +182,10 @@ export default function ProgramWindow({
           : id === "midi" ? 480
             : id === "paint" ? 320
               : id === "dnd" ? 520
-                : 300;
+                : id === "interface" ? 420
+                  : 300;
   const normalWidth =
-    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "dnd" ? 560 : undefined;
+    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "dnd" ? 560 : id === "interface" ? 520 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -949,6 +961,7 @@ export default function ProgramWindow({
       onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
       controlsDisabled={contentModalOpen}
+      melt={id === "interface" ? frame.melt : undefined}
       toolbar={toolbar}
     >
       {id === "welcome" && (
@@ -1036,6 +1049,8 @@ export default function ProgramWindow({
       )}
 
       {id === "dnd" && <DndWindow ref={dndRef} onStateChange={setDndState} />}
+
+      {id === "interface" && <InterfaceWindow frame={frame} onFrameChange={setFrame} />}
     </DesktopWindow>
   );
 }

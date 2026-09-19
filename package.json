@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "changelog": "node tools/generate-changelog.mjs",
+    "guys:sprites": "node scripts/content/make-guys-sprites.mjs",
     "changelog:json": "node tools/generate-changelog.mjs --json --output src/data/changelogs.json",
     "container:image": "bash containers/ci.sh image",
     "container:dev": "bash containers/ci.sh dev",

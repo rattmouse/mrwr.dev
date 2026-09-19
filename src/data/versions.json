@@ -18,7 +18,11 @@
         "Party (dnd.exe) no longer throws away a half-finished sheet when you click another character — your edits wait for you, marked with a *, until you come back and Save",
         "Moving or resizing a window works the old way now — a dotted outline follows your pointer and the window jumps there when you let go, and Escape leaves it where it was",
         "Collections now opens on a Cards tab holding the Pokémon card collection — each card shows its number, its set and how rare it is — and the cards scatter across the desktop like the albums and paintings do",
-        "Maximizing Collections now shows whatever you have picked as big as the window will allow, rather than a stamp in the middle of it"
+        "Maximizing Collections now shows whatever you have picked as big as the window will allow, rather than a stamp in the middle of it",
+        "A new window, Interface, sits under Programs › Tools: an old-fashioned frame around a modern one, with a drifting crowd on a canvas that reaches for your pointer and a row of buttons above it — Palette, Motion, Readout and Frame — that each open a small tool window you can drag anywhere on the desktop, floating above the window that opened it",
+        "Interface's Frame tool bends the window it sits in — turn Warp up and the whole frame goes soft and pulls out of true, title bar, borders and all, with its corners rounding off as it goes; Straighten up puts it back",
+        "Interface's canvas is a crowd rather than a scattering of dots: every point is one of a set of little painted figures, walking about in whatever colour the palette is set to — and the Palette tool can swap the whole crowd for rats, for mice, or back to plain dots",
+        "Anyone in that crowd can be picked out of it: click a figure on Interface's canvas and a dashed ring marks it, after which the Palette's colour and shape dress that one alone — one rat among the walkers, or a single point left as a dot — with Reset putting it back in step, and a click on empty canvas handing the Palette back to everybody"
       ]
     },
     {
