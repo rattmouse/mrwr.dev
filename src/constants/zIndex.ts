@@ -2,7 +2,7 @@ export const Z = {
   DESKTOP: 1,
   WINDOW: 10,
   // Floating panels belong to a window but live above it, free of its frame —
-  // interface.exe's tool windows drift anywhere on the desktop. Still under the
+  // party.webp's tool windows drift anywhere on the desktop. Still under the
   // taskbar so Start always wins.
   FLOATING: 500,
   TASKBAR: 1000,

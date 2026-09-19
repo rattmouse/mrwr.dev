@@ -120,7 +120,7 @@ const deepen = (hex: string, amount: number) => {
 };
 
 /**
- * interface.exe: a canvas of drifting nodes that reach for the pointer, with a
+ * party.webp: a canvas of drifting nodes that reach for the pointer, with a
  * strip of menus along the top. Each menu opens a tool window that floats free
  * of this frame — they drag anywhere on the desktop and always sit above it —
  * and every control in them writes straight into what the canvas is drawing.
@@ -132,7 +132,7 @@ const deepen = (hex: string, amount: number) => {
  * The frame around it is the usual Windows 95 dressing; everything inside is
  * deliberately not.
  */
-type InterfaceWindowProps = {
+type PartyWindowProps = {
   frame: FrameSettings;
   /**
    * Change part of what the Frame panel is doing. It is a patch rather than a
@@ -142,7 +142,7 @@ type InterfaceWindowProps = {
   onFrameChange: (patch: Partial<FrameSettings>) => void;
 };
 
-export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindowProps) {
+export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   // Open panels, back to front: the last one is on top, and clicking any panel
   // moves it to the end.
@@ -207,7 +207,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
   const closePanel = useCallback((id: PanelId) => setStack((prev) => prev.filter((p) => p !== id)), []);
 
   // The tool windows can borrow the desktop's frame — border and title bar, and
-  // no more of it than that. interface.exe is a modern window in old dressing;
+  // no more of it than that. party.webp is a modern window in old dressing;
   // this is the same joke told about its panels, and the switch is below.
   const [dressPanels, setDressPanels] = useState(false);
 

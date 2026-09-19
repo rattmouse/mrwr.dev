@@ -1,4 +1,4 @@
-// The displacement map behind interface.exe's melting frame.
+// The displacement map behind party.webp's melting frame.
 //
 // The obvious way to warp the window is `feTurbulence` feeding
 // `feDisplacementMap`, and that is what the frame falls back to. The catch is

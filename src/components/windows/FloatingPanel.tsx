@@ -38,7 +38,7 @@ export type FloatingPanelProps = {
 };
 
 /**
- * A tool window for interface.exe. It escapes its parent window entirely — it
+ * A tool window for party.webp. It escapes its parent window entirely — it
  * portals to the document body, so it drags anywhere on the desktop and always
  * paints over the window that opened it. Unlike the Windows 95 frames, it moves
  * live under the pointer rather than trailing a dotted outline: the chrome in

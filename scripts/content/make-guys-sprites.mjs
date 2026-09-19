@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Cuts the little ink figures out of public/guys.webp — a photograph of a
-// painted sheet — and packs them into the sprite sheet interface.exe draws
+// painted sheet — and packs them into the sprite sheet party.webp draws
 // instead of dots when you switch its nodes over to Guys.
 //
 //   node scripts/content/make-guys-sprites.mjs [--debug]

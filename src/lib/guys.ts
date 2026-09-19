@@ -44,7 +44,7 @@ export function guyBounds(pose: number): { x: number; y: number; w: number; h: n
 let pending: Promise<GuySheet | null> | null = null;
 
 /**
- * The little painted figures interface.exe can draw in place of its dots, cut
+ * The little painted figures party.webp can draw in place of its dots, cut
  * out of a photographed sheet by scripts/content/make-guys-sprites.mjs.
  *
  * The sheet is ~100KB, so it is fetched the first time somebody actually asks
