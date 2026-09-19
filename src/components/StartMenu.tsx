@@ -266,6 +266,7 @@ export default function StartMenu({
             submenu: [
               { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
               { label: "Paint", icon: "../w95_paint.ico", size: "sm", onClick: () => pick("paint") },
+              { label: "Media", icon: "../w95_player.ico", size: "sm", onClick: () => pick("player") },
             ],
           },
           {
