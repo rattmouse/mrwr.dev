@@ -246,7 +246,8 @@ type PortraitProps = {
   style?: React.CSSProperties;
 };
 
-export default function DndPortrait({ character, size = 72, style }: PortraitProps) {
+/** The tile as a W×H grid of colours — what both the SVG and the canvas draw. */
+function portraitGrid(character: Pick<Character, "race" | "cls" | "alignment">): string[][] {
   const material = MATERIALS[character.race] ?? DEFAULT_MATERIAL;
   const kit = LOADOUTS[character.cls] ?? DEFAULT_LOADOUT;
   const t = tallness(character.race);
@@ -310,6 +311,49 @@ export default function DndPortrait({ character, size = 72, style }: PortraitPro
       if (ink) grid[oy + y][ox + x] = ink;
     }
   }
+
+  return grid;
+}
+
+const sprites = new Map<string, HTMLCanvasElement>();
+
+/**
+ * The same tile as a one-pixel-per-pixel canvas, for the crowd on interface.exe's
+ * canvas — a party member is a drawImage a frame rather than 744 rects. Cached
+ * per look, since two Human Fighters of the same alignment are the same picture.
+ */
+export function portraitSprite(
+  character: Pick<Character, "race" | "cls" | "alignment">,
+): HTMLCanvasElement | null {
+  const key = `${character.race}|${character.cls}|${character.alignment}`;
+  const cached = sprites.get(key);
+  if (cached) return cached;
+  if (typeof document === "undefined") return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const grid = portraitGrid(character);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      ctx.fillStyle = grid[y][x];
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  sprites.set(key, canvas);
+  return canvas;
+}
+
+/** How wide the tile is for a given height, so callers keep it in proportion. */
+export const portraitWidth = (height: number) => Math.round((height * W) / H);
+
+export default function DndPortrait({ character, size = 72, style }: PortraitProps) {
+  const material = MATERIALS[character.race] ?? DEFAULT_MATERIAL;
+  const grid = portraitGrid(character);
 
   const pixels: React.ReactNode[] = [];
   for (let y = 0; y < H; y++) {

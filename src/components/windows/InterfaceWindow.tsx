@@ -1,11 +1,16 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import DndPortrait, { portraitSprite, portraitWidth } from "@/components/windows/DndPortrait";
 import FloatingPanel from "@/components/windows/FloatingPanel";
+import PartyPanel from "@/components/windows/PartyPanel";
+import { WALK_MS, WALK_STAGGER_MS, type Character } from "@/lib/dnd";
 import { emojiSprite } from "@/lib/emojiSprite";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
+import { useParty } from "@/lib/useParty";
 
-export type PanelId = "palette" | "motion" | "readout" | "frame";
+export type PanelId = "palette" | "motion" | "readout" | "frame" | "party";
 
 /** What the Frame panel is doing to the window around this one: 0–1 of warp. */
 export type FrameSettings = { melt: number };
@@ -15,6 +20,7 @@ const PANELS: { id: PanelId; label: string; title: string; width: number }[] = [
   { id: "motion", label: "Motion", title: "Motion", width: 246 },
   { id: "readout", label: "Readout", title: "Readout", width: 214 },
   { id: "frame", label: "Frame", title: "Frame", width: 246 },
+  { id: "party", label: "Party", title: "Party", width: 322 },
 ];
 
 const ACCENTS = ["#5eead4", "#818cf8", "#f472b6", "#fbbf24", "#a3e635"] as const;
@@ -60,6 +66,8 @@ type Node = {
   guy: number;
   flip: boolean;
   size: number;
+  /** Set on the nodes standing in for party members, to the character's id. */
+  charId?: string;
 };
 
 const DEFAULTS: Settings = {
@@ -71,8 +79,12 @@ const DEFAULTS: Settings = {
   shape: "guys",
 };
 
-// How tall a guy stands on the canvas, before his own size roll.
+// How tall a guy stands on the canvas, before his own size roll. A party member
+// stands a little taller than the crowd — the loadout tile has more in it.
 const GUY_HEIGHT = 26;
+const PARTY_HEIGHT = 34;
+
+const heightOf = (node: Node) => (node.charId ? PARTY_HEIGHT : GUY_HEIGHT) * node.size;
 
 // How many opacity steps the links are drawn in. Five is under the threshold
 // where the banding shows and well under the point where the draw calls hurt.
@@ -107,6 +119,10 @@ const deepen = (hex: string, amount: number) => {
  * of this frame — they drag anywhere on the desktop and always sit above it —
  * and every control in them writes straight into what the canvas is drawing.
  *
+ * One of those tools is the Party: roll up an adventurer, Save them, and they
+ * join the drift as a node of their own — clickable, named, and gone with the
+ * rest of the party when its ten minutes are up.
+ *
  * The frame around it is the usual Windows 95 dressing; everything inside is
  * deliberately not.
  */
@@ -125,7 +141,17 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
   // Both are kept in React state so the panels can show them, and mirrored into
   // refs so the draw loop can read them without re-subscribing.
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // The picked node's character, when the thing picked was a party member.
+  const [selectedChar, setSelectedChar] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<number, NodeOverride>>({});
+
+  const party = useParty();
+  // Who is mid-walk-off and where each of them set out from, in viewport px —
+  // taken from where they were standing on the canvas when the clock ran out.
+  const [walk, setWalk] = useState<{
+    members: Character[];
+    spots: Record<string, { x: number; y: number }>;
+  } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -147,6 +173,19 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
     selectedRef.current = selectedId;
   }, [selectedId]);
   const nextNodeId = useRef(1);
+  // The party's own nodes, kept apart from the crowd so the density slider
+  // never thins a member away, plus where each of them last stood.
+  const partyRef = useRef<Node[]>([]);
+  const rosterRef = useRef<Character[]>(party.roster);
+  useEffect(() => {
+    rosterRef.current = party.roster;
+  }, [party.roster]);
+  const partyPosRef = useRef(new Map<string, { x: number; y: number }>());
+
+  const clearPick = useCallback(() => {
+    setSelectedId(null);
+    setSelectedChar(null);
+  }, []);
 
   const openPanel = (id: PanelId) =>
     setStack((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
@@ -163,7 +202,13 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
   // picked they work on the crowd, exactly as they did before. The controls
   // themselves are the same either way — they just show, and write, whichever
   // of the two is in scope.
-  const selectedOverride = selectedId === null ? null : (overrides[selectedId] ?? {});
+  // A party member is a node like any other, but the Palette is not where they
+  // are dressed — their sheet is. So the per-node controls only take hold on
+  // the crowd, and picking a member sends you to the Party panel instead.
+  const selectedCharacter =
+    selectedChar === null ? null : (party.roster.find((c) => c.id === selectedChar) ?? null);
+  const editable = selectedId !== null && selectedCharacter === null;
+  const selectedOverride = !editable || selectedId === null ? null : (overrides[selectedId] ?? {});
   const activeAccent = selectedOverride?.color ?? settings.accent;
   const activeShape = selectedOverride?.shape ?? settings.shape;
   const editSelected = (patch: NodeOverride) => {
@@ -231,20 +276,35 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
+    const bornNode = (): Node => ({
+      id: nextNodeId.current++,
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: Math.random() * 2 - 1,
+      vy: Math.random() * 2 - 1,
+      guy: Math.floor(Math.random() * 1e6),
+      flip: Math.random() < 0.5,
+      size: 0.78 + Math.random() * 0.5,
+    });
+
     const spawn = (count: number) => {
       const nodes = nodesRef.current;
       while (nodes.length > count) nodes.pop();
-      while (nodes.length < count) {
-        nodes.push({
-          id: nextNodeId.current++,
-          x: Math.random() * width,
-          y: Math.random() * height,
-          vx: Math.random() * 2 - 1,
-          vy: Math.random() * 2 - 1,
-          guy: Math.floor(Math.random() * 1e6),
-          flip: Math.random() < 0.5,
-          size: 0.78 + Math.random() * 0.5,
-        });
+      while (nodes.length < count) nodes.push(bornNode());
+    };
+
+    // A party member is a node too: one walks onto the canvas when they are
+    // saved, and off it when they are struck from the roster or the party goes.
+    // They never face backwards — the loadout tile reads wrong mirrored.
+    const syncParty = () => {
+      const members = rosterRef.current;
+      const party = partyRef.current;
+      for (let i = party.length - 1; i >= 0; i -= 1) {
+        if (!members.some((m) => m.id === party[i].charId)) party.splice(i, 1);
+      }
+      for (const member of members) {
+        if (party.some((n) => n.charId === member.id)) continue;
+        party.push({ ...bornNode(), flip: false, charId: member.id });
       }
     };
 
@@ -286,7 +346,10 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
 
       const { accent, surface, density, speed, reach, shape } = settingsRef.current;
       spawn(density);
-      const nodes = nodesRef.current;
+      syncParty();
+      // The crowd and the party drift, link and are picked as one lot; they are
+      // only kept in two arrays so the density slider can't cull a member.
+      const nodes = nodesRef.current.concat(partyRef.current);
       const light = isLight(surface);
       const ink = light ? "15, 20, 30" : "232, 236, 244";
       const step = (dt / 16.67) * speed;
@@ -363,7 +426,34 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
         return tone;
       };
 
+      const byId = new Map(rosterRef.current.map((member) => [member.id, member] as const));
+
       for (const node of nodes) {
+        if (node.charId) {
+          const member = byId.get(node.charId);
+          if (!member) continue;
+          // Remembered for the walk-off, which sets out from where they stood.
+          partyPosRef.current.set(node.charId, { x: node.x, y: node.y });
+
+          const h = heightOf(node);
+          const sprite = portraitSprite(member);
+          if (sprite) {
+            const w = portraitWidth(h);
+            ctx.save();
+            // The tile is 24×31 actual pixels; smoothing turns it to mush.
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(sprite, node.x - w / 2, node.y - h / 2, w, h);
+            ctx.restore();
+          }
+          // Their name under them, so a party reads as a party and not as five
+          // more of the crowd.
+          ctx.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillStyle = `rgba(${ink}, 0.72)`;
+          ctx.fillText(member.name.trim() || "unnamed", node.x, node.y + h / 2 + 11);
+          continue;
+        }
+
         const override = nodeOverrides[node.id];
         const nodeShape = override?.shape ?? shape;
         const tone = toneOf(override?.color ?? accent);
@@ -419,7 +509,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
           ctx.setLineDash([4, 4]);
           ctx.lineDashOffset = -((now / 45) % 8);
           ctx.beginPath();
-          ctx.arc(node.x, node.y, (GUY_HEIGHT * node.size) / 2 + 7, 0, Math.PI * 2);
+          ctx.arc(node.x, node.y, heightOf(node) / 2 + 7, 0, Math.PI * 2);
           ctx.stroke();
           ctx.restore();
         }
@@ -440,7 +530,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
         });
         // Turning the density down can thin away the node that was picked.
         const picked = selectedRef.current;
-        if (picked !== null && !nodes.some((n) => n.id === picked)) setSelectedId(null);
+        if (picked !== null && !nodes.some((n) => n.id === picked)) clearPick();
       }
     };
 
@@ -449,7 +539,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
       window.cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, []);
+  }, [clearPick]);
 
   const trackPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -461,23 +551,58 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
 
   // Clicking the canvas picks the node under the pointer — its own size decides
   // how big a target it is — and clicking past everyone puts the panels back to
-  // working on the whole crowd.
+  // working on the whole crowd. Click a party member and their sheet comes up
+  // in the Party panel, which is the only place they can actually be changed.
   const pickNode = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     let best: Node | null = null;
     let bestDistance = Infinity;
-    for (const node of nodesRef.current) {
+    for (const node of nodesRef.current.concat(partyRef.current)) {
       const distance = Math.hypot(node.x - x, node.y - y);
-      const radius = Math.max(14, (GUY_HEIGHT * node.size) / 2 + 5);
+      const radius = Math.max(14, heightOf(node) / 2 + 5);
       if (distance <= radius && distance < bestDistance) {
         bestDistance = distance;
         best = node;
       }
     }
     setSelectedId(best ? best.id : null);
+    setSelectedChar(best?.charId ?? null);
+    const member = best?.charId ? party.roster.find((c) => c.id === best.charId) : undefined;
+    if (member) party.select(member);
   };
+
+  // The other way round: a row in the Party panel rings that member on canvas.
+  const pickCharacter = useCallback(
+    (character: Character) => {
+      party.select(character);
+      const node = partyRef.current.find((n) => n.charId === character.id);
+      setSelectedId(node?.id ?? null);
+      setSelectedChar(node ? character.id : null);
+    },
+    [party],
+  );
+
+  // When the party walks off, everyone sets out from wherever they were
+  // standing, crosses the desktop behind the windows, and is gone.
+  useEffect(() => {
+    const departing = party.departing;
+    if (!departing) {
+      setWalk(null);
+      return;
+    }
+    const rect = wrapRef.current?.getBoundingClientRect();
+    const spots: Record<string, { x: number; y: number }> = {};
+    for (const member of departing.members) {
+      const spot = partyPosRef.current.get(member.id);
+      spots[member.id] =
+        spot && rect
+          ? { x: rect.left + spot.x, y: rect.top + spot.y }
+          : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    }
+    setWalk({ members: departing.members, spots });
+  }, [party.departing]);
 
   return (
     <div
@@ -563,9 +688,10 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
             {id === "palette" && (
               <>
                 <Scope
-                  selected={selectedId !== null}
+                  selected={editable}
+                  character={selectedCharacter}
                   edited={edited}
-                  onClear={() => setSelectedId(null)}
+                  onClear={clearPick}
                   onReset={resetSelected}
                   hasOverride={Boolean(selectedOverride && Object.keys(selectedOverride).length > 0)}
                 />
@@ -578,7 +704,7 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
                         aria-label={accent}
                         aria-pressed={activeAccent === accent}
                         onClick={() =>
-                          selectedId === null ? set("accent", accent) : editSelected({ color: accent })
+                          editable ? editSelected({ color: accent }) : set("accent", accent)
                         }
                         style={{
                           width: 26,
@@ -606,9 +732,9 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
                     value={activeShape}
                     accent={settings.accent}
                     onChange={(value) =>
-                      selectedId === null
-                        ? set("shape", value as NodeShape)
-                        : editSelected({ shape: value as NodeShape })
+                      editable
+                        ? editSelected({ shape: value as NodeShape })
+                        : set("shape", value as NodeShape)
                     }
                   />
                 </Field>
@@ -688,6 +814,10 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
               </>
             )}
 
+            {id === "party" && (
+              <PartyPanel party={party} accent={settings.accent} onPick={pickCharacter} />
+            )}
+
             {id === "readout" && (
               <div style={{ display: "grid", gap: 7 }}>
                 <Stat label="Frames" value={`${stats.fps}/s`} accent={settings.accent} />
@@ -695,15 +825,65 @@ export default function InterfaceWindow({ frame, onFrameChange }: InterfaceWindo
                 <Stat label="Pointer" value={`${stats.x}, ${stats.y}`} accent={settings.accent} />
                 <Stat
                   label="Picked"
-                  value={selectedId === null ? "none" : `#${selectedId} · ${SHAPE_NAMES[activeShape]}`}
+                  value={
+                    selectedCharacter
+                      ? `${selectedCharacter.name} · ${selectedCharacter.cls}`
+                      : selectedId === null
+                        ? "none"
+                        : `#${selectedId} · ${SHAPE_NAMES[activeShape]}`
+                  }
                   accent={settings.accent}
                 />
+                <Stat label="Party" value={`${party.roster.length}`} accent={settings.accent} />
                 <Stat label="Edited" value={`${edited}`} accent={settings.accent} />
               </div>
             )}
           </FloatingPanel>
         );
       })}
+
+      {walk &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            aria-hidden
+            style={{
+              position: "fixed",
+              inset: 0,
+              // Between the desktop and the windows, so they file out from
+              // behind the frame they were drifting in.
+              zIndex: 5,
+              pointerEvents: "none",
+              overflow: "hidden",
+            }}
+          >
+            <style>{`
+              @keyframes party-walk-right { from { transform: translateX(0); } to { transform: translateX(100vw); } }
+              @keyframes party-walk-left { from { transform: translateX(0) scaleX(-1); } to { transform: translateX(-100vw) scaleX(-1); } }
+              @keyframes party-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+            `}</style>
+            {walk.members.map((c, i) => {
+              const spot = walk.spots[c.id];
+              const goesRight = i % 2 === 0;
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    position: "absolute",
+                    left: spot.x - 24,
+                    top: spot.y - 24,
+                    animation: `${goesRight ? "party-walk-right" : "party-walk-left"} ${WALK_MS}ms linear ${i * WALK_STAGGER_MS}ms both`,
+                  }}
+                >
+                  <div style={{ animation: "party-bob 160ms steps(1) infinite alternate" }}>
+                    <DndPortrait character={c} size={48} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -727,12 +907,14 @@ function initialSpot(slot: number, width: number) {
  */
 function Scope({
   selected,
+  character,
   edited,
   hasOverride,
   onClear,
   onReset,
 }: {
   selected: boolean;
+  character: Character | null;
   edited: number;
   hasOverride: boolean;
   onClear: () => void;
@@ -764,15 +946,19 @@ function Scope({
       }}
     >
       <span style={{ flex: "1 1 auto" }}>
-        {selected ? "Editing one node" : "Click a node to edit just that one"}
-        {!selected && edited > 0 ? ` · ${edited} edited` : ""}
+        {character
+          ? `${character.name} is on the sheet — the Party panel dresses them`
+          : selected
+            ? "Editing one node"
+            : "Click a node to edit just that one"}
+        {!selected && !character && edited > 0 ? ` · ${edited} edited` : ""}
       </span>
       {selected && hasOverride && (
         <button type="button" style={pill} onClick={onReset}>
           Reset
         </button>
       )}
-      {selected && (
+      {(selected || character) && (
         <button type="button" style={pill} onClick={onClear}>
           Done
         </button>

@@ -266,7 +266,6 @@ export default function StartMenu({
             submenu: [
               { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
               { label: "Paint", icon: "../w95_paint.ico", size: "sm", onClick: () => pick("paint") },
-              { label: "Interface", icon: "../w95_default.ico", size: "sm", onClick: () => pick("interface") },
             ],
           },
           {
@@ -277,7 +276,7 @@ export default function StartMenu({
               { label: "Collections", icon: "../w98_collections_cards.ico", size: "sm", onClick: () => pick("collections") },
               { label: "Sounds", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
               { label: "Keys", icon: "../w98_music.ico", size: "sm", onClick: () => pick("midi") },
-              { label: "Party", icon: "../w98_file_eye.ico", size: "sm", onClick: () => pick("dnd") },
+              { label: "Party", icon: "../w98_file_eye.ico", size: "sm", onClick: () => pick("interface") },
             ],
           },
         ],
