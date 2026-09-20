@@ -278,6 +278,7 @@ export default function StartMenu({
               { label: "Sounds", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
               { label: "Keys", icon: "../w98_music.ico", size: "sm", onClick: () => pick("midi") },
               { label: "Party", icon: "../w98_file_eye.ico", size: "sm", onClick: () => pick("party") },
+              { label: "Marbles", icon: "../w95_marble.ico", size: "sm", onClick: () => pick("marbles") },
             ],
           },
         ],
