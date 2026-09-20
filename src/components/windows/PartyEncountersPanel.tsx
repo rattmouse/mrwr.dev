@@ -11,7 +11,9 @@ import type { Encounter } from "@/lib/partyEncounters";
  * else backs off, or a guest, and the whole crowd comes over — along with a
  * hook to explain why they are there and what the party comes away with.
  *
- * Nothing here is fought or won. It is a prompt, not a game.
+ * This panel is the record of what has turned up: one line per roll, newest at
+ * the top. What any of them then does to anybody is the Goings-on panel's
+ * business, and it is that panel this one keeps pointing at.
  */
 export default function PartyEncountersPanel({
   encounters,
@@ -42,8 +44,8 @@ export default function PartyEncountersPanel({
     <>
       <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
         {party === 0
-          ? "Roll somebody in. With nobody on the roster, only the crowd will react to them."
-          : "Roll somebody in. The party closes on whatever turns up; the crowd scatters from a monster and gathers round a guest."}
+          ? "Roll somebody in. With nobody on the roster it is the crowd's problem — they scatter, and then they start throwing things."
+          : "Roll somebody in. The party closes on whatever turns up and has it out with it; the crowd scatters from a monster and gathers round a guest. Goings-on has the blow-by-blow."}
       </p>
 
       <button

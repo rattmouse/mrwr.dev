@@ -9,12 +9,14 @@
  * That is the whole difference, and it is enough to tell them apart across a
  * room.
  *
- * None of it is a game. There is nothing to win and the monster cannot be
- * fought; it is a prompt, the way the roster is a character sheet rather than
- * a character.
+ * This module only gets them onto the canvas and moves them about on it. What
+ * happens when one of them actually catches somebody — the blows, the numbers
+ * coming off whoever they landed on, who ends up flat on their back — is
+ * partyExchanges' business, and everything here that a fight needs is the
+ * couple of tallies the Arrival carries for it.
  */
 
-import type { Node } from "@/lib/partyCanvas";
+import { isDown, type Node } from "@/lib/partyCanvas";
 
 /** Whether the crowd backs away from this one or comes over to look. */
 export type ArrivalKind = "threat" | "welcome";
@@ -33,6 +35,29 @@ export type Arrival = {
   /** It wanders in, and it wanders off again after this. */
   goesAt: number;
   arrivedAt: number;
+  /** What it can take before it gives up and goes. Guests are never hit. */
+  hp: number;
+  max: number;
+  /** When it can next take a swing at whoever is in front of it. */
+  swingAt: number;
+  /** How many times it has done something to somebody, or somebody to it. */
+  turns: number;
+  /** Damage dealt, or — for a guest — hit points handed back out. */
+  dealt: number;
+  taken: number;
+  /** Who it is presently dealing with, by name. */
+  with: string;
+  /** The last thing that happened, in words, for the Goings-on panel. */
+  last: string;
+  /**
+   * Why it is here and what it is carrying, kept on the arrival as well as on
+   * the Encounter so that beating it can hand the loot over, and so that
+   * picking it on the canvas has something to tell you about it.
+   */
+  hook: string;
+  reward: string;
+  /** True once it has been driven off, rather than having stayed its welcome out. */
+  beaten: boolean;
 };
 
 type Somebody = { name: string; face: string; size: number };
@@ -143,6 +168,15 @@ const WELCOME_CHANCE = 0.1;
 
 export const arrivalSize = (arrival: Arrival) => SMALLEST + (LARGEST - SMALLEST) * arrival.size;
 
+/**
+ * What one of them can take before it has had enough, by how big it is. It runs
+ * steeply on purpose: a goblin goes down to a couple of good swings and the
+ * odd rock, while a dragon simply outlasts its own welcome — there is nothing
+ * a party of three can do to one in forty seconds but survive it. Guests carry
+ * the number too and never spend any of it; nobody hits a guest.
+ */
+export const arrivalHp = (size: number) => Math.round(14 + size * 90);
+
 export type Encounter = {
   id: number;
   at: number;
@@ -176,6 +210,9 @@ export function rollEncounter(
   const toX = width * (0.3 + Math.random() * 0.4);
   const toY = height * (0.3 + Math.random() * 0.4);
   const away = Math.max(1, Math.hypot(toX - spot.x, toY - spot.y));
+  const hook = pick(kind === "welcome" ? WELCOMES : HOOKS);
+  const reward = pick(kind === "welcome" ? GIFTS : LOOT);
+  const stuffing = arrivalHp(somebody.size);
 
   return {
     arrival: {
@@ -191,14 +228,26 @@ export function rollEncounter(
       vy: ((toY - spot.y) / away) * (2.6 - somebody.size * 1.4),
       arrivedAt: now,
       goesAt: now + STAY_MS,
+      hp: stuffing,
+      max: stuffing,
+      // It gets its bearings before it starts on anybody.
+      swingAt: now + 1200,
+      turns: 0,
+      dealt: 0,
+      taken: 0,
+      with: "",
+      last: kind === "welcome" ? "looking for somebody to help" : "sizing the room up",
+      hook,
+      reward,
+      beaten: false,
     },
     encounter: {
       id: nextId(),
       at: Date.now(),
       kind,
       who: somebody.name,
-      hook: pick(kind === "welcome" ? WELCOMES : HOOKS),
-      reward: pick(kind === "welcome" ? GIFTS : LOOT),
+      hook,
+      reward,
     },
   };
 }
@@ -209,6 +258,18 @@ export function rollEncounter(
 const REACH = 5.5;
 const BRAVERY = 0.055;
 const FRIGHT = 0.16;
+// What the party does about something on the far side of the canvas, where its
+// presence is not felt at all: they set off towards it anyway. This is the only
+// reason an encounter is reliably an encounter — a party of three and a monster
+// adrift in a window this size will otherwise often never meet, and forty
+// seconds is not long to be crossing a room in.
+//
+// It is an acceleration like everything else here, and what holds it in check
+// is the walking pace the crowd is kept at, which is forever easing everybody
+// back down to a stroll. The two settle against each other at a little under
+// five times that stroll — a party that has plainly set off somewhere, and
+// arrives well inside the time their visitor is staying.
+const SEEK = 0.012;
 // Curiosity is gentler than fright and slower to arrive: a crowd gathering has
 // all the time in the world, a crowd getting out of the way does not.
 const CURIOSITY = 0.045;
@@ -217,6 +278,33 @@ const CURIOSITY = 0.045;
 const GATHER_AT = 1.9;
 const DRAG = 0.02;
 const WANDER = 0.035;
+// What a monster does about the fact that everybody keeps getting out of its
+// way: it goes after whoever is nearest. Held down by the drag above to a shade
+// over twice a stroll, so it runs down the dawdlers and the unlucky while the
+// rest of the crowd stays ahead of it — which is the whole picture of a crowd
+// with something in it. Guests do not do this. Guests are not chasing anybody.
+const HUNT = 0.025;
+// Close enough to try, and what it puts into trying. Without this the crowd's
+// fright — which is far stronger than anything a monster can walk at — parts
+// around it perfectly for ever and it never lays a hand on a soul. With it, the
+// unlucky and the slow get caught, which is the point of there being a monster.
+const LUNGE_AT = 3;
+const LUNGE = 6;
+
+/** Whoever is closest and still on their feet, for something to go after. */
+function nearest(arrival: Arrival, nodes: Node[]): Node | null {
+  let best: Node | null = null;
+  let bestAway = Infinity;
+  for (const node of nodes) {
+    if (isDown(node)) continue;
+    const away = Math.hypot(node.x - arrival.x, node.y - arrival.y);
+    if (away < bestAway) {
+      bestAway = away;
+      best = node;
+    }
+  }
+  return best;
+}
 
 /**
  * Move whoever has wandered in and let everyone react to them. The party
@@ -240,14 +328,26 @@ export function stepArrivals(
     }
     if (step === 0) continue;
 
+    const size = arrivalSize(arrival);
+
     // They keep moving, turn when they meet a wall, and drift.
     arrival.vx += (Math.random() * 2 - 1) * WANDER * step;
     arrival.vy += (Math.random() * 2 - 1) * WANDER * step;
+    if (arrival.kind === "threat" && !arrival.beaten) {
+      const quarry = nearest(arrival, nodes);
+      if (quarry) {
+        const dx = quarry.x - arrival.x;
+        const dy = quarry.y - arrival.y;
+        const away = Math.max(1, Math.hypot(dx, dy));
+        const after = HUNT * (away < size * LUNGE_AT ? LUNGE : 1) * step;
+        arrival.vx += (dx / away) * after;
+        arrival.vy += (dy / away) * after;
+      }
+    }
     arrival.vx *= Math.max(0, 1 - DRAG * step);
     arrival.vy *= Math.max(0, 1 - DRAG * step);
     arrival.x += arrival.vx * step;
     arrival.y += arrival.vy * step;
-    const size = arrivalSize(arrival);
     const edge = size / 2;
     if (arrival.x < edge && arrival.vx < 0) arrival.vx = -arrival.vx;
     if (arrival.x > width - edge && arrival.vx > 0) arrival.vx = -arrival.vx;
@@ -259,12 +359,20 @@ export function stepArrivals(
       const dx = arrival.x - node.x;
       const dy = arrival.y - node.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < 1 || dist > reach) continue;
+      if (dist < 1) continue;
+      // Somebody flat on their back is out of it: they don't run, they don't
+      // close in, and nothing drags them across the canvas by the ankles.
+      if (isDown(node)) continue;
+      // Everybody else only reacts to what they can feel from where they are
+      // standing. The party is the exception, below.
+      if (dist > reach && !node.charId) continue;
       const near = 1 - dist / reach;
       if (node.charId) {
-        // The party closes in — but stops short of walking into the thing.
+        // The party closes in — but stops short of walking into the thing —
+        // and from right across the canvas sets off towards it in the first
+        // place, because that is what the party is for.
         const want = dist > size * 1.1 ? 1 : -1.6;
-        const pull = near * BRAVERY * want * step;
+        const pull = dist > reach ? SEEK * step : near * BRAVERY * want * step;
         node.vx += (dx / dist) * pull;
         node.vy += (dy / dist) * pull;
       } else if (arrival.kind === "welcome") {
