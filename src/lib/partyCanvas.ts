@@ -23,7 +23,33 @@ export type Node = {
   size: number;
   /** Set on the nodes standing in for party members, to the character's id. */
   charId?: string;
+  /**
+   * What a scrap has left of them. Only there once something has actually
+   * picked a fight with this one, and filled in entirely by partyExchanges,
+   * which owns every rule about it.
+   */
+  vitals?: Vitals;
 };
+
+/**
+ * How somebody is holding up. It rides on the node rather than in a table of
+ * its own so that the forces and the draw loop can both tell at a glance who
+ * is lying down — and so that it dies with the node when the density slider
+ * thins the crowd, rather than needing sweeping up afterwards.
+ */
+export type Vitals = {
+  hp: number;
+  max: number;
+  /** When somebody knocked down gets up again; 0 while they are still on their feet. */
+  upAt: number;
+  /** When they can next take a swing, or throw something. */
+  swingAt: number;
+  /** When they next get a point back, left alone. */
+  mendAt: number;
+};
+
+/** Flat out and out of it: no longer a target, and no longer going anywhere. */
+export const isDown = (node: Node) => (node.vitals?.upAt ?? 0) > 0;
 
 export type Pointer = { x: number; y: number; on: boolean };
 

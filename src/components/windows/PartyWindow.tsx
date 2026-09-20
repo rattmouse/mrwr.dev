@@ -10,6 +10,8 @@ import { NO_LIGHTS, type FrameLights } from "@/components/windows/FrameLights";
 import PartyConsole from "@/components/windows/PartyConsole";
 import PartyDicePanel from "@/components/windows/PartyDicePanel";
 import PartyEncountersPanel from "@/components/windows/PartyEncountersPanel";
+import PartyGoingsPanel from "@/components/windows/PartyGoingsPanel";
+import PartyInfoPanel, { type Picked } from "@/components/windows/PartyInfoPanel";
 import {
   Dial,
   Field,
@@ -29,6 +31,7 @@ import {
   forcesAtRest,
   formationHolding,
   holdStrength,
+  isDown,
   keepWandering,
   DEFAULT_LINKS,
   LINK_ALL,
@@ -56,12 +59,23 @@ import {
   type Roll,
 } from "@/lib/partyDice";
 import {
+  arrivalSize,
   drawArrivals,
   rollEncounter,
   stepArrivals,
   type Arrival,
   type Encounter,
 } from "@/lib/partyEncounters";
+import {
+  drawHits,
+  drawVitals,
+  goingsOn,
+  stepExchanges,
+  stepHits,
+  NO_GOINGS,
+  type Goings,
+  type Hit,
+} from "@/lib/partyExchanges";
 import { useParty } from "@/lib/useParty";
 import { usePartyLog } from "@/lib/usePartyLog";
 
@@ -73,6 +87,8 @@ export type PanelId =
   | "links"
   | "dice"
   | "encounters"
+  | "goings"
+  | "info"
   | "readout"
   | "frame"
   | "console"
@@ -94,6 +110,8 @@ const PANELS: { id: PanelId; label: string; title: string; width: number }[] = [
   { id: "links", label: "Links", title: "Links", width: 252 },
   { id: "dice", label: "Dice", title: "Dice", width: 262 },
   { id: "encounters", label: "Encounters", title: "Encounters", width: 274 },
+  { id: "goings", label: "Goings-on", title: "Goings-on", width: 300 },
+  { id: "info", label: "Info", title: "Info", width: 286 },
   { id: "readout", label: "Readout", title: "Readout", width: 214 },
   { id: "frame", label: "Frame", title: "Frame", width: 246 },
   { id: "console", label: "Console", title: "Console", width: 306 },
@@ -293,6 +311,13 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   // The picked node's character, when the thing picked was a party member.
   const [selectedChar, setSelectedChar] = useState<string | null>(null);
+  // Or the one that wandered in, when that is what was clicked. It is its own
+  // piece of state rather than another kind of selected id because arrivals and
+  // nodes are numbered from two different counters and could collide.
+  const [selectedArrival, setSelectedArrival] = useState<number | null>(null);
+  // Everything the Info panel says about whichever of them is picked, read off
+  // the canvas along with the rest of the readout.
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [overrides, setOverrides] = useState<Record<number, NodeOverride>>({});
 
   const party = useParty();
@@ -315,11 +340,23 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   const arrivalsRef = useRef<Arrival[]>([]);
   const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [visiting, setVisiting] = useState(0);
+  // The numbers lifting off whoever they happened to, and the account of it
+  // all that the Goings-on panel reads. The numbers live in a ref like the
+  // crowd and the dice do; the account is taken off the canvas four times a
+  // second, which is as often as anyone can read it.
+  const hitsRef = useRef<Hit[]>([]);
+  const [goings, setGoings] = useState<Goings>(NO_GOINGS);
   // Only so the panel can grey the button out while the party is lining up.
   const [liningUp, setLiningUp] = useState(false);
   // Pulled out so the effects below can depend on it: the log itself is a new
   // object every time a line is written, this is the same function throughout.
   const { note } = log;
+  // And mirrored into a ref for the draw loop, which is set up once and never
+  // torn down — the fight on the canvas has things to say about itself.
+  const noteRef = useRef(note);
+  useEffect(() => {
+    noteRef.current = note;
+  }, [note]);
   // Who is mid-walk-off and where each of them set out from, in viewport px —
   // taken from where they were standing on the canvas when the clock ran out.
   const [walk, setWalk] = useState<{
@@ -354,6 +391,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   useEffect(() => {
     selectedRef.current = selectedId;
   }, [selectedId]);
+  const selectedArrivalRef = useRef<number | null>(selectedArrival);
+  useEffect(() => {
+    selectedArrivalRef.current = selectedArrival;
+  }, [selectedArrival]);
   const nextNodeId = useRef(1);
   // The party's own nodes, kept apart from the crowd so the density slider
   // never thins a member away, plus where each of them last stood.
@@ -422,6 +463,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   const clearPick = useCallback(() => {
     setSelectedId(null);
     setSelectedChar(null);
+    setSelectedArrival(null);
   }, []);
 
   const panelName = (id: PanelId) => PANELS.find((p) => p.id === id)?.label.toLowerCase() ?? id;
@@ -719,7 +761,18 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       // monster on it sends the crowd running while the party closes in, and a
       // guest gathers everybody in together.
       stepDice(diceRef.current, nodes, { step, now, width, height });
+      // Whoever has wandered in gets their frame of everyone before they are
+      // moved and, if their time is up, taken off the canvas — that order is
+      // what lets somebody be seen off in the log on the way out.
+      stepExchanges(arrivalsRef.current, nodes, hitsRef.current, {
+        step,
+        now,
+        memberOf: (id) => rosterRef.current.find((member) => member.id === id),
+        nextId: () => nextDieId.current++,
+        note: (line) => noteRef.current(line),
+      });
       stepArrivals(arrivalsRef.current, nodes, { step, now, width, height });
+      stepHits(hitsRef.current, { frames: dt / 16.67, now });
       const initiative = initiativeRef.current;
       if (initiative) {
         if (now > initiative.until) initiativeRef.current = null;
@@ -775,6 +828,19 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       // when the crowd has been let out, a second time into the canvas lying
       // over the desktop — same crowd, same lines, shifted to wherever the
       // window happens to be sitting.
+      // Put the canvas over one of the crowd, ready to draw them: the right way
+      // round or the other way round, and on their back if that is where
+      // something has put them.
+      const stand = (into: CanvasRenderingContext2D, node: Node, flat: boolean) => {
+        into.translate(node.x, node.y);
+        if (flat) {
+          into.globalAlpha = 0.45;
+          into.rotate(Math.PI / 2);
+        }
+        // Half of them face the other way, so the crowd isn't a chorus line.
+        if (node.flip) into.scale(-1, 1);
+      };
+
       const paint = (into: CanvasRenderingContext2D) => {
         drawLinks(into, nodes, {
           reach,
@@ -799,20 +865,30 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
             partyPosRef.current.set(node.charId, { x: node.x, y: node.y });
 
             const h = heightOf(node);
+            // Knocked flat by something that wandered in: drawn lying where
+            // they fell, and faintly, until they come round.
+            const flat = isDown(node);
             const sprite = portraitSprite(member, toneOf(accent), sheet);
             if (sprite) {
               const w = portraitWidth(h);
               into.save();
               // The tile is 24×31 actual pixels; smoothing turns it to mush.
               into.imageSmoothingEnabled = false;
-              into.drawImage(sprite, node.x - w / 2, node.y - h / 2, w, h);
+              if (flat) {
+                into.globalAlpha = 0.5;
+                into.translate(node.x, node.y);
+                into.rotate(Math.PI / 2);
+                into.drawImage(sprite, -w / 2, -h / 2, w, h);
+              } else {
+                into.drawImage(sprite, node.x - w / 2, node.y - h / 2, w, h);
+              }
               into.restore();
             }
             // Their name under them, so a party reads as a party and not as five
             // more of the crowd.
             into.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
             into.textAlign = "center";
-            into.fillStyle = `rgba(${ink}, 0.72)`;
+            into.fillStyle = `rgba(${ink}, ${flat ? 0.4 : 0.72})`;
             into.fillText(member.name.trim() || "unnamed", node.x, node.y + h / 2 + 11);
 
             // Rolled for initiative, everyone carries their number over their
@@ -831,14 +907,15 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
           const tone = toneOf(override?.color ?? accent);
           const h = GUY_HEIGHT * node.size;
           const emoji = EMOJI[nodeShape];
+          // One of the crowd who got in the way of something: on their back,
+          // and faint, until they pick themselves up.
+          const flat = isDown(node);
 
           if (emoji) {
             const sprite = emojiSprite(emoji);
             if (!sprite) continue;
             into.save();
-            into.translate(node.x, node.y);
-            // Half of them face the other way, so the crowd isn't a chorus line.
-            if (node.flip) into.scale(-1, 1);
+            stand(into, node, flat);
             into.drawImage(sprite, -h / 2, -h / 2, h, h);
             into.restore();
           } else if (nodeShape === "guys" && sheet) {
@@ -847,8 +924,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
             const sy = Math.floor(guy / sheet.columns) * sheet.cellHeight;
             const w = h * (sheet.cellWidth / sheet.cellHeight);
             into.save();
-            into.translate(node.x, node.y);
-            if (node.flip) into.scale(-1, 1);
+            stand(into, node, flat);
             into.drawImage(
               tintGuys(sheet, tone),
               sx,
@@ -862,10 +938,13 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
             );
             into.restore();
           } else {
+            into.save();
+            into.globalAlpha = flat ? 0.45 : 1;
             into.fillStyle = tone;
             into.beginPath();
             into.arc(node.x, node.y, 1.8, 0, Math.PI * 2);
             into.fill();
+            into.restore();
           }
         }
 
@@ -875,25 +954,39 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
           accent: toneOf(accent),
           sprite: emojiSprite,
         });
+        // What anybody in a scrap has left of themselves, and only for those
+        // who have lost some of it.
+        drawVitals(into, nodes, arrivalsRef.current, { now, ink, light, heightOf });
         drawDice(into, diceRef.current, { now, accent: toneOf(accent), ink, surface });
 
-        // The picked node wears a marching-ants ring, in the palette's own colour
-        // rather than its own, so it stands out however it has been dressed.
+        // Whatever is picked wears a marching-ants ring, in the palette's own
+        // colour rather than its own, so it stands out however it is dressed.
+        const ring = (x: number, y: number, radius: number) => {
+          into.save();
+          into.strokeStyle = accent;
+          into.lineWidth = 1.5;
+          into.setLineDash([4, 4]);
+          into.lineDashOffset = -((now / 45) % 8);
+          into.beginPath();
+          into.arc(x, y, radius, 0, Math.PI * 2);
+          into.stroke();
+          into.restore();
+        };
         const selected = selectedRef.current;
         if (selected !== null) {
           const node = nodes.find((n) => n.id === selected);
-          if (node) {
-            into.save();
-            into.strokeStyle = accent;
-            into.lineWidth = 1.5;
-            into.setLineDash([4, 4]);
-            into.lineDashOffset = -((now / 45) % 8);
-            into.beginPath();
-            into.arc(node.x, node.y, heightOf(node) / 2 + 7, 0, Math.PI * 2);
-            into.stroke();
-            into.restore();
-          }
+          if (node) ring(node.x, node.y, heightOf(node) / 2 + 7);
         }
+        const visitor = selectedArrivalRef.current;
+        if (visitor !== null) {
+          const arrival = arrivalsRef.current.find((a) => a.id === visitor);
+          if (arrival) ring(arrival.x, arrival.y, arrivalSize(arrival) / 2 + 9);
+        }
+
+        // Last of all, over the lot of them: the numbers lifting off whoever
+        // they happened to. They are the only way to see any of the arithmetic,
+        // so nothing gets to be drawn on top of them.
+        drawHits(into, hitsRef.current, { now, ink, light, surface });
       };
 
       paint(ctx);
@@ -937,7 +1030,6 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       }
 
       wipeRef.current = false;
-
       fpsAccum += dt;
       fpsFrames += 1;
       if (now - statsAt > 250) {
@@ -951,14 +1043,65 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
           x: Math.round(pointer.x),
           y: Math.round(pointer.y),
         });
-        // Turning the density down can thin away the node that was picked.
-        const picked = selectedRef.current;
-        if (picked !== null && !nodes.some((n) => n.id === picked)) clearPick();
+        // Turning the density down can thin away the node that was picked, and
+        // whatever wandered in wanders off again on its own clock.
+        const pickedId = selectedRef.current;
+        const pickedNode = pickedId === null ? null : nodes.find((n) => n.id === pickedId);
+        if (pickedId !== null && !pickedNode) clearPick();
+        const pickedArrival = selectedArrivalRef.current;
+        if (pickedArrival !== null && !arrivalsRef.current.some((a) => a.id === pickedArrival)) {
+          clearPick();
+        }
+
+        // What the Info panel reads. Counting the lines strung to the picked
+        // node is a pass over the crowd, which is why it happens here with
+        // everything else that only has to be right four times a second.
+        if (!pickedNode) {
+          setPicked((was) => (was === null ? was : null));
+        } else {
+          let links = 0;
+          for (const other of nodes) {
+            if (other === pickedNode) continue;
+            if (Math.hypot(other.x - pickedNode.x, other.y - pickedNode.y) <= reach) links += 1;
+          }
+          const override = overridesRef.current[pickedNode.id];
+          const vitals = pickedNode.vitals;
+          setPicked({
+            id: pickedNode.id,
+            charId: pickedNode.charId,
+            guy: pickedNode.guy,
+            guys: guysRef.current?.count ?? 0,
+            flip: pickedNode.flip,
+            size: pickedNode.size,
+            x: pickedNode.x,
+            y: pickedNode.y,
+            speed: Math.hypot(pickedNode.vx, pickedNode.vy),
+            links,
+            hp: vitals?.hp ?? 0,
+            max: vitals?.max ?? 0,
+            down: isDown(pickedNode),
+            scrapped: Boolean(vitals),
+            shape: override?.shape ?? shape,
+            dressed: Boolean(override && (override.shape || override.color)),
+          });
+        }
         // The initiative order runs out in the draw loop; this is the panel's
         // button finding out about it.
         setLiningUp((was) => (was && !initiativeRef.current ? false : was));
         // They wander off on their own clock; this is the panel noticing.
         setVisiting((was) => (was === arrivalsRef.current.length ? was : arrivalsRef.current.length));
+        // And this is the Goings-on panel reading the canvas. With nothing
+        // going on and nobody to report on, the old account is handed back
+        // rather than an identically empty new one.
+        const account = goingsOn(arrivalsRef.current, nodes, rosterRef.current, now);
+        setGoings((was) =>
+          was.visits.length === 0 &&
+          account.visits.length === 0 &&
+          was.party.length === 0 &&
+          account.party.length === 0
+            ? was
+            : account,
+        );
       }
     };
 
@@ -977,14 +1120,30 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     pointerRef.current = { ...pointerRef.current, on: false };
   };
 
-  // Clicking the canvas picks the node under the pointer — its own size decides
-  // how big a target it is — and clicking past everyone puts the panels back to
-  // working on the whole crowd. Click a party member and their sheet comes up
-  // in the Party panel, which is the only place they can actually be changed.
+  // Clicking the canvas picks whoever is under the pointer — their own size
+  // decides how big a target they are — and clicking past everyone puts the
+  // panels back to working on the whole crowd. Click a party member and their
+  // sheet comes up in the Party panel, which is the only place they can
+  // actually be changed. Whatever is picked, the Info panel describes it.
+  //
+  // Whoever has wandered in is looked at first: they are drawn over the top of
+  // everybody and are the biggest thing on the canvas, so a click that lands on
+  // one was meant for them and not for whoever is cowering underneath.
   const pickNode = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    for (const arrival of arrivalsRef.current) {
+      const radius = Math.max(16, arrivalSize(arrival) / 2 + 5);
+      if (Math.hypot(arrival.x - x, arrival.y - y) > radius) continue;
+      setSelectedId(null);
+      setSelectedChar(null);
+      setSelectedArrival(arrival.id);
+      note(`picked the ${arrival.name}`);
+      return;
+    }
+
     let best: Node | null = null;
     let bestDistance = Infinity;
     for (const node of nodesRef.current.concat(partyRef.current)) {
@@ -997,6 +1156,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     }
     setSelectedId(best ? best.id : null);
     setSelectedChar(best?.charId ?? null);
+    setSelectedArrival(null);
     const member = best?.charId ? party.roster.find((c) => c.id === best.charId) : undefined;
     if (member) party.select(member);
     if (member) note(`picked ${nameOf(member)}`);
@@ -1011,6 +1171,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       const node = partyRef.current.find((n) => n.charId === character.id);
       setSelectedId(node?.id ?? null);
       setSelectedChar(node ? character.id : null);
+      setSelectedArrival(null);
     },
     [party],
   );
@@ -1164,6 +1325,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 <Scope
                   selected={editable}
                   character={selectedCharacter}
+                  visitor={
+                    goings.visits.find((visit) => visit.id === selectedArrival)?.who ?? null
+                  }
                   edited={edited}
                   onClear={clearPick}
                   onReset={resetSelected}
@@ -1559,6 +1723,19 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
               />
             )}
 
+            {id === "goings" && (
+              <PartyGoingsPanel goings={goings} accent={settings.accent} />
+            )}
+
+            {id === "info" && (
+              <PartyInfoPanel
+                picked={picked}
+                member={selectedCharacter}
+                arrival={goings.visits.find((visit) => visit.id === selectedArrival) ?? null}
+                accent={settings.accent}
+              />
+            )}
+
             {id === "console" && <PartyConsole log={log} accent={settings.accent} />}
 
             {id === "frame" && (
@@ -1670,11 +1847,13 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 <Stat
                   label="Picked"
                   value={
-                    selectedCharacter
-                      ? `${selectedCharacter.name} · ${selectedCharacter.cls}`
-                      : selectedId === null
-                        ? "none"
-                        : `#${selectedId} · ${SHAPE_NAMES[activeShape]}`
+                    selectedArrival !== null
+                      ? (goings.visits.find((visit) => visit.id === selectedArrival)?.who ?? "gone")
+                      : selectedCharacter
+                        ? `${selectedCharacter.name} · ${selectedCharacter.cls}`
+                        : selectedId === null
+                          ? "none"
+                          : `#${selectedId} · ${SHAPE_NAMES[activeShape]}`
                   }
                   accent={settings.accent}
                 />
@@ -1779,6 +1958,7 @@ function initialSpot(slot: number, width: number) {
 function Scope({
   selected,
   character,
+  visitor,
   edited,
   hasOverride,
   onClear,
@@ -1786,6 +1966,8 @@ function Scope({
 }: {
   selected: boolean;
   character: Character | null;
+  /** What has wandered in, when that is what was clicked — the Palette's one blind spot. */
+  visitor: string | null;
   edited: number;
   hasOverride: boolean;
   onClear: () => void;
@@ -1817,19 +1999,21 @@ function Scope({
       }}
     >
       <span style={{ flex: "1 1 auto" }}>
-        {character
-          ? `${character.name} is on the sheet — the Party panel dresses them`
-          : selected
-            ? "Selected node in edit"
-            : "Select a node to edit"}
-        {!selected && !character && edited > 0 ? ` · ${edited} edited` : ""}
+        {visitor
+          ? `the ${visitor} is picked — the Palette does not dress what wanders in`
+          : character
+            ? `${character.name} is on the sheet — the Party panel dresses them`
+            : selected
+              ? "Selected node in edit"
+              : "Select a node to edit"}
+        {!selected && !character && !visitor && edited > 0 ? ` · ${edited} edited` : ""}
       </span>
       {selected && hasOverride && (
         <button type="button" style={pill} onClick={onReset}>
           Reset
         </button>
       )}
-      {(selected || character) && (
+      {(selected || character || visitor) && (
         <button type="button" style={pill} onClick={onClear}>
           Done
         </button>
