@@ -7,6 +7,9 @@ import {
   MenuList,
   MenuListItem,
   ScrollView,
+  Window,
+  WindowContent,
+  WindowHeader,
 } from "react95";
 import IssuesTreeView, { IssuesTreeViewHandle } from "@/components/issues/IssuesTreeView";
 import ChangesTreeView, { ChangesTreeViewHandle } from "@/components/changes/ChangesTreeView";
@@ -15,7 +18,7 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import PartyWindow, { NO_FRAME, FrameSettings } from "@/components/windows/PartyWindow";
-import MarblesWindow, { MarblesWindowHandle } from "@/components/windows/MarblesWindow";
+import MarblesWindow, { MarblesWindowHandle, RunResult, readClock } from "@/components/windows/MarblesWindow";
 import PlayerWindow, { PLAYER_ACCEPT, PlayerWindowHandle, VizMode, VIZ_MODES } from "@/components/windows/PlayerWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
@@ -111,6 +114,11 @@ export default function ProgramWindow({
   // marbles.exe writes its running time straight into this, rather than
   // pushing it up as state ten times a second.
   const marblesClockRef = useRef<HTMLSpanElement | null>(null);
+  // Set when a course has been got round, cleared the moment the next run
+  // starts. marbles.exe reports both, so this can't be left showing a time for
+  // a run that is already over.
+  const [marblesRun, setMarblesRun] = useState<RunResult | null>(null);
+  const handleMarblesResult = useCallback((result: RunResult | null) => setMarblesRun(result), []);
   const playerFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerFolderInputRef = useRef<HTMLInputElement | null>(null);
   const playerAddInputRef = useRef<HTMLInputElement | null>(null);
@@ -1119,7 +1127,47 @@ export default function ProgramWindow({
 
       {id === "party" && <PartyWindow frame={frame} onFrameChange={patchFrame} />}
 
-      {id === "marbles" && <MarblesWindow ref={marblesRef} clock={marblesClockRef} />}
+      {id === "marbles" && (
+        <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0, display: "flex", position: "relative" }}>
+          <MarblesWindow ref={marblesRef} clock={marblesClockRef} onResult={handleMarblesResult} />
+          {marblesRun && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 5,
+                // The panel takes clicks; the rest of the canvas is left alone,
+                // so you can still swing the camera round the finish while you
+                // decide what to do next.
+                pointerEvents: "none",
+              }}
+            >
+              <Window style={{ minWidth: 230, pointerEvents: "auto" }}>
+                <WindowHeader style={{ display: "flex", alignItems: "center" }}>
+                  <span>{marblesRun.improved ? "Best time" : "Finished"}</span>
+                </WindowHeader>
+                <WindowContent>
+                  <div style={{ textAlign: "center", fontSize: 26, fontWeight: "bold", lineHeight: 1.1 }}>
+                    {readClock(marblesRun.time)}
+                  </div>
+                  <div style={{ textAlign: "center", marginTop: 4, fontSize: 11, opacity: 0.75 }}>
+                    {marblesRun.improved
+                      ? "round this course, and the quickest yet"
+                      : `best on this course: ${readClock(marblesRun.best)}`}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 12, justifyContent: "center" }}>
+                    <Button onClick={() => marblesRef.current?.restart()}>Try again</Button>
+                    <Button onClick={() => marblesRef.current?.reroll()}>Next course</Button>
+                  </div>
+                </WindowContent>
+              </Window>
+            </div>
+          )}
+        </div>
+      )}
     </DesktopWindow>
   );
 }

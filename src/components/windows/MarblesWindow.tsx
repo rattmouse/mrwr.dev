@@ -13,6 +13,16 @@ export type MarblesWindowHandle = {
   reroll: () => void;
 };
 
+/** How a run ended, for the window to offer another go with. */
+export type RunResult = {
+  /** Seconds, for this run. */
+  time: number;
+  /** The quickest this course has been got round so far. */
+  best: number;
+  /** Whether this run was that best — the first one round always is. */
+  improved: boolean;
+};
+
 type MarblesWindowProps = {
   /**
    * Where the running time is written. Handed in as an element rather than
@@ -20,10 +30,16 @@ type MarblesWindowProps = {
    * around it has no other reason to redraw that often.
    */
   clock?: React.RefObject<HTMLElement | null>;
+  /**
+   * Called with the result when a run is finished, and with null the moment
+   * the next one begins — whichever way it was started, the toolbar or the R
+   * key — so what the window is showing can't get out of step with the game.
+   */
+  onResult?: (result: RunResult | null) => void;
 };
 
 /** Minutes, seconds and tenths — long enough for a bad run, short enough to read. */
-function readClock(seconds: number) {
+export function readClock(seconds: number) {
   const whole = Math.max(0, seconds);
   const mins = Math.floor(whole / 60);
   const secs = Math.floor(whole % 60);
@@ -39,8 +55,8 @@ const PITCH_MIN = 0.06;
 const PITCH_MAX = 1;
 /** How long after you last touched the camera it starts trailing the ball again. */
 const TRAIL_AFTER = 1.5;
-/** How long the finish stays lit before the ball is put back at the start. */
-const CELEBRATION = 1.8;
+/** How fast the finish lights up, and goes out again. */
+const GLOW_RATE = 3.5;
 
 const MOVE_KEYS = new Set([
   "KeyW",
@@ -81,7 +97,7 @@ function turnToward(from: number, to: number) {
  * the finish up and starts you over. The whole game is in the picture.
  */
 const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(function MarblesWindow(
-  { clock },
+  { clock, onResult },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +117,12 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
     /** Seconds since the last deliberate camera move, for the lazy trail. */
     idle: 0,
   });
+
+  // Held in a ref rather than read from props inside the loop: the loop is set
+  // up once and must not be torn down and rebuilt — that would deal a new
+  // course — just because the window around it re-rendered.
+  const resultRef = useRef(onResult);
+  resultRef.current = onResult;
 
   const keysRef = useRef(new Set<string>());
   /** Raised by a press of the jump key, lowered by the frame that spends it. */
@@ -187,14 +209,20 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
     let frame = 0;
     let previous = performance.now();
     let ticking = 0;
-    // Counts down from CELEBRATION while the finish is lit.
-    let celebrating = 0;
+    // 0 to 1 as the finish pad lights up.
+    let glow = 0;
     // The current run. It holds at nought until you actually set off — no
     // sense counting the time spent reading what the keys do — and stops when
     // the finish is reached, so the time you got stays up while it is lit.
     let elapsed = 0;
     let running = false;
     let shown = "";
+    // Set when a course has been got round. The ball stops where it is and
+    // stays there: what happens next — another go at this one, or a new one —
+    // is the window's to ask and yours to answer.
+    let finished = false;
+    // The quickest this course has been done, which is what a retry is for.
+    let best: number | null = null;
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
@@ -210,6 +238,7 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
         rerollRef.current = false;
         courseRef.current = buildCourse();
         restartRef.current = true;
+        best = null;
       }
       const course = courseRef.current;
       const marble = marbleRef.current;
@@ -220,9 +249,10 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
         resetMarble(marble, course.start);
         cam.look = { ...marble.pos };
         cam.yaw = facing(course);
-        celebrating = 0;
         elapsed = 0;
         running = false;
+        finished = false;
+        resultRef.current?.(null);
       }
 
       const held = (...codes: string[]) => codes.some((c) => keys.has(c));
@@ -240,32 +270,28 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       const jump = jumpRef.current;
       jumpRef.current = false;
 
+      // The ferries keep sliding once the run is over — it should look like a
+      // place that is still there — but the ball stops where it finished.
       stepCourse(blocks, ticking, dt);
-      const events = stepMarble(
-        marble,
-        blocks,
-        { forward: touchRollRef.current ? 1 : forward, right, yaw: cam.yaw, jump },
-        dt,
-      );
+      const events = finished
+        ? { fell: false, reached: false }
+        : stepMarble(
+            marble,
+            blocks,
+            { forward: touchRollRef.current ? 1 : forward, right, yaw: cam.yaw, jump },
+            dt,
+          );
 
-      if (rolling && !running && celebrating <= 0) running = true;
+      if (rolling && !running && !finished) running = true;
       if (running) elapsed += dt;
-      if (events.reached && celebrating <= 0) {
-        celebrating = CELEBRATION;
+      if (events.reached) {
+        finished = true;
         running = false;
+        const improved = best === null || elapsed < best;
+        if (improved) best = elapsed;
+        resultRef.current?.({ time: elapsed, best: best ?? elapsed, improved });
       }
-      if (celebrating > 0) {
-        celebrating -= dt;
-        if (celebrating <= 0) {
-          celebrating = 0;
-          // Round once is the whole of it; the next one is a new course.
-          courseRef.current = buildCourse();
-          resetMarble(marble, courseRef.current.start);
-          cam.look = { ...marble.pos };
-          cam.yaw = facing(courseRef.current);
-          elapsed = 0;
-        }
-      }
+      glow += ((finished ? 1 : 0) - glow) * Math.min(1, GLOW_RATE * dt);
 
       // Left alone for a moment, the camera drifts round behind wherever the
       // ball is actually going — enough to help, not enough to fight a drag.
@@ -298,7 +324,7 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       };
 
       const view = makeView(camera, width, height);
-      const lift = celebrating > 0 ? Math.min(1, celebrating / CELEBRATION) : 0;
+      const lift = glow;
 
       drawSky(ctx, view, stars);
       paintQueue(ctx, [
