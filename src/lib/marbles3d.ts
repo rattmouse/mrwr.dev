@@ -5,9 +5,14 @@
  * There is no WebGL and no scene graph here. Corners are moved into the
  * camera's frame by hand, clipped against the near plane, divided through by
  * depth, and the resulting flat quads are sorted back-to-front and filled on an
- * ordinary 2D canvas. A painter's algorithm is wrong the moment two shapes
- * interlock, which is exactly why the course is built out of separate boxes
- * floating clear of each other.
+ * ordinary 2D canvas.
+ *
+ * Painting back-to-front decides what hides what one whole quad at a time,
+ * which is wrong twice over: two shapes that pass through each other can't be
+ * ordered at all, and a floor stretching away from you can't be either in
+ * front of or behind everything standing on it. So the course is built out of
+ * boxes that keep clear of one another, and big faces are cut into pieces
+ * before they are sorted — see marblesDraw.
  */
 
 export type Vec3 = { x: number; y: number; z: number };

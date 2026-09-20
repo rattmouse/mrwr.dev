@@ -61,12 +61,39 @@ function fogAt(away: number) {
   return Math.min(FOG_MAX, Math.max(0, (away - FOG_NEAR) / (FOG_FAR - FOG_NEAR)) * FOG_MAX);
 }
 
+/**
+ * Cutting a face up before sorting it. One quad is sorted as a single thing,
+ * so a floor stretching away from you is either in front of everything on its
+ * far half or behind everything on its near half, and whichever way it falls
+ * something is drawn through the ground. Cut into pieces this big, each piece
+ * sorts beside its own neighbours instead.
+ */
+const TILE = 1.2;
+/** However big a face is, it is never cut into more than this many strips. */
+const TILE_MOST = 20;
+/**
+ * And it is only cut at all within this far of the eye. Further off than this
+ * everything near a face is far off too, so one piece sorts as well as twenty
+ * — which keeps the count down to a few hundred pieces a frame rather than
+ * a few thousand.
+ */
+const TILE_REACH = 26;
+
 /** How far the furthest of these points is from the eye — the paint order. */
 function furthest(points: Vec3[], eye: Vec3) {
   let most = 0;
   for (const p of points) most = Math.max(most, length(sub(p, eye)));
   return most;
 }
+
+function nearest(points: Vec3[], eye: Vec3) {
+  let least = Infinity;
+  for (const p of points) least = Math.min(least, length(sub(p, eye)));
+  return least;
+}
+
+const lerp = (a: Vec3, b: Vec3, t: number): Vec3 =>
+  vec(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 
 /**
  * Every face of every box that is pointing at us, ready to sort. Faces looking
@@ -89,37 +116,78 @@ export function collectBlocks(view: View, blocks: Block[], lift: number): Drawab
       // Facing us if the outward normal leans back toward the eye.
       if (dot(normal, sub(ring[0], eye)) >= 0) continue;
 
-      const poly = clipNear(ring.map((p) => toEye(view, p)));
-      if (poly.length < 3) continue;
-
-      const away = furthest(ring, eye);
-      // Fog by how far off the middle of the face is, not its far corner —
-      // otherwise a floor underfoot would fade out along with the horizon.
-      let haze = 0;
-      for (const p of ring) haze += length(sub(p, eye));
-      haze /= ring.length;
-
       const lambert = 0.34 + 0.66 * Math.max(0, dot(normal, LIGHT));
       const glow = b.goal ? 0.45 + lift * 0.9 : lift * 0.25;
-      const shade: Tint = fogged(b.tint, lambert + glow, fogAt(haze), SKY);
-      const fill = rgb(shade);
-      const edge = rgb(shade, 0.62);
-      const screen = poly.map((p) => project(view, p));
 
-      queue.push({
-        away,
-        paint: (ctx) => {
-          ctx.beginPath();
-          ctx.moveTo(screen[0].x, screen[0].y);
-          for (let i = 1; i < screen.length; i += 1) ctx.lineTo(screen[i].x, screen[i].y);
-          ctx.closePath();
-          ctx.fillStyle = fill;
-          ctx.fill();
-          ctx.lineWidth = 1;
-          ctx.strokeStyle = edge;
-          ctx.stroke();
-        },
-      });
+      // The scenery hangs on its own out in the dark with nothing standing on
+      // it, so it is never worth cutting up; nor is anything far enough off.
+      const cut = b.solid && nearest(ring, eye) <= TILE_REACH;
+      const strips = (a: Vec3, c: Vec3) =>
+        cut ? Math.max(1, Math.min(TILE_MOST, Math.ceil(length(sub(c, a)) / TILE))) : 1;
+      const cols = strips(ring[0], ring[1]);
+      const rows = strips(ring[1], ring[2]);
+      // Bilinear across the face: s runs along the first edge, t down the next.
+      const corner = (s: number, t: number) =>
+        lerp(lerp(ring[0], ring[1], s), lerp(ring[3], ring[2], s), t);
+
+      for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
+          const s0 = col / cols;
+          const s1 = (col + 1) / cols;
+          const t0 = row / rows;
+          const t1 = (row + 1) / rows;
+          const quad =
+            cols === 1 && rows === 1
+              ? ring
+              : [corner(s0, t0), corner(s1, t0), corner(s1, t1), corner(s0, t1)];
+
+          const poly = clipNear(quad.map((p) => toEye(view, p)));
+          if (poly.length < 3) continue;
+
+          // Fog by the middle of the piece; paint order by its far corner.
+          let haze = 0;
+          for (const p of quad) haze += length(sub(p, eye));
+          haze /= quad.length;
+
+          const shade: Tint = fogged(b.tint, lambert + glow, fogAt(haze), SKY);
+          const fill = rgb(shade);
+          const edge = rgb(shade, 0.62);
+          const screen = poly.map((p) => project(view, p));
+          // Which of a piece's four sides are the face's own outline rather
+          // than a cut through the middle of it. Only those get the dark edge;
+          // the rest are stroked in their own colour, to cover the hairline
+          // the canvas leaves between two abutting fills.
+          const rim =
+            poly.length === 4
+              ? [row === 0, col === cols - 1, row === rows - 1, col === 0]
+              : null;
+
+          queue.push({
+            away: furthest(quad, eye),
+            paint: (ctx) => {
+              ctx.beginPath();
+              ctx.moveTo(screen[0].x, screen[0].y);
+              for (let i = 1; i < screen.length; i += 1) ctx.lineTo(screen[i].x, screen[i].y);
+              ctx.closePath();
+              ctx.fillStyle = fill;
+              ctx.fill();
+              ctx.lineWidth = 1;
+              ctx.strokeStyle = fill;
+              ctx.stroke();
+
+              if (!rim) return;
+              ctx.beginPath();
+              for (let i = 0; i < 4; i += 1) {
+                if (!rim[i]) continue;
+                ctx.moveTo(screen[i].x, screen[i].y);
+                ctx.lineTo(screen[(i + 1) % 4].x, screen[(i + 1) % 4].y);
+              }
+              ctx.strokeStyle = edge;
+              ctx.stroke();
+            },
+          });
+        }
+      }
     }
   }
   return queue;

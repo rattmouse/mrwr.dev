@@ -87,9 +87,11 @@ const BOUNCE = 0.35;
 /**
  * How hard a sliding block hangs on to whatever is riding it. High enough that
  * rolling drag — which works against the world, not against the block — can't
- * walk the ball off the back of the ferry over the length of a crossing.
+ * walk the ball off the back of the ferry over the length of a crossing, and
+ * no higher: grip much past this pins the ball to the deck, and there is no
+ * rolling off at the far end before the ferry sets back the way it came.
  */
-const CARRY = 25;
+const CARRY = 9;
 /** A surface this close to level is something you can stand on. */
 const FOOTING = 0.5;
 /** Fixed physics step. Collisions against thin walls need the small slice. */
@@ -123,6 +125,27 @@ function block(
 
 const DEG = Math.PI / 180;
 
+/**
+ * Half the thickness of everything you roll on, and the same for all of it.
+ *
+ * Thin, and uniform, so that where two pieces have to sit over one another —
+ * the island over the first of the steps below it, one step over the next —
+ * the upper one clears the lower rather than being buried in it. Two solids
+ * that pass through each other cannot be put in any drawing order that looks
+ * right: the renderer sorts whole faces, so at the seam it flips between them
+ * and the lower one shows through the floor. Keeping the course's own pieces
+ * out of each other is what that costs.
+ */
+const SLAB = 0.28;
+/**
+ * And where two pieces meet end-on, they stop this far short of each other
+ * instead of touching — for the same reason, and because a marble is nearly
+ * a metre across and rolls over a gap this size without noticing it.
+ */
+const SEAM = 0.15;
+/** How far each of the curving steps drops below the one before it. */
+const STEP_DROP = 0.6;
+
 const PAD: Tint = [86, 100, 128];
 const LEDGE: Tint = [112, 126, 156];
 const RAMP: Tint = [176, 132, 74];
@@ -141,55 +164,83 @@ const SCENERY: Tint = [74, 70, 112];
  */
 export function buildCourse(): Block[] {
   const blocks: Block[] = [];
+  // Every pad is placed by the height of the surface you roll on, since that
+  // is the number that matters and the only one that has to line up.
+  const pad = (x: number, top: number, z: number, half: Vec3, tint: Tint, extra = {}) =>
+    block(vec(x, top - SLAB, z), vec(half.x, SLAB, half.z), tint, extra);
 
   // Where you start. The back wall is there so the first thing you do can't be
   // to roll off behind you.
-  blocks.push(block(vec(0, -0.5, 2), vec(5, 0.5, 5), PAD));
-  blocks.push(block(vec(0, 0.1, 7.3), vec(5.3, 0.6, 0.3), LEDGE));
+  blocks.push(pad(0, 0, 2, vec(5, 0, 5), PAD));
+  blocks.push(block(vec(0, 0.4, 6.6), vec(5, 0.4, 0.35), LEDGE));
 
   // The bridge over: two and a half marbles wide, and nothing either side.
-  blocks.push(block(vec(0, -0.5, -7.5), vec(1.3, 0.5, 4.5), LEDGE));
+  blocks.push(pad(0, 0, -7.5, vec(1.3, 0, 4.5 - SEAM), LEDGE));
 
   // The zigzag. Each wall leaves its gap on the other side from the last.
-  blocks.push(block(vec(0, -0.5, -17), vec(5, 0.5, 5), PAD));
+  blocks.push(pad(0, 0, -17, vec(5, 0, 5), PAD));
   blocks.push(block(vec(-1.6, 0.7, -14.5), vec(3.4, 0.7, 0.3), WALL));
   blocks.push(block(vec(1.6, 0.7, -17), vec(3.4, 0.7, 0.3), WALL));
   blocks.push(block(vec(-1.6, 0.7, -19.5), vec(3.4, 0.7, 0.3), WALL));
 
-  // Up the ramp. Its lower lip is flush with the pad behind it and its top
-  // with the pad in front, which is what the awkward numbers are.
-  blocks.push(block(vec(0, 0.77, -26.15), vec(2.6, 0.4, 4.2), RAMP, { tilt: 16 * DEG }));
-  blocks.push(block(vec(0, 1.8, -34), vec(5, 0.5, 4), PAD));
+  // Up the ramp, which is placed by the two ends it has to meet rather than by
+  // numbers typed out: tilted so that its top face starts level with the pad
+  // behind it and finishes level with the one in front, and short enough to
+  // stop clear of both instead of burying its ends in them.
+  const rampReach = 3.85;
+  const rampTilt = Math.asin(2.3 / (2 * rampReach));
+  blocks.push(
+    block(
+      vec(0, rampReach * Math.sin(rampTilt) - SLAB * Math.cos(rampTilt), -26),
+      vec(2.6, SLAB, rampReach),
+      RAMP,
+      { tilt: rampTilt },
+    ),
+  );
+  blocks.push(pad(0, 2.3, -34, vec(5, 0, 4), PAD));
 
-  // The ferry. It touches the pad behind at one end of its travel and the
-  // island ahead at the other, so it is only ever worth boarding on the beat.
-  // Deck and rails are three separate boxes sliding on the same description,
-  // which is the only way they stay together; without the rails the least
-  // sideways drift takes you off the edge somewhere over the gap.
-  const crossing = { axis: vec(0, 0, 1), reach: 5.8, period: 7, phase: 0 };
-  blocks.push(block(vec(0, 1.9, -44), vec(2.2, 0.4, 2.2), FERRY, { slide: crossing }));
+  // The ferry, which has the whole gap to itself: it runs from a hand's
+  // breadth off the pad behind to a hand's breadth off the island ahead and
+  // overlaps neither, so it is only worth boarding on the beat. Deck and rails
+  // are three boxes sliding on the same description, which is the only way
+  // they stay together; without the rails the least sideways drift takes you
+  // off the edge somewhere over the gap.
+  const ferryHalf = 2.2;
+  // The pad ends here and the island starts there; the ferry and its travel
+  // divide up what is left, less the gap it keeps at either end.
+  const ferryFrom = -38 - SEAM;
+  const ferryTo = -49.2 + SEAM;
+  const ferryHome = (ferryFrom + ferryTo) / 2;
+  const crossing = {
+    axis: vec(0, 0, 1),
+    reach: (ferryFrom - ferryTo) / 2 - ferryHalf,
+    period: 8,
+    phase: 0,
+  };
+  blocks.push(block(vec(0, 2.3 - SLAB, ferryHome), vec(ferryHalf, SLAB, ferryHalf), FERRY, { slide: crossing }));
   for (const x of [-2.05, 2.05]) {
-    blocks.push(block(vec(x, 2.7, -44), vec(0.15, 0.4, 2.2), POST, { slide: crossing }));
+    blocks.push(block(vec(x, 2.7, ferryHome), vec(0.15, 0.4, ferryHalf), POST, { slide: crossing }));
   }
-  // Longer at the far end than it looks like it needs to be: the steps below
-  // are turned to follow their arc, so their near edge comes away at an angle
-  // and the island has to reach past it or there is a notch to drop into.
-  blocks.push(block(vec(0, 1.8, -55), vec(5.5, 0.5, 5.8), PAD));
+
+  // The island reaches further at its far end than it looks like it needs to:
+  // the steps below are turned to follow their arc, so their near edge comes
+  // away at an angle and the island has to reach past it or there is a notch
+  // to drop into.
+  blocks.push(pad(0, 2.3, -55, vec(5.5, 0, 5.8), PAD));
 
   // Five steps curving away off the island and dropping as they go. Worked
   // round an arc rather than typed out one by one, so the ribbon stays joined
-  // up if the radius or the sweep is ever changed.
+  // up if the radius or the sweep is ever changed. The drop is bigger than a
+  // step is thick, which is what keeps each one clear of the next.
   const arc = { x: -9, z: -60, radius: 9 };
   for (let i = 1; i <= 5; i += 1) {
     const angle = i * 18 * DEG;
     blocks.push(
-      block(
-        vec(
-          arc.x + arc.radius * Math.cos(angle),
-          2.3 - 0.6 * i - 0.5,
-          arc.z - arc.radius * Math.sin(angle),
-        ),
-        vec(2.2, 0.5, 1.9),
+      pad(
+        arc.x + arc.radius * Math.cos(angle),
+        2.3 - STEP_DROP * i,
+        arc.z - arc.radius * Math.sin(angle),
+        vec(2.2, 0, 1.9),
         i % 2 ? LEDGE : PAD,
         // Turned to put its long axis along the arc, not across it — the
         // steps overlap each other by a marble's width that way round.
@@ -200,16 +251,17 @@ export function buildCourse(): Block[] {
 
   // The run in, with three bumpers to get round. Wide enough that there is
   // always a clear way past each one without being wide enough to ignore them.
-  blocks.push(block(vec(-16.5, -1.2, -69), vec(5.5, 0.5, 3.6), PAD));
-  blocks.push(block(vec(-13, 0.1, -70.2), vec(0.8, 0.8, 0.8), WALL, { yaw: 20 * DEG }));
-  blocks.push(block(vec(-16, 0.1, -67.8), vec(0.8, 0.8, 0.8), WALL, { yaw: -25 * DEG }));
-  blocks.push(block(vec(-19, 0.1, -70.2), vec(0.8, 0.8, 0.8), WALL, { yaw: 10 * DEG }));
+  const floor = 2.3 - STEP_DROP * 5;
+  blocks.push(pad(-16.5, floor, -69, vec(5.5, 0, 3.6), PAD));
+  blocks.push(block(vec(-13, floor + 0.8, -70.2), vec(0.8, 0.8, 0.8), WALL, { yaw: 20 * DEG }));
+  blocks.push(block(vec(-16, floor + 0.8, -67.8), vec(0.8, 0.8, 0.8), WALL, { yaw: -25 * DEG }));
+  blocks.push(block(vec(-19, floor + 0.8, -70.2), vec(0.8, 0.8, 0.8), WALL, { yaw: 10 * DEG }));
 
   // The finish: a lit pad between four posts. Nothing says so in words.
-  blocks.push(block(vec(-25, -1.2, -69), vec(3, 0.5, 3.6), GOAL, { goal: true }));
-  for (const x of [-22.6, -27.4]) {
+  blocks.push(pad(-25 - SEAM, floor, -69, vec(3, 0, 3.6), GOAL, { goal: true }));
+  for (const x of [-22.75, -27.55]) {
     for (const z of [-71.6, -66.4]) {
-      blocks.push(block(vec(x, 0.9, z), vec(0.25, 1.6, 0.25), POST));
+      blocks.push(block(vec(x, floor + 1.6, z), vec(0.25, 1.6, 0.25), POST));
     }
   }
 
