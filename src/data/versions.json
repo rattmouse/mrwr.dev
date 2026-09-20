@@ -8,7 +8,7 @@
       "name": "Party 2.0",
       "date": "2026-09-19",
       "summary": "A crowd on a canvas, and a party that walks out into it.",
-      "issues": [],
+      "issues": [131],
       "changes": [
         "Party 2.0 (party.webp) sits under Toys: an old-fashioned frame around a modern one, with a drifting crowd on a canvas that reaches for your pointer and a row of buttons above it — Palette, Motion, Readout and Frame — that each open a small tool window you can drag anywhere on the desktop, floating above the window that opened it",
         "Party 2.0's Frame tool bends the window it sits in — turn Warp up and the whole frame goes soft and pulls out of true, title bar, borders and all, with its corners rounding off as it goes; Straighten up puts it back",
@@ -22,7 +22,8 @@
         "Media (player.exe) sits under Tools: open a song or a video — or a whole folder, and it plays everything in it in order — with play, pause, skip, shuffle, repeat, volume and a playlist you can double-click through, and trim with the Delete key or a right-click. Drag along the seek bar and a tooltip shows where you'll land before you let go. Songs get a little green screen under their name that moves with the sound, like an old monitor with scanlines and a glow that trails behind — a View menu swaps it between bars, the waveform itself, and a spectrum scrolling slowly past. It plays old .au sound files too, and starts out with a drone loop queued up. Files can be dropped straight onto it, and they never leave your computer",
         "The media player's previous, stop and next buttons are drawn the same way as play, pause and the rest of the row — square-edged pixel shapes instead of three characters borrowed from the system font, which never quite matched",
         "Projects lists card-binder, the card scanner that fills Collections' card shelf: photograph a trading card — or a whole binder page — and it works out which print it is, prices it, and files it in a binder you can sort and export. It's closed source, so instead of sending you to a repository the entry says so and opens a screenshot of the thing itself",
-        "Collections' cards behave like things on a desk: drag one and it stays on top of the pile instead of dropping back underneath the moment you touch another, and picking one up moves it rather than peeling it off the screen as a picture to drop somewhere else"
+        "Collections' cards behave like things on a desk: drag one and it stays on top of the pile instead of dropping back underneath the moment you touch another, and picking one up moves it rather than peeling it off the screen as a picture to drop somewhere else",
+        "Party 2.0's Motion tool has gained a Trails slider: turn it up and the canvas stops wiping itself clean every frame, so the crowd and the lines strung between them smear across it like a long exposure — Wipe clean takes it back to bare surface without interrupting the drift"
       ]
     },
     {
