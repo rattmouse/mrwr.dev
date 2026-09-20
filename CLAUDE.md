@@ -51,9 +51,12 @@ Orientation notes for working in this repo.
   party.webp draws in place of its dots) are the exception to all of the
   above: they are **committed**, not gitignored, and no deploy step regenerates
   them. `scripts/content/make-guys-sprites.mjs` (`npm run guys:sprites`) cuts
-  them out of the photograph at `public/guys.webp` — an unevenly lit photo of a
-  painted sheet, so the cutting is tuned by eye once rather than run in every
-  visitor's browser. Re-run it only if that photograph changes.
+  them out of the photographs listed in its `SHEETS` — `public/guys.webp` and
+  `public/guys2.webp`, unevenly lit photos of painted sheets, also committed —
+  so the cutting is tuned by eye once rather than run in every visitor's
+  browser. Each sheet gets its own hand-judged crop. Re-run it only when one of
+  those photographs changes or another sheet is painted, and pass `--debug` for
+  a contact sheet of the cut-outs to check.
 - `public/collections/` (everything the Collections window shows) is gitignored
   in full and read only at build time: the album covers, the Bluesky picklists
   behind Paintings and Songs, and — for the Cards tab, the one the window opens
