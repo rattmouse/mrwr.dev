@@ -15,6 +15,7 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import PartyWindow, { NO_FRAME, FrameSettings } from "@/components/windows/PartyWindow";
+import MarblesWindow, { MarblesWindowHandle } from "@/components/windows/MarblesWindow";
 import PlayerWindow, { PLAYER_ACCEPT, PlayerWindowHandle, VizMode, VIZ_MODES } from "@/components/windows/PlayerWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
@@ -106,6 +107,7 @@ export default function ProgramWindow({
   const notepadFileInputRef = useRef<HTMLInputElement | null>(null);
   const paintFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerRef = useRef<PlayerWindowHandle>(null);
+  const marblesRef = useRef<MarblesWindowHandle>(null);
   const playerFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerFolderInputRef = useRef<HTMLInputElement | null>(null);
   const playerAddInputRef = useRef<HTMLInputElement | null>(null);
@@ -162,7 +164,9 @@ export default function ProgramWindow({
                   ? "party.webp"
                   : id === "player"
                     ? "player.exe"
-                    : "mrwr.dev";
+                    : id === "marbles"
+                      ? "marbles.exe"
+                      : "mrwr.dev";
   const titleIcon =
     id === "welcome"
       ? "../w95_desktop.ico"
@@ -180,7 +184,9 @@ export default function ProgramWindow({
                   ? "../w98_file_eye.ico"
                   : id === "player"
                     ? "../w95_player.ico"
-                    : "../w98_repl.ico";
+                    : id === "marbles"
+                      ? "../w95_default.ico"
+                      : "../w98_repl.ico";
 
   const normalHeight =
     id === "welcome" ? 160
@@ -190,9 +196,10 @@ export default function ProgramWindow({
             : id === "paint" ? 320
               : id === "party" ? 460
                 : id === "player" ? 420
-                  : 300;
+                  : id === "marbles" ? 420
+                    : 300;
   const normalWidth =
-    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : id === "player" ? 440 : undefined;
+    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : id === "player" ? 440 : id === "marbles" ? 560 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -969,6 +976,17 @@ export default function ProgramWindow({
           />
         ))}
       </>
+    ) : id === "marbles" ? (
+      <>
+        <Button variant="menu" size="sm" title="Put the ball back on the first pad" onClick={() => marblesRef.current?.restart()}>
+          Restart
+        </Button>
+        {/* The only instructions there are. They live up here rather than over
+            the view, which is left to the game. */}
+        <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.7, alignSelf: "center" }}>
+          arrows or WASD to roll &middot; drag to look round &middot; R to start over
+        </span>
+      </>
     ) : undefined;
 
   return (
@@ -1081,6 +1099,8 @@ export default function ProgramWindow({
       {id === "player" && <PlayerWindow ref={playerRef} viz={playerViz} />}
 
       {id === "party" && <PartyWindow frame={frame} onFrameChange={patchFrame} />}
+
+      {id === "marbles" && <MarblesWindow ref={marblesRef} />}
     </DesktopWindow>
   );
 }
