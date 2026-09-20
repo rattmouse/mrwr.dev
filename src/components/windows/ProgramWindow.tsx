@@ -108,6 +108,9 @@ export default function ProgramWindow({
   const paintFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerRef = useRef<PlayerWindowHandle>(null);
   const marblesRef = useRef<MarblesWindowHandle>(null);
+  // marbles.exe writes its running time straight into this, rather than
+  // pushing it up as state ten times a second.
+  const marblesClockRef = useRef<HTMLSpanElement | null>(null);
   const playerFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerFolderInputRef = useRef<HTMLInputElement | null>(null);
   const playerAddInputRef = useRef<HTMLInputElement | null>(null);
@@ -185,7 +188,7 @@ export default function ProgramWindow({
                   : id === "player"
                     ? "../w95_player.ico"
                     : id === "marbles"
-                      ? "../w95_default.ico"
+                      ? "../w95_marble.ico"
                       : "../w98_repl.ico";
 
   const normalHeight =
@@ -981,10 +984,26 @@ export default function ProgramWindow({
         <Button variant="menu" size="sm" title="Put the ball back on the first pad" onClick={() => marblesRef.current?.restart()}>
           Restart
         </Button>
-        {/* The only instructions there are. They live up here rather than over
-            the view, which is left to the game. */}
-        <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.7, alignSelf: "center" }}>
-          arrows or WASD to roll &middot; drag to look round &middot; R to start over
+        <Button variant="menu" size="sm" title="Throw this course away and roll another" onClick={() => marblesRef.current?.reroll()}>
+          New course
+        </Button>
+        {/* The clock and the only instructions there are. Both live up here
+            rather than over the view, which is left to the game. */}
+        <span
+          ref={marblesClockRef}
+          title="This run, from when you first set off"
+          style={{
+            marginLeft: 8,
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: "bold",
+            alignSelf: "center",
+            minWidth: 52,
+          }}
+        >
+          0:00.0
+        </span>
+        <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.7, alignSelf: "center" }}>
+          arrows or WASD to roll &middot; space to jump &middot; drag to look round &middot; R to start over
         </span>
       </>
     ) : undefined;
@@ -1100,7 +1119,7 @@ export default function ProgramWindow({
 
       {id === "party" && <PartyWindow frame={frame} onFrameChange={patchFrame} />}
 
-      {id === "marbles" && <MarblesWindow ref={marblesRef} />}
+      {id === "marbles" && <MarblesWindow ref={marblesRef} clock={marblesClockRef} />}
     </DesktopWindow>
   );
 }

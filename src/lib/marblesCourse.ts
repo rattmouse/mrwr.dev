@@ -1,9 +1,9 @@
 /**
- * What marbles.exe is a game of: the boxes the course is built from, the ball
- * that rolls over them, and the handful of rules that get it from one to the
- * other.
+ * What marbles.exe is a game of: what a piece of a course is, the ball that
+ * rolls over it, and the handful of rules that get one to the other. The
+ * courses themselves are rolled in marblesLayout.
  *
- * Every solid in the course is a box — some of them turned, some tilted into
+ * Every solid in a course is a box — some of them turned, some tilted into
  * ramps, one of them sliding back and forth across a gap. That is the whole
  * vocabulary, which is why a sphere-against-box test is the only collision
  * this file knows how to do.
@@ -60,16 +60,22 @@ export type Marble = {
   /** The roll it picked up at its last contact; it keeps it through the air. */
   omega: Vec3;
   grounded: boolean;
+  /** How long since it last had footing, which is what a late jump is allowed. */
+  offGround: number;
   /** The last place it was properly supported — where a fall puts it back. */
   safe: Vec3;
 };
 
 /** What the keys are asking for this frame, in the camera's own directions. */
-export type Input = { forward: number; right: number; yaw: number };
+export type Input = {
+  forward: number;
+  right: number;
+  yaw: number;
+  /** True on the frame the jump key goes down, not while it is held. */
+  jump: boolean;
+};
 
 export type Events = { fell: boolean; reached: boolean };
-
-export const START: Vec3 = { x: 0, y: 0.5, z: 4 };
 
 /** Below this there is nothing but sky, and the ball has plainly missed. */
 const VOID = -25;
@@ -94,214 +100,29 @@ const BOUNCE = 0.35;
 const CARRY = 9;
 /** A surface this close to level is something you can stand on. */
 const FOOTING = 0.5;
+/**
+ * How hard a jump pushes off. About a marble and a half of height, which is
+ * roughly four metres of ground at a fair roll — the gaps are cut to suit.
+ */
+const JUMP = 9.5;
+/**
+ * And how long after rolling off an edge a jump still works. Without a little
+ * of this every jump from the lip of a platform feels stolen.
+ */
+const COYOTE = 0.12;
 /** Fixed physics step. Collisions against thin walls need the small slice. */
 const STEP = 1 / 120;
 
-/* ------------------------------------------------------------- the course */
-
-function block(
-  centre: Vec3,
-  half: Vec3,
-  tint: Tint,
-  extra: Partial<Pick<Block, "yaw" | "tilt" | "solid" | "goal" | "spin" | "slide">> = {},
-): Block {
-  const yaw = extra.yaw ?? 0;
-  const tilt = extra.tilt ?? 0;
+export function newMarble(start: Vec3): Marble {
   return {
-    home: centre,
-    centre,
-    vel: vec(0, 0, 0),
-    half,
-    yaw,
-    tilt,
-    rot: orientation(yaw, tilt),
-    tint,
-    solid: extra.solid ?? true,
-    goal: extra.goal,
-    spin: extra.spin,
-    slide: extra.slide,
-  };
-}
-
-const DEG = Math.PI / 180;
-
-/**
- * Half the thickness of everything you roll on, and the same for all of it.
- *
- * Thin, and uniform, so that where two pieces have to sit over one another —
- * the island over the first of the steps below it, one step over the next —
- * the upper one clears the lower rather than being buried in it. Two solids
- * that pass through each other cannot be put in any drawing order that looks
- * right: the renderer sorts whole faces, so at the seam it flips between them
- * and the lower one shows through the floor. Keeping the course's own pieces
- * out of each other is what that costs.
- */
-const SLAB = 0.28;
-/**
- * And where two pieces meet end-on, they stop this far short of each other
- * instead of touching — for the same reason, and because a marble is nearly
- * a metre across and rolls over a gap this size without noticing it.
- */
-const SEAM = 0.15;
-/** How far each of the curving steps drops below the one before it. */
-const STEP_DROP = 0.6;
-
-const PAD: Tint = [86, 100, 128];
-const LEDGE: Tint = [112, 126, 156];
-const RAMP: Tint = [176, 132, 74];
-const WALL: Tint = [198, 86, 104];
-const FERRY: Tint = [92, 176, 148];
-const POST: Tint = [120, 214, 214];
-const GOAL: Tint = [96, 232, 208];
-const SCENERY: Tint = [74, 70, 112];
-
-/**
- * The course, from the pad the ball starts on to the pad it is trying to
- * reach: a narrow bridge, a zigzag between three walls, a ramp up, a ferry
- * across open space, a staircase curving down and away, and a short run
- * between bumpers to the finish. Everything hangs in the dark with nothing
- * under it.
- */
-export function buildCourse(): Block[] {
-  const blocks: Block[] = [];
-  // Every pad is placed by the height of the surface you roll on, since that
-  // is the number that matters and the only one that has to line up.
-  const pad = (x: number, top: number, z: number, half: Vec3, tint: Tint, extra = {}) =>
-    block(vec(x, top - SLAB, z), vec(half.x, SLAB, half.z), tint, extra);
-
-  // Where you start. The back wall is there so the first thing you do can't be
-  // to roll off behind you.
-  blocks.push(pad(0, 0, 2, vec(5, 0, 5), PAD));
-  blocks.push(block(vec(0, 0.4, 6.6), vec(5, 0.4, 0.35), LEDGE));
-
-  // The bridge over: two and a half marbles wide, and nothing either side.
-  blocks.push(pad(0, 0, -7.5, vec(1.3, 0, 4.5 - SEAM), LEDGE));
-
-  // The zigzag. Each wall leaves its gap on the other side from the last.
-  blocks.push(pad(0, 0, -17, vec(5, 0, 5), PAD));
-  blocks.push(block(vec(-1.6, 0.7, -14.5), vec(3.4, 0.7, 0.3), WALL));
-  blocks.push(block(vec(1.6, 0.7, -17), vec(3.4, 0.7, 0.3), WALL));
-  blocks.push(block(vec(-1.6, 0.7, -19.5), vec(3.4, 0.7, 0.3), WALL));
-
-  // Up the ramp, which is placed by the two ends it has to meet rather than by
-  // numbers typed out: tilted so that its top face starts level with the pad
-  // behind it and finishes level with the one in front, and short enough to
-  // stop clear of both instead of burying its ends in them.
-  const rampReach = 3.85;
-  const rampTilt = Math.asin(2.3 / (2 * rampReach));
-  blocks.push(
-    block(
-      vec(0, rampReach * Math.sin(rampTilt) - SLAB * Math.cos(rampTilt), -26),
-      vec(2.6, SLAB, rampReach),
-      RAMP,
-      { tilt: rampTilt },
-    ),
-  );
-  blocks.push(pad(0, 2.3, -34, vec(5, 0, 4), PAD));
-
-  // The ferry, which has the whole gap to itself: it runs from a hand's
-  // breadth off the pad behind to a hand's breadth off the island ahead and
-  // overlaps neither, so it is only worth boarding on the beat. Deck and rails
-  // are three boxes sliding on the same description, which is the only way
-  // they stay together; without the rails the least sideways drift takes you
-  // off the edge somewhere over the gap.
-  const ferryHalf = 2.2;
-  // The pad ends here and the island starts there; the ferry and its travel
-  // divide up what is left, less the gap it keeps at either end.
-  const ferryFrom = -38 - SEAM;
-  const ferryTo = -49.2 + SEAM;
-  const ferryHome = (ferryFrom + ferryTo) / 2;
-  const crossing = {
-    axis: vec(0, 0, 1),
-    reach: (ferryFrom - ferryTo) / 2 - ferryHalf,
-    period: 8,
-    phase: 0,
-  };
-  blocks.push(block(vec(0, 2.3 - SLAB, ferryHome), vec(ferryHalf, SLAB, ferryHalf), FERRY, { slide: crossing }));
-  for (const x of [-2.05, 2.05]) {
-    blocks.push(block(vec(x, 2.7, ferryHome), vec(0.15, 0.4, ferryHalf), POST, { slide: crossing }));
-  }
-
-  // The island reaches further at its far end than it looks like it needs to:
-  // the steps below are turned to follow their arc, so their near edge comes
-  // away at an angle and the island has to reach past it or there is a notch
-  // to drop into.
-  blocks.push(pad(0, 2.3, -55, vec(5.5, 0, 5.8), PAD));
-
-  // Five steps curving away off the island and dropping as they go. Worked
-  // round an arc rather than typed out one by one, so the ribbon stays joined
-  // up if the radius or the sweep is ever changed. The drop is bigger than a
-  // step is thick, which is what keeps each one clear of the next.
-  const arc = { x: -9, z: -60, radius: 9 };
-  for (let i = 1; i <= 5; i += 1) {
-    const angle = i * 18 * DEG;
-    blocks.push(
-      pad(
-        arc.x + arc.radius * Math.cos(angle),
-        2.3 - STEP_DROP * i,
-        arc.z - arc.radius * Math.sin(angle),
-        vec(2.2, 0, 1.9),
-        i % 2 ? LEDGE : PAD,
-        // Turned to put its long axis along the arc, not across it — the
-        // steps overlap each other by a marble's width that way round.
-        { yaw: angle },
-      ),
-    );
-  }
-
-  // The run in, with three bumpers to get round. Wide enough that there is
-  // always a clear way past each one without being wide enough to ignore them.
-  const floor = 2.3 - STEP_DROP * 5;
-  blocks.push(pad(-16.5, floor, -69, vec(5.5, 0, 3.6), PAD));
-  blocks.push(block(vec(-13, floor + 0.8, -70.2), vec(0.8, 0.8, 0.8), WALL, { yaw: 20 * DEG }));
-  blocks.push(block(vec(-16, floor + 0.8, -67.8), vec(0.8, 0.8, 0.8), WALL, { yaw: -25 * DEG }));
-  blocks.push(block(vec(-19, floor + 0.8, -70.2), vec(0.8, 0.8, 0.8), WALL, { yaw: 10 * DEG }));
-
-  // The finish: a lit pad between four posts. Nothing says so in words.
-  blocks.push(pad(-25 - SEAM, floor, -69, vec(3, 0, 3.6), GOAL, { goal: true }));
-  for (const x of [-22.75, -27.55]) {
-    for (const z of [-71.6, -66.4]) {
-      blocks.push(block(vec(x, floor + 1.6, z), vec(0.25, 1.6, 0.25), POST));
-    }
-  }
-
-  // Scenery: shapes hanging in the dark, turning slowly, that the ball passes
-  // straight through. They are here to give the space some depth — without
-  // them there is nothing out there to judge distance against.
-  const floaters: [number, number, number, number, number][] = [
-    [12, 6, -10, 2.4, 0.18],
-    [-13, 9, -24, 3.2, -0.12],
-    [16, -5, -36, 2.0, 0.24],
-    [-18, 4, -46, 2.8, 0.09],
-    [11, 12, -58, 3.6, -0.16],
-    [-4, -9, -64, 2.2, 0.21],
-    [-28, 7, -56, 3.0, -0.2],
-    [4, 5, -76, 2.6, 0.13],
-    [-34, -4, -74, 2.4, 0.17],
-    [22, 2, -66, 2.0, -0.26],
-  ];
-  for (const [x, y, z, size, spin] of floaters) {
-    blocks.push(
-      block(vec(x, y, z), vec(size, size * 0.7, size), SCENERY, {
-        solid: false,
-        spin,
-        tilt: 22 * DEG,
-      }),
-    );
-  }
-
-  return blocks;
-}
-
-export function newMarble(): Marble {
-  return {
-    pos: { ...START },
+    pos: { ...start },
     vel: vec(0, 0, 0),
     radius: 0.45,
     turn: IDENTITY,
     omega: vec(0, 0, 0),
     grounded: false,
-    safe: { ...START },
+    offGround: 0,
+    safe: { ...start },
   };
 }
 
@@ -421,6 +242,8 @@ function substep(marble: Marble, blocks: Block[], input: Input, dt: number): Eve
     if (b.goal) events.reached = true;
   }
 
+  marble.offGround = marble.grounded ? 0 : marble.offGround + dt;
+
   if (marble.grounded && ground) {
     // On a slope, push along the slope rather than into it.
     const into = dot(push, ground);
@@ -461,6 +284,17 @@ function substep(marble: Marble, blocks: Block[], input: Input, dt: number): Eve
 /** A whole frame's worth of physics, however long the frame was. */
 export function stepMarble(marble: Marble, blocks: Block[], input: Input, dt: number): Events {
   const events: Events = { fell: false, reached: false };
+
+  // Taken once, at the top of the frame rather than inside the loop: the key
+  // is pressed once and the ball should leave the ground once, however many
+  // slices the frame happens to be cut into. Straight up whatever it is
+  // standing on, and never twice without landing in between.
+  if (input.jump && (marble.grounded || marble.offGround < COYOTE)) {
+    marble.vel = vec(marble.vel.x, JUMP, marble.vel.z);
+    marble.grounded = false;
+    marble.offGround = COYOTE;
+  }
+
   let left = Math.min(dt, 0.1);
   while (left > 1e-4) {
     const slice = Math.min(STEP, left);
@@ -472,11 +306,12 @@ export function stepMarble(marble: Marble, blocks: Block[], input: Input, dt: nu
   return events;
 }
 
-export function resetMarble(marble: Marble) {
-  marble.pos = { ...START };
+export function resetMarble(marble: Marble, start: Vec3) {
+  marble.pos = { ...start };
   marble.vel = vec(0, 0, 0);
   marble.omega = vec(0, 0, 0);
   marble.turn = IDENTITY;
   marble.grounded = false;
-  marble.safe = { ...START };
+  marble.offGround = 0;
+  marble.safe = { ...start };
 }

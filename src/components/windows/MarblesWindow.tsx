@@ -2,24 +2,33 @@
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { drawSky, makeStars, makeView, paintQueue, vec, type Camera } from "@/lib/marbles3d";
-import {
-  buildCourse,
-  newMarble,
-  resetMarble,
-  stepCourse,
-  stepMarble,
-  type Block,
-  type Marble,
-} from "@/lib/marblesCourse";
+import { newMarble, resetMarble, stepCourse, stepMarble, type Marble } from "@/lib/marblesCourse";
+import { buildCourse, type Course } from "@/lib/marblesLayout";
 import { collectBlocks, collectMarble, drawFinishGlow } from "@/lib/marblesDraw";
 
 export type MarblesWindowHandle = {
-  /** Put the ball back on the first pad, wherever it had got to. */
+  /** Put the ball back on the first pad of the course it is already on. */
   restart: () => void;
+  /** Throw that course away and roll another one. */
+  reroll: () => void;
 };
 
-/** Nothing to pass in: the game takes everything it needs from the keyboard. */
-type MarblesWindowProps = Record<never, never>;
+type MarblesWindowProps = {
+  /**
+   * Where the running time is written. Handed in as an element rather than
+   * pushed up as state: the clock changes ten times a second and the window
+   * around it has no other reason to redraw that often.
+   */
+  clock?: React.RefObject<HTMLElement | null>;
+};
+
+/** Minutes, seconds and tenths — long enough for a bad run, short enough to read. */
+function readClock(seconds: number) {
+  const whole = Math.max(0, seconds);
+  const mins = Math.floor(whole / 60);
+  const secs = Math.floor(whole % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}.${Math.floor((whole * 10) % 10)}`;
+}
 
 /** How far behind the ball the camera sits, and how much further at speed. */
 const CAMERA_BACK = 9;
@@ -41,11 +50,23 @@ const MOVE_KEYS = new Set([
   "KeyQ",
   "KeyE",
   "KeyR",
+  "Space",
   "ArrowUp",
   "ArrowDown",
   "ArrowLeft",
   "ArrowRight",
 ]);
+
+/**
+ * Which way the camera should be pointing when a course opens: down the course,
+ * rather than at whatever happens to be behind the ball.
+ */
+function facing(course: Course) {
+  const first = course.route[0];
+  const next = course.route[1] ?? first;
+  if (!first || (next.x === first.x && next.z === first.z)) return 0;
+  return Math.atan2(-(next.x - first.x), -(next.z - first.z));
+}
 
 /** Shortest way round from one heading to another, in radians. */
 function turnToward(from: number, to: number) {
@@ -60,19 +81,21 @@ function turnToward(from: number, to: number) {
  * the finish up and starts you over. The whole game is in the picture.
  */
 const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(function MarblesWindow(
-  _props,
+  { clock },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const marbleRef = useRef<Marble>(newMarble());
-  const blocksRef = useRef<Block[]>(buildCourse());
+  // A course is rolled when the window opens and lasts as long as it is open.
+  const courseRef = useRef<Course>(buildCourse());
+  const marbleRef = useRef<Marble>(newMarble(courseRef.current.start));
   const restartRef = useRef(false);
+  const rerollRef = useRef(false);
 
   // Where the camera is looking from, and the point it is easing toward. Kept
   // in a ref because the draw loop owns it — React never needs to see it.
   const camRef = useRef({
-    yaw: 0,
+    yaw: facing(courseRef.current),
     pitch: 0.34,
     look: { ...marbleRef.current.pos },
     /** Seconds since the last deliberate camera move, for the lazy trail. */
@@ -80,12 +103,25 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
   });
 
   const keysRef = useRef(new Set<string>());
+  /** Raised by a press of the jump key, lowered by the frame that spends it. */
+  const jumpRef = useRef(false);
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null);
   // A finger held on the canvas rolls the ball forward; there is no keyboard to
   // do it with, and dragging is already steering the camera.
   const touchRollRef = useRef(false);
 
-  useImperativeHandle(ref, () => ({ restart: () => { restartRef.current = true; } }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      restart: () => {
+        restartRef.current = true;
+      },
+      reroll: () => {
+        rerollRef.current = true;
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
@@ -100,7 +136,13 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       if (!MOVE_KEYS.has(event.code)) return;
       event.preventDefault();
       if (event.code === "KeyR") restartRef.current = true;
-      else keysRef.current.add(event.code);
+      // A jump is a press, not a hold: taking it here rather than reading the
+      // key each frame is what stops a held space bar hopping all the way
+      // along the ground.
+      else if (event.code === "Space") {
+        if (!keysRef.current.has("Space")) jumpRef.current = true;
+        keysRef.current.add("Space");
+      } else keysRef.current.add(event.code);
     };
     const up = (event: KeyboardEvent) => keysRef.current.delete(event.code);
     const blur = () => keysRef.current.clear();
@@ -144,28 +186,43 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
 
     let frame = 0;
     let previous = performance.now();
-    let clock = 0;
+    let ticking = 0;
     // Counts down from CELEBRATION while the finish is lit.
     let celebrating = 0;
+    // The current run. It holds at nought until you actually set off — no
+    // sense counting the time spent reading what the keys do — and stops when
+    // the finish is reached, so the time you got stays up while it is lit.
+    let elapsed = 0;
+    let running = false;
+    let shown = "";
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
       // A long pause — a hidden tab, a dragged window — should not be simulated.
       const dt = Math.min((now - previous) / 1000, 0.05);
       previous = now;
-      clock += dt;
+      ticking += dt;
 
-      const marble = marbleRef.current;
-      const blocks = blocksRef.current;
       const cam = camRef.current;
       const keys = keysRef.current;
 
+      if (rerollRef.current) {
+        rerollRef.current = false;
+        courseRef.current = buildCourse();
+        restartRef.current = true;
+      }
+      const course = courseRef.current;
+      const marble = marbleRef.current;
+      const blocks = course.blocks;
+
       if (restartRef.current) {
         restartRef.current = false;
-        resetMarble(marble);
+        resetMarble(marble, course.start);
         cam.look = { ...marble.pos };
-        cam.yaw = 0;
+        cam.yaw = facing(course);
         celebrating = 0;
+        elapsed = 0;
+        running = false;
       }
 
       const held = (...codes: string[]) => codes.some((c) => keys.has(c));
@@ -179,22 +236,34 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
         cam.idle += dt;
       }
 
-      stepCourse(blocks, clock, dt);
+      const rolling = forward !== 0 || right !== 0 || touchRollRef.current || jumpRef.current;
+      const jump = jumpRef.current;
+      jumpRef.current = false;
+
+      stepCourse(blocks, ticking, dt);
       const events = stepMarble(
         marble,
         blocks,
-        { forward: touchRollRef.current ? 1 : forward, right, yaw: cam.yaw },
+        { forward: touchRollRef.current ? 1 : forward, right, yaw: cam.yaw, jump },
         dt,
       );
 
-      if (events.reached && celebrating <= 0) celebrating = CELEBRATION;
+      if (rolling && !running && celebrating <= 0) running = true;
+      if (running) elapsed += dt;
+      if (events.reached && celebrating <= 0) {
+        celebrating = CELEBRATION;
+        running = false;
+      }
       if (celebrating > 0) {
         celebrating -= dt;
         if (celebrating <= 0) {
           celebrating = 0;
-          resetMarble(marble);
+          // Round once is the whole of it; the next one is a new course.
+          courseRef.current = buildCourse();
+          resetMarble(marble, courseRef.current.start);
           cam.look = { ...marble.pos };
-          cam.yaw = 0;
+          cam.yaw = facing(courseRef.current);
+          elapsed = 0;
         }
       }
 
@@ -237,6 +306,12 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
         ...collectMarble(view, marble, blocks),
       ]);
       drawFinishGlow(ctx, view, blocks, lift);
+
+      const reading = readClock(elapsed);
+      if (reading !== shown && clock?.current) {
+        shown = reading;
+        clock.current.textContent = reading;
+      }
     };
 
     frame = window.requestAnimationFrame(draw);
@@ -244,7 +319,7 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       window.cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, []);
+  }, [clock]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.preventDefault();

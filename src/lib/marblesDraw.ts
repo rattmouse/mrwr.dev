@@ -12,6 +12,7 @@ import {
   apply,
   applyT,
   clipNear,
+  cross,
   Drawable,
   dot,
   fogged,
@@ -231,22 +232,95 @@ function floorBelow(blocks: Block[], from: Vec3): { point: Vec3; drop: number } 
 
 /* ------------------------------------------------------------------ marble */
 
-/** A scatter of points over the ball, so that it visibly turns as it rolls. */
-const SPOTS: Vec3[] = (() => {
-  const out: Vec3[] = [];
-  const count = 26;
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < count; i += 1) {
-    const y = 1 - (i / (count - 1)) * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    const a = golden * i;
-    out.push(vec(Math.cos(a) * r, y, Math.sin(a) * r));
+/**
+ * The ball is a little globe: an ocean with land on it and ice at both poles,
+ * which is a far better way of showing that a sphere is turning than a pattern
+ * of dots — you can see which way is which, and which way up it has got to.
+ *
+ * Each landmass is a closed loop of directions on the ball's surface. Rolling
+ * turns the loops with everything else; drawing one means throwing away the
+ * part of it that has gone round the back, then projecting what is left.
+ */
+type Land = { loop: Vec3[]; tint: Tint };
+
+const OCEAN: Tint = [38, 82, 156];
+const GRASS: Tint = [92, 152, 86];
+const SAND: Tint = [158, 140, 92];
+const ICE: Tint = [224, 234, 244];
+const RIM: Tint = [150, 180, 220];
+
+/** A ring of directions at a fixed angle from `axis`, wobbled by `shape`. */
+function ring(axis: Vec3, spread: number, points: number, shape: (a: number) => number): Vec3[] {
+  // Any two directions square to the axis will do to sweep around it.
+  const side = Math.abs(axis.y) < 0.9 ? vec(0, 1, 0) : vec(1, 0, 0);
+  const u = normalise(cross(axis, side));
+  const v = cross(axis, u);
+  const loop: Vec3[] = [];
+  for (let i = 0; i < points; i += 1) {
+    const a = (i / points) * Math.PI * 2;
+    const r = spread * shape(a);
+    const out = add(scale(u, Math.cos(a)), scale(v, Math.sin(a)));
+    loop.push(normalise(add(scale(axis, Math.cos(r)), scale(out, Math.sin(r)))));
   }
-  return out;
+  return loop;
+}
+
+/** The same world every time the window opens; it is one ball, not a new one. */
+const GLOBE: Land[] = (() => {
+  let seed = 0x5bf03635;
+  const roll = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  const lands: Land[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    const y = roll() * 1.5 - 0.75;
+    const a = roll() * Math.PI * 2;
+    const flat = Math.sqrt(Math.max(0, 1 - y * y));
+    const axis = vec(Math.cos(a) * flat, y, Math.sin(a) * flat);
+    // Two slow harmonics are enough to keep a coastline from looking drawn
+    // with a compass.
+    const wob1 = 0.16 + roll() * 0.2;
+    const wob2 = 0.1 + roll() * 0.16;
+    const turn1 = roll() * Math.PI * 2;
+    const turn2 = roll() * Math.PI * 2;
+    lands.push({
+      loop: ring(axis, 0.34 + roll() * 0.4, 18, (t) =>
+        1 + wob1 * Math.sin(2 * t + turn1) + wob2 * Math.sin(3 * t + turn2),
+      ),
+      tint: roll() < 0.3 ? SAND : GRASS,
+    });
+  }
+  // Ice at both ends, so which way up the ball has rolled is never in doubt.
+  for (const pole of [1, -1]) {
+    lands.push({
+      loop: ring(vec(0, pole, 0), 0.3, 16, (t) => 1 + 0.12 * Math.sin(3 * t)),
+      tint: ICE,
+    });
+  }
+  return lands;
 })();
 
-const BALL: Tint = [236, 240, 250];
-const BALL_SPOT: Tint = [108, 128, 198];
+/**
+ * The part of a loop still on the side of the ball facing us. `limb` is where
+ * the horizon actually falls: on a ball this close it is not quite halfway
+ * round, and using halfway leaves slivers of the far side showing at the edge.
+ */
+function thisSide(loop: Vec3[], toCam: Vec3, limb: number): Vec3[] {
+  const out: Vec3[] = [];
+  for (let i = 0; i < loop.length; i += 1) {
+    const a = loop[i];
+    const b = loop[(i + 1) % loop.length];
+    const da = dot(a, toCam) - limb;
+    const db = dot(b, toCam) - limb;
+    if (da > 0) out.push(a);
+    if (da > 0 !== db > 0) {
+      const t = da / (da - db);
+      out.push(normalise(vec(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t)));
+    }
+  }
+  return out;
+}
 
 export function collectMarble(view: View, marble: Marble, blocks: Block[]): Drawable[] {
   const queue: Drawable[] = [];
@@ -291,18 +365,19 @@ export function collectMarble(view: View, marble: Marble, blocks: Block[]): Draw
   const offX = lightEye.x * radius * 0.45;
   const offY = -lightEye.y * radius * 0.45;
 
-  const spots = SPOTS.map((s) => {
-    const dir = apply(marble.turn, s);
-    const face = dot(dir, toCam);
-    if (face <= 0.12) return null;
-    const p = project(view, toEye(view, add(marble.pos, scale(dir, marble.radius * 0.99))));
-    return { p, r: radius * 0.2 * face };
-  }).filter((s): s is { p: { x: number; y: number }; r: number } => s !== null);
+  // Where the horizon of a ball this size falls, seen from this far off.
+  const limb = marble.radius / depth;
+  const coasts = GLOBE.map((land) => {
+    const seen = thisSide(land.loop.map((d) => apply(marble.turn, d)), toCam, limb);
+    if (seen.length < 3) return null;
+    return {
+      fill: rgb(fogged(land.tint, 1, fog, SKY)),
+      shape: seen.map((d) => project(view, toEye(view, add(marble.pos, scale(d, marble.radius))))),
+    };
+  }).filter((c): c is { fill: string; shape: { x: number; y: number }[] } => c !== null);
 
-  const lit = rgb(fogged(BALL, 1.05, fog, SKY));
-  const dim = rgb(fogged(BALL, 0.42, fog, SKY));
-  const spotFill = rgb(fogged(BALL_SPOT, 1, fog, SKY));
-  const rim = rgb(fogged(BALL, 0.3, fog, SKY));
+  const sea = rgb(fogged(OCEAN, 1, fog, SKY));
+  const rim = rgb(fogged(RIM, 0.55, fog, SKY));
 
   queue.push({
     away: ballAway,
@@ -312,26 +387,38 @@ export function collectMarble(view: View, marble: Marble, blocks: Block[]): Draw
       ctx.arc(centre.x, centre.y, radius, 0, Math.PI * 2);
       ctx.clip();
 
+      ctx.fillStyle = sea;
+      ctx.fillRect(centre.x - radius, centre.y - radius, radius * 2, radius * 2);
+
+      for (const coast of coasts) {
+        ctx.beginPath();
+        ctx.moveTo(coast.shape[0].x, coast.shape[0].y);
+        for (let i = 1; i < coast.shape.length; i += 1) ctx.lineTo(coast.shape[i].x, coast.shape[i].y);
+        ctx.closePath();
+        ctx.fillStyle = coast.fill;
+        ctx.fill();
+        // Stroked in its own colour: without it the canvas leaves the coastline
+        // ragged at this size.
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = coast.fill;
+        ctx.stroke();
+      }
+
+      // Daylight across the face of it: bright where the light falls, falling
+      // away into shadow round the other side.
       const shade = ctx.createRadialGradient(
         centre.x + offX,
         centre.y + offY,
-        radius * 0.08,
-        centre.x,
-        centre.y,
-        radius * 1.15,
+        radius * 0.1,
+        centre.x + offX * 0.4,
+        centre.y + offY * 0.4,
+        radius * 1.5,
       );
-      shade.addColorStop(0, lit);
-      shade.addColorStop(1, dim);
+      shade.addColorStop(0, "rgba(255,252,236,0.3)");
+      shade.addColorStop(0.45, "rgba(255,252,236,0)");
+      shade.addColorStop(1, "rgba(2,6,18,0.72)");
       ctx.fillStyle = shade;
       ctx.fillRect(centre.x - radius, centre.y - radius, radius * 2, radius * 2);
-
-      ctx.fillStyle = spotFill;
-      for (const s of spots) {
-        if (s.r < 0.35) continue;
-        ctx.beginPath();
-        ctx.arc(s.p.x, s.p.y, s.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
       ctx.restore();
 
       ctx.beginPath();
