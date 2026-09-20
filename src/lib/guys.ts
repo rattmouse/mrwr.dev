@@ -45,11 +45,11 @@ let pending: Promise<GuySheet | null> | null = null;
 
 /**
  * The little painted figures party.webp can draw in place of its dots, cut
- * out of a photographed sheet by scripts/content/make-guys-sprites.mjs.
+ * out of the photographed sheets by scripts/content/make-guys-sprites.mjs.
  *
- * The sheet is ~100KB, so it is fetched the first time somebody actually asks
- * for guys and then kept for the life of the page. A failed load resolves to
- * null rather than throwing — the canvas just stays dots.
+ * The sheet is a couple of hundred KB, so it is fetched the first time somebody
+ * actually asks for guys and then kept for the life of the page. A failed load
+ * resolves to null rather than throwing — the canvas just stays dots.
  */
 export function loadGuys(): Promise<GuySheet | null> {
   if (pending) return pending;
