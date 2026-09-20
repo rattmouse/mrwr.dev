@@ -203,6 +203,40 @@ export function Stat({ label, value, accent }: { label: string; value: string; a
   );
 }
 
+/** A line of text in a panel — the one control here the others aren't built on. */
+export function TextField({
+  value,
+  placeholder,
+  label,
+  onChange,
+}: {
+  value: string;
+  placeholder?: string;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <input
+      value={value}
+      placeholder={placeholder}
+      aria-label={label}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        boxSizing: "border-box",
+        width: "100%",
+        borderRadius: 8,
+        border: "1px solid rgba(255, 255, 255, 0.16)",
+        background: "rgba(255, 255, 255, 0.06)",
+        color: "#e8ecf4",
+        font: "inherit",
+        fontSize: 12,
+        padding: "7px 9px",
+        outline: "none",
+      }}
+    />
+  );
+}
+
 const DIAL_SIZE = 74;
 
 /**
