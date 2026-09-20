@@ -264,6 +264,267 @@ export function applyForces(
   }
 }
 
+/* -------------------------------------------------------------- formation */
+
+export type FormationShape = "drift" | "grid" | "ring" | "spiral" | "text";
+
+export type Formation = {
+  shape: FormationShape;
+  /** What the crowd spells out, when it has been told to spell something. */
+  text: string;
+  /** How hard they hold the shape once they have walked into it. */
+  hold: number;
+  /** 0 and they hold it for good; up from there they keep breaking out of it. */
+  restless: number;
+};
+
+/** Nobody arranged: the aimless wander the canvas starts out doing. */
+export const NO_FORMATION: Formation = { shape: "drift", text: "", hold: 0.55, restless: 0 };
+
+// How hard a node is pulled towards its place in the shape, and how much of its
+// own speed is taken off it on the way — without the second it sails through
+// the spot it was aiming for and swings back, for ever.
+const FORM_PULL = 0.0042;
+const FORM_DAMP = 0.1;
+
+// The slowest and the fastest a restless crowd breaks out of its shape and
+// walks back into it.
+const RESTLESS_SLOW = 26000;
+const RESTLESS_QUICK = 5000;
+
+/**
+ * How much of the hold is on right now. With Restless down it is simply all of
+ * it; up from there it eases off to nothing for a stretch of every cycle, which
+ * is the crowd wandering out of the shape, and comes back, which is them
+ * walking into it again.
+ */
+const holdNow = (formation: Formation, now: number) => {
+  if (formation.restless <= 0) return 1;
+  const cycle = RESTLESS_SLOW + (RESTLESS_QUICK - RESTLESS_SLOW) * formation.restless;
+  const phase = (now % cycle) / cycle;
+  if (phase < 0.6) return 1;
+  return 0.5 + 0.5 * Math.cos(((phase - 0.6) / 0.4) * Math.PI * 2);
+};
+
+type Places = { xs: Float64Array; ys: Float64Array };
+
+// Working the places out means rasterising a word or walking a spiral, and
+// neither changes from one frame to the next — so the last set is kept and
+// handed back until something about the shape actually moves.
+let placed: { key: string; places: Places | null } | null = null;
+
+const spread = (count: number) => ({ xs: new Float64Array(count), ys: new Float64Array(count) });
+
+/**
+ * Where each node stands in the shape. Node i takes place i every frame, so the
+ * crowd walks to somewhere and stays there rather than swapping places about
+ * underneath itself.
+ */
+function placesFor(formation: Formation, count: number, width: number, height: number): Places | null {
+  const key = `${formation.shape}|${formation.text}|${count}|${width}|${height}`;
+  if (placed?.key === key) return placed.places;
+  const places = layOut(formation, count, width, height);
+  placed = { key, places };
+  return places;
+}
+
+function layOut(formation: Formation, count: number, width: number, height: number): Places | null {
+  if (count === 0) return null;
+  const places = spread(count);
+
+  if (formation.shape === "grid") {
+    // As near square on the canvas as the canvas itself is, so the grid fills
+    // it rather than sitting in a tall or wide block in the middle.
+    const columns = Math.max(1, Math.round(Math.sqrt((count * width) / height)));
+    const rows = Math.ceil(count / columns);
+    const gapX = width / (columns + 1);
+    const gapY = height / (rows + 1);
+    for (let i = 0; i < count; i += 1) {
+      places.xs[i] = gapX * ((i % columns) + 1);
+      places.ys[i] = gapY * (Math.floor(i / columns) + 1);
+    }
+    return places;
+  }
+
+  if (formation.shape === "ring") {
+    const radius = Math.min(width, height) * 0.38;
+    for (let i = 0; i < count; i += 1) {
+      const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+      places.xs[i] = width / 2 + Math.cos(angle) * radius;
+      places.ys[i] = height / 2 + Math.sin(angle) * radius;
+    }
+    return places;
+  }
+
+  if (formation.shape === "spiral") {
+    const radius = Math.min(width, height) * 0.44;
+    const turns = 3.25;
+    for (let i = 0; i < count; i += 1) {
+      const along = count === 1 ? 0 : i / (count - 1);
+      const angle = along * turns * Math.PI * 2;
+      places.xs[i] = width / 2 + Math.cos(angle) * radius * along;
+      places.ys[i] = height / 2 + Math.sin(angle) * radius * along;
+    }
+    return places;
+  }
+
+  if (formation.shape === "text") return spellOut(formation.text, count, width, height);
+  return null;
+}
+
+// How far apart, in px, the crowd stands along the outline of a word. A figure
+// is about thirteen px across, so at this spacing they stand shoulder to
+// shoulder and the strokes of the letters read as strokes. Further apart and
+// the word is a scattering of dots in roughly the right places.
+const LETTER_SPACING = 15;
+
+/**
+ * The crowd in the shape of a word. The word is drawn to a canvas of its own and
+ * its lit pixels handed out evenly, and it is *outlined* rather than filled —
+ * a crowd scattered through solid letters is a blob, while the same crowd
+ * standing along the edges of them is legible.
+ *
+ * How big the word comes out depends on how many of them there are to spell it:
+ * it is drawn once at whatever the canvas will take, and then taken down until
+ * the crowd is close enough together to make continuous strokes. So turning
+ * Density up doesn't crowd the word, it grows it.
+ */
+function spellOut(text: string, count: number, width: number, height: number): Places | null {
+  const word = text.trim();
+  if (!word || typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = "#fff";
+  const weight = (size: number) => Math.max(2, size * 0.045);
+
+  // Everything the letters are drawn in, at a given size.
+  const trace = (size: number) => {
+    ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+    ctx.lineWidth = weight(size);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeText(word, canvas.width / 2, canvas.height / 2);
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const lit: number[] = [];
+    for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 140) lit.push((i - 3) / 4);
+    return lit;
+  };
+
+  // As large as the canvas will take it, to begin with.
+  let size = Math.round(height * 0.62);
+  ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+  while (size > 12 && ctx.measureText(word).width > width * 0.88) {
+    size = Math.floor(size * 0.86);
+    ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+  }
+
+  let lit = trace(size);
+  if (lit.length === 0) return null;
+  // The lit pixels are the outline's area; its length is that over how thick it
+  // was drawn, and both grow with the size — so one step lands on the size that
+  // puts the crowd the right distance apart.
+  const spacing = lit.length / weight(size) / count;
+  if (spacing > LETTER_SPACING) {
+    size = Math.max(12, Math.round((size * LETTER_SPACING) / spacing));
+    lit = trace(size);
+    if (lit.length === 0) return null;
+  }
+
+  const places = spread(count);
+  for (let i = 0; i < count; i += 1) {
+    const at = lit[Math.min(lit.length - 1, Math.floor(((i + 0.5) * lit.length) / count))];
+    places.xs[i] = at % canvas.width;
+    places.ys[i] = Math.floor(at / canvas.width);
+  }
+  return places;
+}
+
+/**
+ * Walk the crowd into whatever shape they have been told to stand in. Like the
+ * forces above this only writes to vx/vy — nobody is ever put anywhere, they
+ * are pulled there, so they arrive on foot and the shape assembles itself.
+ */
+export function applyFormation(
+  nodes: Node[],
+  formation: Formation,
+  opts: { step: number; now: number; width: number; height: number },
+) {
+  if (formation.shape === "drift" || formation.hold <= 0 || opts.step === 0) return;
+  const eased = holdNow(formation, opts.now);
+  if (eased <= 0.001) return;
+  const places = placesFor(formation, nodes.length, opts.width, opts.height);
+  if (!places) return;
+
+  const strength = formation.hold * eased;
+  const pull = strength * FORM_PULL * opts.step;
+  const damp = Math.min(0.9, strength * FORM_DAMP * opts.step);
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i];
+    node.vx += (places.xs[i] - node.x) * pull - node.vx * damp;
+    node.vy += (places.ys[i] - node.y) * pull - node.vy * damp;
+  }
+}
+
+/** How much of a grip the shape has on the crowd this instant, 0 to 1. */
+export const holdStrength = (formation: Formation, now: number) =>
+  formation.shape === "drift" ? 0 : formation.hold * holdNow(formation, now);
+
+/** True while a shape is being held, so the crowd isn't wrapped round the edges. */
+export const formationHolding = (formation: Formation, now: number) =>
+  holdStrength(formation, now) > 0.001;
+
+/** The pace the crowd drifts at when there is nothing holding on to them. */
+const WANDER_SPEED = 0.45;
+// How quickly someone who has been shoved — by a die, by something that walked
+// in — comes back down to that pace. Slow enough that a scattering is a
+// scattering you can watch, rather than a twitch.
+const SETTLE_RATE = 0.007;
+
+/**
+ * Keep the crowd at a walking pace. It works both ways, and both ways matter.
+ *
+ * Bringing them back *up* is what stops a crowd let out of a shape standing
+ * exactly where it was left for ever — walking into a formation means having
+ * the drift damped out of you, and without this a word on the canvas would
+ * never come apart again.
+ *
+ * Bringing them back *down* is what makes a scattering something that happens
+ * rather than something that has happened: a die shoving its way through, or a
+ * monster clearing the ground around it, would otherwise throw the crowd
+ * outwards at that speed permanently, and one goblin would empty the canvas
+ * for good.
+ *
+ * `freedom` is how much of a grip the shape has let go of — at 0 nobody is
+ * touched, which is what keeps a held shape still. `settle` is off whenever the
+ * Forces panel is pushing, since a terminal velocity is that panel's business
+ * and this would cap it at a stroll.
+ */
+export function keepWandering(nodes: Node[], step: number, freedom: number, settle: boolean) {
+  if (step === 0 || freedom <= 0.001) return;
+  const pace = WANDER_SPEED * freedom;
+  for (const node of nodes) {
+    const speed = Math.hypot(node.vx, node.vy);
+    let eased: number;
+    if (speed < pace) {
+      eased = Math.min(pace, speed + pace * 0.03 * step);
+    } else if (settle && speed > pace) {
+      eased = Math.max(pace, speed - (speed - pace) * SETTLE_RATE * step);
+    } else {
+      continue;
+    }
+    // Standing dead still, any direction will do — and once they are moving at
+    // all it is that direction they carry on in.
+    const angle = speed > 0.001 ? Math.atan2(node.vy, node.vx) : Math.random() * Math.PI * 2;
+    node.vx = Math.cos(angle) * eased;
+    node.vy = Math.sin(angle) * eased;
+  }
+}
+
 /* ------------------------------------------------------------------- links */
 
 export type LinkColour = "ink" | "accent" | "nodes";

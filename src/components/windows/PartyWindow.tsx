@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 import DndPortrait, { portraitSprite, portraitWidth } from "@/components/windows/DndPortrait";
 import FloatingPanel from "@/components/windows/FloatingPanel";
 import PartyPanel from "@/components/windows/PartyPanel";
-import { WALK_MS, WALK_STAGGER_MS, type Character } from "@/lib/dnd";
+import { modifier, WALK_MS, WALK_STAGGER_MS, type Character } from "@/lib/dnd";
 import { NO_LIGHTS, type FrameLights } from "@/components/windows/FrameLights";
 import PartyConsole from "@/components/windows/PartyConsole";
+import PartyDicePanel from "@/components/windows/PartyDicePanel";
+import PartyEncountersPanel from "@/components/windows/PartyEncountersPanel";
 import {
   Dial,
   Field,
@@ -16,21 +18,50 @@ import {
   Segmented,
   Slider,
   Stat,
+  TextField,
 } from "@/components/windows/PartyControls";
 import { emojiSprite } from "@/lib/emojiSprite";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
 import {
   applyForces,
+  applyFormation,
   drawLinks,
+  forcesAtRest,
+  formationHolding,
+  holdStrength,
+  keepWandering,
   DEFAULT_LINKS,
   LINK_ALL,
   NO_FORCES,
+  NO_FORMATION,
   type Forces,
+  type Formation,
+  type FormationShape,
   type LinkColour,
   type Links,
   type Node,
   type PointerMode,
 } from "@/lib/partyCanvas";
+import {
+  drawDice,
+  holdTheLine,
+  readRoll,
+  rollInitiative,
+  stepDice,
+  throwDice,
+  type Die,
+  type DieKind,
+  type Initiative,
+  type Luck,
+  type Roll,
+} from "@/lib/partyDice";
+import {
+  drawMonsters,
+  rollEncounter,
+  stepMonsters,
+  type Encounter,
+  type Monster,
+} from "@/lib/partyEncounters";
 import { useParty } from "@/lib/useParty";
 import { usePartyLog } from "@/lib/usePartyLog";
 
@@ -38,7 +69,10 @@ export type PanelId =
   | "palette"
   | "motion"
   | "forces"
+  | "formation"
   | "links"
+  | "dice"
+  | "encounters"
   | "readout"
   | "frame"
   | "console"
@@ -56,7 +90,10 @@ const PANELS: { id: PanelId; label: string; title: string; width: number }[] = [
   { id: "palette", label: "Palette", title: "Palette", width: 258 },
   { id: "motion", label: "Motion", title: "Motion", width: 246 },
   { id: "forces", label: "Forces", title: "Forces", width: 258 },
+  { id: "formation", label: "Formation", title: "Formation", width: 262 },
   { id: "links", label: "Links", title: "Links", width: 252 },
+  { id: "dice", label: "Dice", title: "Dice", width: 262 },
+  { id: "encounters", label: "Encounters", title: "Encounters", width: 274 },
   { id: "readout", label: "Readout", title: "Readout", width: 214 },
   { id: "frame", label: "Frame", title: "Frame", width: 246 },
   { id: "console", label: "Console", title: "Console", width: 306 },
@@ -89,9 +126,13 @@ type Settings = {
   reach: number;
   /** 0 = the canvas is wiped every frame; up towards 1 the crowd smears. */
   trails: number;
+  /** Let the crowd past the frame to wander the desktop behind the windows. */
+  loose: boolean;
   shape: NodeShape;
   /** What the Forces panel is pushing the crowd around with. */
   forces: Forces;
+  /** The shape the Formation panel has told the crowd to stand in. */
+  formation: Formation;
   /** What the Links panel is doing to the lines strung between them. */
   links: Links;
 };
@@ -106,8 +147,10 @@ const DEFAULTS: Settings = {
   speed: 0.5,
   reach: 120,
   trails: 0,
+  loose: false,
   shape: "guys",
   forces: NO_FORCES,
+  formation: NO_FORMATION,
   links: DEFAULT_LINKS,
 };
 
@@ -121,8 +164,10 @@ const SETTING_LABEL: Record<keyof Settings, string> = {
   speed: "speed",
   reach: "reach",
   trails: "trails",
+  loose: "crowd",
   shape: "nodes",
   forces: "forces",
+  formation: "formation",
   links: "links",
 };
 
@@ -138,6 +183,13 @@ const FORCE_LABEL: Record<keyof Forces, string> = {
   cohesion: "cohesion",
 };
 
+const FORMATION_LABEL: Record<keyof Formation, string> = {
+  shape: "formation",
+  text: "spelling",
+  hold: "hold",
+  restless: "restless",
+};
+
 const LINK_LABEL: Record<keyof Links, string> = {
   opacity: "link opacity",
   weight: "link weight",
@@ -150,6 +202,7 @@ const LINK_LABEL: Record<keyof Links, string> = {
 const percent = (value: number) => Math.round(value * 100);
 
 const showSetting = (key: keyof Settings, value: Settings[keyof Settings]) => {
+  if (key === "loose") return value ? "let out" : "kept in";
   if (key === "trails") return `${percent(value as number)}`;
   if (key === "surface") return (SURFACES.find((s) => s.value === value)?.label ?? "").toLowerCase();
   if (key === "shape") return SHAPE_NAMES[value as NodeShape];
@@ -162,6 +215,12 @@ const showForce = (key: keyof Forces, value: Forces[keyof Forces]) =>
     : typeof value === "number"
       ? `${percent(value)}`
       : String(value);
+
+const showFormation = (key: keyof Formation, value: Formation[keyof Formation]) => {
+  if (key === "text") return value ? `"${value}"` : "nothing";
+  if (key === "shape") return String(value);
+  return `${percent(value as number)}`;
+};
 
 const showLink = (key: keyof Links, value: Links[keyof Links]) => {
   if (key === "max") return value === LINK_ALL ? "all" : String(value);
@@ -238,6 +297,26 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
 
   const party = useParty();
   const log = usePartyLog();
+
+  // What the Dice panel is set to, what it has rolled, and what is presently
+  // bouncing about on the canvas. The dice themselves live in a ref like the
+  // crowd does — they are moved sixty times a second, and nothing in React
+  // needs to hear about it.
+  const [die, setDie] = useState<DieKind>("d20");
+  const [luck, setLuck] = useState<Luck>("normal");
+  const [rolls, setRolls] = useState<Roll[]>([]);
+  const diceRef = useRef<Die[]>([]);
+  const nextDieId = useRef(1);
+  const initiativeRef = useRef<Initiative | null>(null);
+  // Rolls waiting for their dice to stop bouncing before they are read out.
+  const settling = useRef(new Set<number>());
+
+  // What is prowling about on the canvas, and what has happened so far.
+  const monstersRef = useRef<Monster[]>([]);
+  const [encounters, setEncounters] = useState<Encounter[]>([]);
+  const [prowling, setProwling] = useState(0);
+  // Only so the panel can grey the button out while the party is lining up.
+  const [liningUp, setLiningUp] = useState(false);
   // Pulled out so the effects below can depend on it: the log itself is a new
   // object every time a line is written, this is the same function throughout.
   const { note } = log;
@@ -249,6 +328,11 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // The canvas lying over the desktop that the crowd wanders onto once it has
+  // been let out of the window. It is always mounted — the draw loop is set up
+  // once and never torn down, so it can't be handed a canvas that comes and
+  // goes with the switch.
+  const looseRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const nodesRef = useRef<Node[]>([]);
   const pointerRef = useRef<{ x: number; y: number; on: boolean }>({ x: 0, y: 0, on: false });
@@ -279,6 +363,61 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     rosterRef.current = party.roster;
   }, [party.roster]);
   const partyPosRef = useRef(new Map<string, { x: number; y: number }>());
+
+  // The canvas' own size, for throwing a die onto it. The wrap element is what
+  // the canvas is sized from, so it is the honest answer even mid-resize.
+  const canvasSize = () => {
+    const box = wrapRef.current?.getBoundingClientRect();
+    return { width: Math.max(80, box?.width ?? 600), height: Math.max(80, box?.height ?? 360) };
+  };
+
+  const roll = () => {
+    const now = performance.now();
+    const { width, height } = canvasSize();
+    const { dice, roll: rolled } = throwDice(die, luck, width, height, now, () => nextDieId.current++);
+    diceRef.current.push(...dice);
+    // The number is settled before the die is ever thrown, but nobody wants to
+    // be told it while the thing is still bouncing — so the panel and the log
+    // wait for it to come to rest, the same as you would.
+    const lands = Math.max(...dice.map((d) => d.restsAt)) - now + 140;
+    const timer = window.setTimeout(() => {
+      settling.current.delete(timer);
+      setRolls((prev) => [...prev, rolled].slice(-40));
+      note(`rolled ${readRoll(rolled)}`);
+    }, lands);
+    settling.current.add(timer);
+  };
+
+  const rollForInitiative = () => {
+    if (party.roster.length === 0) return;
+    const { initiative, lines } = rollInitiative(
+      party.roster.map((c) => ({ id: c.id, name: c.name.trim() || "unnamed", dex: modifier(c.scores.dex) })),
+      performance.now(),
+    );
+    initiativeRef.current = initiative;
+    setLiningUp(true);
+    note("rolled for initiative");
+    for (const line of lines) note(line);
+  };
+
+  const rollAnEncounter = () => {
+    const { width, height } = canvasSize();
+    const { monster, encounter } = rollEncounter(width, height, performance.now(), () =>
+      nextDieId.current++,
+    );
+    monstersRef.current.push(monster);
+    setEncounters((prev) => [encounter, ...prev].slice(0, 24));
+    setProwling(monstersRef.current.length);
+    note(`a ${encounter.monster} — ${encounter.hook}`);
+  };
+
+  const sendThemAway = () => {
+    const gone = monstersRef.current.length;
+    if (gone === 0) return;
+    monstersRef.current.length = 0;
+    setProwling(0);
+    note(gone > 1 ? `${gone} of them sent away` : "sent away");
+  };
 
   const clearPick = useCallback(() => {
     setSelectedId(null);
@@ -338,6 +477,17 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     }
     setSettings((prev) => ({ ...prev, forces: { ...prev.forces, [key]: value } }));
   };
+  const setForm = <K extends keyof Formation>(key: K, value: Formation[K]) => {
+    if (settings.formation[key] !== value) {
+      log.changed(
+        `formation.${key}`,
+        FORMATION_LABEL[key],
+        showFormation(key, settings.formation[key]),
+        showFormation(key, value),
+      );
+    }
+    setSettings((prev) => ({ ...prev, formation: { ...prev.formation, [key]: value } }));
+  };
   const setLink = <K extends keyof Links>(key: K, value: Links[K]) => {
     if (settings.links[key] !== value) {
       log.changed(
@@ -349,7 +499,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     }
     setSettings((prev) => ({ ...prev, links: { ...prev.links, [key]: value } }));
   };
-  const { forces, links } = settings;
+  const { forces, formation, links } = settings;
 
   // Turning Colour up from nothing lights the frame and sets it moving, rather
   // than handing back a frame that is lit but stone still and looks broken.
@@ -421,6 +571,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     // the frames drawn over it. All three belong to the clear step in draw().
     let primed = false;
     let lastSurface = "";
+    // Whether the desktop's canvas is currently blank — it is, until the crowd
+    // is let out, and it is wiped back to blank when they are shut in again.
+    let looseWasOff = true;
     let toppedUpAt = 0;
 
     const fit = () => {
@@ -501,8 +654,12 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       const dt = Math.min(now - last, 50);
       last = now;
 
-      const { accent, surface, density, speed, reach, trails, shape, forces, links } =
+      const { accent, surface, density, speed, reach, trails, loose, shape, forces, formation, links } =
         settingsRef.current;
+      // Both canvases clear on the same Wipe clean, so the flag is read here
+      // and lowered at the end of the frame rather than by whichever of them
+      // happens to get to it first.
+      const wiping = wipeRef.current;
       spawn(density);
       syncParty();
       // The crowd and the party drift, link and are picked as one lot; they are
@@ -520,10 +677,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       // A sheer fill has to be laid over something, so the surface goes on
       // solid once first — after a resize, a change of surface, or Wipe clean.
       ctx.fillStyle = surface;
-      if (!primed || wipeRef.current || surface !== lastSurface || trails <= 0) {
+      const fresh = !primed || wiping || surface !== lastSurface || trails <= 0;
+      if (fresh) {
         ctx.fillRect(0, 0, width, height);
         primed = true;
-        wipeRef.current = false;
         lastSurface = surface;
       } else {
         // The fade is raised to dt so a trail is as long on a 144Hz screen as
@@ -548,15 +705,55 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       // the crowd exactly as it used to.
       const pointer = pointerRef.current;
       applyForces(nodes, forces, { step, now, reach, pointer });
+      applyFormation(nodes, formation, { step, now, width, height });
+      // Whatever the shape has let go of, the old aimless wander takes back —
+      // and anyone a die or a monster has thrown is walked back down to a
+      // stroll, unless the Forces panel is the one doing the throwing.
+      keepWandering(
+        nodes,
+        step,
+        1 - Math.min(1, holdStrength(formation, now)),
+        forcesAtRest(forces),
+      );
+      // A die crossing the canvas shoves whoever it passes out of the way, and
+      // a monster on it sends the crowd running while the party closes in.
+      stepDice(diceRef.current, nodes, { step, now, width, height });
+      stepMonsters(monstersRef.current, nodes, { step, now, width, height });
+      const initiative = initiativeRef.current;
+      if (initiative) {
+        if (now > initiative.until) initiativeRef.current = null;
+        else holdTheLine(partyRef.current, initiative, { step, now, width, height });
+      }
 
+      // Where the window is sitting on the desktop, which is what turns a
+      // place on this canvas into a place on the screen. Only wanted when the
+      // crowd has been let out, and it costs a layout read, so it is only
+      // taken then.
+      const out = loose ? looseRef.current : null;
+      const outCtx = out?.getContext("2d") ?? null;
+      const at = out ? wrap.getBoundingClientRect() : null;
+
+      // Let out, the crowd's world is the whole screen rather than the window:
+      // they carry on past the frame and come back round at the far edge of
+      // the desktop instead of the far edge of the canvas.
+      const left = at ? -at.left - reach : -reach;
+      const right = at ? window.innerWidth - at.left + reach : width + reach;
+      const top = at ? -at.top - reach : -reach;
+      const bottom = at ? window.innerHeight - at.top + reach : height + reach;
+
+      // A crowd holding a shape is never wrapped round the edges: someone who
+      // has strayed a little past the border is walking back in, and sending
+      // them the long way round instead would be a poor way to assemble a ring.
+      const wraps = !formationHolding(formation, now);
       for (const node of nodes) {
         node.x += node.vx * step;
         node.y += node.vy * step;
         // Wrap rather than bounce, so nothing piles up along the edges.
-        if (node.x < -reach) node.x = width + reach;
-        if (node.x > width + reach) node.x = -reach;
-        if (node.y < -reach) node.y = height + reach;
-        if (node.y > height + reach) node.y = -reach;
+        if (!wraps) continue;
+        if (node.x < left) node.x = right;
+        if (node.x > right) node.x = left;
+        if (node.y < top) node.y = bottom;
+        if (node.y > bottom) node.y = top;
       }
 
       const sheet = guysRef.current;
@@ -573,107 +770,172 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         return tone;
       };
 
-      drawLinks(ctx, nodes, {
-        reach,
-        links,
-        ink,
-        // Toned for a pale surface like everything else the canvas draws, or
-        // the lines wash out of Mist entirely.
-        accent: toneOf(accent),
-        pointer,
-        // A party member is painted in the palette's colour whatever the crowd
-        // around them has been dressed in, so their links are too.
-        colourOf: (node) => toneOf(node.charId ? accent : (nodeOverrides[node.id]?.color ?? accent)),
-      });
+      // Everything below is drawn once into the window's own canvas and,
+      // when the crowd has been let out, a second time into the canvas lying
+      // over the desktop — same crowd, same lines, shifted to wherever the
+      // window happens to be sitting.
+      const paint = (into: CanvasRenderingContext2D) => {
+        drawLinks(into, nodes, {
+          reach,
+          links,
+          ink,
+          // Toned for a pale surface like everything else the canvas draws, or
+          // the lines wash out of Mist entirely.
+          accent: toneOf(accent),
+          pointer,
+          // A party member is painted in the palette's colour whatever the crowd
+          // around them has been dressed in, so their links are too.
+          colourOf: (node) => toneOf(node.charId ? accent : (nodeOverrides[node.id]?.color ?? accent)),
+        });
 
-      const byId = new Map(rosterRef.current.map((member) => [member.id, member] as const));
+        const byId = new Map(rosterRef.current.map((member) => [member.id, member] as const));
 
-      for (const node of nodes) {
-        if (node.charId) {
-          const member = byId.get(node.charId);
-          if (!member) continue;
-          // Remembered for the walk-off, which sets out from where they stood.
-          partyPosRef.current.set(node.charId, { x: node.x, y: node.y });
+        for (const node of nodes) {
+          if (node.charId) {
+            const member = byId.get(node.charId);
+            if (!member) continue;
+            // Remembered for the walk-off, which sets out from where they stood.
+            partyPosRef.current.set(node.charId, { x: node.x, y: node.y });
 
-          const h = heightOf(node);
-          const sprite = portraitSprite(member, toneOf(accent), sheet);
-          if (sprite) {
-            const w = portraitWidth(h);
-            ctx.save();
-            // The tile is 24×31 actual pixels; smoothing turns it to mush.
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(sprite, node.x - w / 2, node.y - h / 2, w, h);
-            ctx.restore();
+            const h = heightOf(node);
+            const sprite = portraitSprite(member, toneOf(accent), sheet);
+            if (sprite) {
+              const w = portraitWidth(h);
+              into.save();
+              // The tile is 24×31 actual pixels; smoothing turns it to mush.
+              into.imageSmoothingEnabled = false;
+              into.drawImage(sprite, node.x - w / 2, node.y - h / 2, w, h);
+              into.restore();
+            }
+            // Their name under them, so a party reads as a party and not as five
+            // more of the crowd.
+            into.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
+            into.textAlign = "center";
+            into.fillStyle = `rgba(${ink}, 0.72)`;
+            into.fillText(member.name.trim() || "unnamed", node.x, node.y + h / 2 + 11);
+
+            // Rolled for initiative, everyone carries their number over their
+            // head for as long as the order stands.
+            const rolled = initiativeRef.current?.scores[node.charId];
+            if (rolled) {
+              into.font = "700 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
+              into.fillStyle = toneOf(accent);
+              into.fillText(String(rolled.total), node.x, node.y - h / 2 - 6);
+            }
+            continue;
           }
-          // Their name under them, so a party reads as a party and not as five
-          // more of the crowd.
-          ctx.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillStyle = `rgba(${ink}, 0.72)`;
-          ctx.fillText(member.name.trim() || "unnamed", node.x, node.y + h / 2 + 11);
-          continue;
+
+          const override = nodeOverrides[node.id];
+          const nodeShape = override?.shape ?? shape;
+          const tone = toneOf(override?.color ?? accent);
+          const h = GUY_HEIGHT * node.size;
+          const emoji = EMOJI[nodeShape];
+
+          if (emoji) {
+            const sprite = emojiSprite(emoji);
+            if (!sprite) continue;
+            into.save();
+            into.translate(node.x, node.y);
+            // Half of them face the other way, so the crowd isn't a chorus line.
+            if (node.flip) into.scale(-1, 1);
+            into.drawImage(sprite, -h / 2, -h / 2, h, h);
+            into.restore();
+          } else if (nodeShape === "guys" && sheet) {
+            const guy = node.guy % sheet.count;
+            const sx = (guy % sheet.columns) * sheet.cellWidth;
+            const sy = Math.floor(guy / sheet.columns) * sheet.cellHeight;
+            const w = h * (sheet.cellWidth / sheet.cellHeight);
+            into.save();
+            into.translate(node.x, node.y);
+            if (node.flip) into.scale(-1, 1);
+            into.drawImage(
+              tintGuys(sheet, tone),
+              sx,
+              sy,
+              sheet.cellWidth,
+              sheet.cellHeight,
+              -w / 2,
+              -h / 2,
+              w,
+              h,
+            );
+            into.restore();
+          } else {
+            into.fillStyle = tone;
+            into.beginPath();
+            into.arc(node.x, node.y, 1.8, 0, Math.PI * 2);
+            into.fill();
+          }
         }
 
-        const override = nodeOverrides[node.id];
-        const nodeShape = override?.shape ?? shape;
-        const tone = toneOf(override?.color ?? accent);
-        const h = GUY_HEIGHT * node.size;
-        const emoji = EMOJI[nodeShape];
+        drawMonsters(into, monstersRef.current, {
+          now,
+          ink,
+          accent: toneOf(accent),
+          sprite: emojiSprite,
+        });
+        drawDice(into, diceRef.current, { now, accent: toneOf(accent), ink, surface });
 
-        if (emoji) {
-          const sprite = emojiSprite(emoji);
-          if (!sprite) continue;
-          ctx.save();
-          ctx.translate(node.x, node.y);
-          // Half of them face the other way, so the crowd isn't a chorus line.
-          if (node.flip) ctx.scale(-1, 1);
-          ctx.drawImage(sprite, -h / 2, -h / 2, h, h);
-          ctx.restore();
-        } else if (nodeShape === "guys" && sheet) {
-          const guy = node.guy % sheet.count;
-          const sx = (guy % sheet.columns) * sheet.cellWidth;
-          const sy = Math.floor(guy / sheet.columns) * sheet.cellHeight;
-          const w = h * (sheet.cellWidth / sheet.cellHeight);
-          ctx.save();
-          ctx.translate(node.x, node.y);
-          if (node.flip) ctx.scale(-1, 1);
-          ctx.drawImage(
-            tintGuys(sheet, tone),
-            sx,
-            sy,
-            sheet.cellWidth,
-            sheet.cellHeight,
-            -w / 2,
-            -h / 2,
-            w,
-            h,
-          );
-          ctx.restore();
+        // The picked node wears a marching-ants ring, in the palette's own colour
+        // rather than its own, so it stands out however it has been dressed.
+        const selected = selectedRef.current;
+        if (selected !== null) {
+          const node = nodes.find((n) => n.id === selected);
+          if (node) {
+            into.save();
+            into.strokeStyle = accent;
+            into.lineWidth = 1.5;
+            into.setLineDash([4, 4]);
+            into.lineDashOffset = -((now / 45) % 8);
+            into.beginPath();
+            into.arc(node.x, node.y, heightOf(node) / 2 + 7, 0, Math.PI * 2);
+            into.stroke();
+            into.restore();
+          }
+        }
+      };
+
+      paint(ctx);
+
+      // The desktop's canvas has to stay see-through — there is a desktop under
+      // it — so where the window lays its surface down again this erases what
+      // was there instead, and trails are the same erasure done gently.
+      if (out && outCtx && at) {
+        const dpr = window.devicePixelRatio || 1;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (out.width !== Math.round(vw * dpr) || out.height !== Math.round(vh * dpr)) {
+          out.width = Math.round(vw * dpr);
+          out.height = Math.round(vh * dpr);
+          out.style.width = `${vw}px`;
+          out.style.height = `${vh}px`;
+          looseWasOff = true;
+        }
+        outCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (fresh || looseWasOff) {
+          outCtx.clearRect(0, 0, vw, vh);
         } else {
-          ctx.fillStyle = tone;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, 1.8, 0, Math.PI * 2);
-          ctx.fill();
+          outCtx.save();
+          outCtx.globalCompositeOperation = "destination-out";
+          outCtx.globalAlpha = 1 - Math.pow(1 - Math.pow(0.03, trails), dt / 16.67);
+          outCtx.fillStyle = "#000";
+          outCtx.fillRect(0, 0, vw, vh);
+          outCtx.restore();
         }
+        looseWasOff = false;
+        outCtx.save();
+        outCtx.translate(at.left, at.top);
+        paint(outCtx);
+        outCtx.restore();
+      } else if (!looseWasOff) {
+        // Shut the crowd back in and whatever was left on the desktop goes.
+        const stale = looseRef.current;
+        const staleCtx = stale?.getContext("2d");
+        if (stale && staleCtx) staleCtx.clearRect(0, 0, stale.width, stale.height);
+        looseWasOff = true;
       }
 
-      // The picked node wears a marching-ants ring, in the palette's own colour
-      // rather than its own, so it stands out however it has been dressed.
-      const selected = selectedRef.current;
-      if (selected !== null) {
-        const node = nodes.find((n) => n.id === selected);
-        if (node) {
-          ctx.save();
-          ctx.strokeStyle = accent;
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([4, 4]);
-          ctx.lineDashOffset = -((now / 45) % 8);
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, heightOf(node) / 2 + 7, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
+      wipeRef.current = false;
 
       fpsAccum += dt;
       fpsFrames += 1;
@@ -691,6 +953,11 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         // Turning the density down can thin away the node that was picked.
         const picked = selectedRef.current;
         if (picked !== null && !nodes.some((n) => n.id === picked)) clearPick();
+        // The initiative order runs out in the draw loop; this is the panel's
+        // button finding out about it.
+        setLiningUp((was) => (was && !initiativeRef.current ? false : was));
+        // Monsters wander off on their own clock; this is the panel noticing.
+        setProwling((was) => (was === monstersRef.current.length ? was : monstersRef.current.length));
       }
     };
 
@@ -746,6 +1013,15 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     },
     [party],
   );
+
+  // A window closed mid-throw shouldn't leave a roll waiting to be read out.
+  useEffect(() => {
+    const pending = settling.current;
+    return () => {
+      for (const timer of pending) window.clearTimeout(timer);
+      pending.clear();
+    };
+  }, []);
 
   // The Console's own reporting. Everything above writes down what you did to
   // it; this is the window writing down what happened to it.
@@ -1114,6 +1390,72 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
               </>
             )}
 
+            {id === "formation" && (
+              <>
+                <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
+                  Stop drifting and arrange.
+                </p>
+                <Field label="Shape">
+                  <Segmented
+                    options={[
+                      { label: "Drift", value: "drift" },
+                      { label: "Grid", value: "grid" },
+                      { label: "Ring", value: "ring" },
+                      { label: "Spiral", value: "spiral" },
+                      { label: "Text", value: "text" },
+                    ]}
+                    value={formation.shape}
+                    accent={settings.accent}
+                    onChange={(value) => setForm("shape", value as FormationShape)}
+                  />
+                </Field>
+                {/* Typing moves them onto the word without having to reach for
+                    the switch above first — nobody types into this field and
+                    means anything else by it. */}
+                <TextField
+                  label="Spell out"
+                  value={formation.text}
+                  placeholder="spell something"
+                  onChange={(value) => {
+                    setForm("text", value);
+                    if (value.trim() && formation.shape !== "text") setForm("shape", "text");
+                  }}
+                />
+                <Group dim={formation.shape === "drift"}>
+                  <Slider
+                    label="Hold"
+                    value={percent(formation.hold)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setForm("hold", v / 100)}
+                  />
+                  {/* Up from nothing they keep breaking out of the shape and
+                      walking back into it, rather than standing in it for good. */}
+                  <Slider
+                    label="Restless"
+                    value={percent(formation.restless)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setForm("restless", v / 100)}
+                  />
+                </Group>
+                <button
+                  type="button"
+                  onClick={() => {
+                    note("formation broken up");
+                    setSettings((prev) => ({ ...prev, formation: { ...prev.formation, shape: "drift" } }));
+                  }}
+                  style={{ ...panelButton, opacity: formation.shape === "drift" ? 0.4 : 1 }}
+                >
+                  Let them wander
+                </button>
+              </>
+            )}
+
             {id === "links" && (
               <>
                 <Slider
@@ -1190,6 +1532,32 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
               </>
             )}
 
+            {id === "dice" && (
+              <PartyDicePanel
+                die={die}
+                luck={luck}
+                rolls={rolls}
+                accent={settings.accent}
+                party={party.roster.length}
+                liningUp={liningUp}
+                onDie={setDie}
+                onLuck={setLuck}
+                onRoll={roll}
+                onInitiative={rollForInitiative}
+              />
+            )}
+
+            {id === "encounters" && (
+              <PartyEncountersPanel
+                encounters={encounters}
+                accent={settings.accent}
+                prowling={prowling}
+                party={party.roster.length}
+                onRoll={rollAnEncounter}
+                onClear={sendThemAway}
+              />
+            )}
+
             {id === "console" && <PartyConsole log={log} accent={settings.accent} />}
 
             {id === "frame" && (
@@ -1197,6 +1565,19 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
                   Edit parent window frame.
                 </p>
+                {/* The frame already bends and lights the window it sits in.
+                    This lets the crowd out through it. */}
+                <Field label="Crowd">
+                  <Segmented
+                    options={[
+                      { label: "Kept in", value: "in" },
+                      { label: "Let out", value: "out" },
+                    ]}
+                    value={settings.loose ? "out" : "in"}
+                    accent={settings.accent}
+                    onChange={(value) => set("loose", value === "out")}
+                  />
+                </Field>
                 <Field label="Tool windows">
                   <Segmented
                     options={[
@@ -1304,6 +1685,25 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         );
       })}
 
+      {typeof document !== "undefined" &&
+        createPortal(
+          <canvas
+            ref={looseRef}
+            aria-hidden
+            style={{
+              position: "fixed",
+              left: 0,
+              top: 0,
+              // Between the desktop and the windows, the same place the party
+              // walks out through, so the crowd wanders behind everything that
+              // is open rather than over the top of it.
+              zIndex: 5,
+              pointerEvents: "none",
+            }}
+          />,
+          document.body,
+        )}
+
       {walk &&
         typeof document !== "undefined" &&
         createPortal(
@@ -1350,16 +1750,23 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   );
 }
 
+// How far down the desktop the next panel's slot sits, and how far left the
+// next column of them starts once a column has run out of screen.
+const SLOT_DOWN = 132;
+const SLOT_ACROSS = 290;
+
 // Each panel has its own slot down the right edge of the desktop, so opening two
-// at once never lands one on top of the other. This is only where a panel that
-// has never been dragged opens: once it has been moved, the window remembers
-// the spot and gives it back on every reopen.
+// at once never lands one on top of the other — and once a column of slots
+// reaches the taskbar the next one starts a column to its left, rather than
+// going on off the bottom of the screen. This is only where a panel that has
+// never been dragged opens: once it has been moved, the window remembers the
+// spot and gives it back on every reopen.
 function initialSpot(slot: number, width: number) {
   if (typeof window === "undefined") return { x: 420, y: 96 };
-  const step = Math.max(120, Math.min(200, (window.innerHeight - 100) / PANELS.length));
+  const perColumn = Math.max(1, Math.floor((window.innerHeight - 150) / SLOT_DOWN));
   return {
-    x: Math.max(16, window.innerWidth - width - 24),
-    y: 66 + slot * step,
+    x: Math.max(16, window.innerWidth - width - 24 - Math.floor(slot / perColumn) * SLOT_ACROSS),
+    y: 66 + (slot % perColumn) * SLOT_DOWN,
   };
 }
 
