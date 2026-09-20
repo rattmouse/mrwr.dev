@@ -53,6 +53,8 @@ type Settings = {
   density: number;
   speed: number;
   reach: number;
+  /** 0 = the canvas is wiped every frame; up towards 1 the crowd smears. */
+  trails: number;
   shape: NodeShape;
 };
 
@@ -82,6 +84,7 @@ const DEFAULTS: Settings = {
   density: 46,
   speed: 0.5,
   reach: 120,
+  trails: 0,
   shape: "guys",
 };
 
@@ -168,6 +171,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const nodesRef = useRef<Node[]>([]);
   const pointerRef = useRef<{ x: number; y: number; on: boolean }>({ x: 0, y: 0, on: false });
+  // Raised by the Motion panel's Wipe clean; the draw loop lowers it again on
+  // the frame it clears in full.
+  const wipeRef = useRef(false);
   // The draw loop reads settings through a ref so moving a slider never has to
   // tear down and restart the animation.
   const guysRef = useRef<GuySheet | null>(null);
@@ -289,6 +295,12 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
 
     let width = 0;
     let height = 0;
+    // Whether the surface has been laid down opaquely at least once since the
+    // canvas was last sized, the surface it was laid down in, and a count of
+    // the frames drawn over it. All three belong to the clear step in draw().
+    let primed = false;
+    let lastSurface = "";
+    let toppedUpAt = 0;
 
     const fit = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -314,6 +326,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Resizing the canvas blanks it to transparent, so the next frame has to
+      // lay the surface down in full before it can start fading it.
+      primed = false;
     };
 
     const bornNode = (): Node => ({
@@ -384,7 +399,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       const dt = Math.min(now - last, 50);
       last = now;
 
-      const { accent, surface, density, speed, reach, shape } = settingsRef.current;
+      const { accent, surface, density, speed, reach, trails, shape } = settingsRef.current;
       spawn(density);
       syncParty();
       // The crowd and the party drift, link and are picked as one lot; they are
@@ -394,8 +409,36 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       const ink = light ? "15, 20, 30" : "232, 236, 244";
       const step = (dt / 16.67) * speed;
 
+      // With Trails down this is the ordinary wipe: the surface goes on solid
+      // and nothing survives the frame. Turn it up and the surface goes on
+      // sheer instead, so what was drawn last frame is still faintly under it
+      // and the crowd smears rather than moves.
+      //
+      // A sheer fill has to be laid over something, so the surface goes on
+      // solid once first — after a resize, a change of surface, or Wipe clean.
       ctx.fillStyle = surface;
-      ctx.fillRect(0, 0, width, height);
+      if (!primed || wipeRef.current || surface !== lastSurface || trails <= 0) {
+        ctx.fillRect(0, 0, width, height);
+        primed = true;
+        wipeRef.current = false;
+        lastSurface = surface;
+      } else {
+        // The fade is raised to dt so a trail is as long on a 144Hz screen as
+        // it is on a 60Hz one, and the top-up is on a clock for the same
+        // reason. It is there because a fill this sheer moves an 8-bit channel
+        // by less than half a level once a ghost is close to the surface,
+        // which rounds to no change at all and leaves the last of every trail
+        // burnt into the canvas for good — on Ink it stalls around #191919
+        // rather than reaching #0b0e14. Three times a second the fill goes on
+        // harder than asked, which is what finally takes it off, and that is
+        // far too sparse to see.
+        const fade = 1 - Math.pow(1 - Math.pow(0.03, trails), dt / 16.67);
+        const topUp = now - toppedUpAt > 330;
+        if (topUp) toppedUpAt = now;
+        ctx.globalAlpha = topUp ? Math.max(fade, 0.12) : fade;
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalAlpha = 1;
+      }
 
       for (const node of nodes) {
         node.x += node.vx * step;
@@ -822,6 +865,27 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   accent={settings.accent}
                   onChange={(v) => set("reach", v)}
                 />
+                <Slider
+                  label="Trails"
+                  value={Math.round(settings.trails * 100)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  accent={settings.accent}
+                  onChange={(v) => set("trails", v / 100)}
+                />
+                {/* Nothing to wipe until the canvas is holding on to something,
+                    so with Trails down the button is dimmed rather than left
+                    looking broken — the same as the Frame panel's lights. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    wipeRef.current = true;
+                  }}
+                  style={{ ...panelButton, opacity: settings.trails > 0 ? 1 : 0.4 }}
+                >
+                  Wipe clean
+                </button>
               </>
             )}
 
