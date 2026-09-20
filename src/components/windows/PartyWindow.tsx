@@ -56,11 +56,11 @@ import {
   type Roll,
 } from "@/lib/partyDice";
 import {
-  drawMonsters,
+  drawArrivals,
   rollEncounter,
-  stepMonsters,
+  stepArrivals,
+  type Arrival,
   type Encounter,
-  type Monster,
 } from "@/lib/partyEncounters";
 import { useParty } from "@/lib/useParty";
 import { usePartyLog } from "@/lib/usePartyLog";
@@ -311,10 +311,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   // Rolls waiting for their dice to stop bouncing before they are read out.
   const settling = useRef(new Set<number>());
 
-  // What is prowling about on the canvas, and what has happened so far.
-  const monstersRef = useRef<Monster[]>([]);
+  // Who is out on the canvas, and what has happened so far.
+  const arrivalsRef = useRef<Arrival[]>([]);
   const [encounters, setEncounters] = useState<Encounter[]>([]);
-  const [prowling, setProwling] = useState(0);
+  const [visiting, setVisiting] = useState(0);
   // Only so the panel can grey the button out while the party is lining up.
   const [liningUp, setLiningUp] = useState(false);
   // Pulled out so the effects below can depend on it: the log itself is a new
@@ -402,20 +402,20 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
 
   const rollAnEncounter = () => {
     const { width, height } = canvasSize();
-    const { monster, encounter } = rollEncounter(width, height, performance.now(), () =>
+    const { arrival, encounter } = rollEncounter(width, height, performance.now(), () =>
       nextDieId.current++,
     );
-    monstersRef.current.push(monster);
+    arrivalsRef.current.push(arrival);
     setEncounters((prev) => [encounter, ...prev].slice(0, 24));
-    setProwling(monstersRef.current.length);
-    note(`a ${encounter.monster} — ${encounter.hook}`);
+    setVisiting(arrivalsRef.current.length);
+    note(`a ${encounter.who} — ${encounter.hook}`);
   };
 
   const sendThemAway = () => {
-    const gone = monstersRef.current.length;
+    const gone = arrivalsRef.current.length;
     if (gone === 0) return;
-    monstersRef.current.length = 0;
-    setProwling(0);
+    arrivalsRef.current.length = 0;
+    setVisiting(0);
     note(gone > 1 ? `${gone} of them sent away` : "sent away");
   };
 
@@ -707,7 +707,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       applyForces(nodes, forces, { step, now, reach, pointer });
       applyFormation(nodes, formation, { step, now, width, height });
       // Whatever the shape has let go of, the old aimless wander takes back —
-      // and anyone a die or a monster has thrown is walked back down to a
+      // and anyone a die or an arrival has thrown is walked back down to a
       // stroll, unless the Forces panel is the one doing the throwing.
       keepWandering(
         nodes,
@@ -715,10 +715,11 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         1 - Math.min(1, holdStrength(formation, now)),
         forcesAtRest(forces),
       );
-      // A die crossing the canvas shoves whoever it passes out of the way, and
-      // a monster on it sends the crowd running while the party closes in.
+      // A die crossing the canvas shoves whoever it passes out of the way; a
+      // monster on it sends the crowd running while the party closes in, and a
+      // guest gathers everybody in together.
       stepDice(diceRef.current, nodes, { step, now, width, height });
-      stepMonsters(monstersRef.current, nodes, { step, now, width, height });
+      stepArrivals(arrivalsRef.current, nodes, { step, now, width, height });
       const initiative = initiativeRef.current;
       if (initiative) {
         if (now > initiative.until) initiativeRef.current = null;
@@ -868,7 +869,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
           }
         }
 
-        drawMonsters(into, monstersRef.current, {
+        drawArrivals(into, arrivalsRef.current, {
           now,
           ink,
           accent: toneOf(accent),
@@ -956,8 +957,8 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         // The initiative order runs out in the draw loop; this is the panel's
         // button finding out about it.
         setLiningUp((was) => (was && !initiativeRef.current ? false : was));
-        // Monsters wander off on their own clock; this is the panel noticing.
-        setProwling((was) => (was === monstersRef.current.length ? was : monstersRef.current.length));
+        // They wander off on their own clock; this is the panel noticing.
+        setVisiting((was) => (was === arrivalsRef.current.length ? was : arrivalsRef.current.length));
       }
     };
 
@@ -1551,7 +1552,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
               <PartyEncountersPanel
                 encounters={encounters}
                 accent={settings.accent}
-                prowling={prowling}
+                visiting={visiting}
                 party={party.roster.length}
                 onRoll={rollAnEncounter}
                 onClear={sendThemAway}

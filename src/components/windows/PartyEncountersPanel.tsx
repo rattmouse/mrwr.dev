@@ -6,24 +6,25 @@ import type { Encounter } from "@/lib/partyEncounters";
 
 /**
  * party.webp's Encounters panel. The roster is a party and the canvas is
- * somewhere for it to be; this is the thing that happens to it. Roll one and a
- * monster walks in — the party moves towards it and everybody else moves away —
- * along with a hook to explain why it is there and the loot for afterwards.
+ * somewhere for it to be; this is the thing that happens to it. Roll one and
+ * somebody walks in — a monster, and the party moves towards it while everybody
+ * else backs off, or a guest, and the whole crowd comes over — along with a
+ * hook to explain why they are there and what the party comes away with.
  *
  * Nothing here is fought or won. It is a prompt, not a game.
  */
 export default function PartyEncountersPanel({
   encounters,
   accent,
-  prowling,
+  visiting,
   party,
   onRoll,
   onClear,
 }: {
   encounters: Encounter[];
   accent: string;
-  /** How many monsters are on the canvas right now. */
-  prowling: number;
+  /** How many of them are on the canvas right now. */
+  visiting: number;
   /** How many are on the roster, so the panel can say who is converging. */
   party: number;
   onRoll: () => void;
@@ -41,8 +42,8 @@ export default function PartyEncountersPanel({
     <>
       <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
         {party === 0
-          ? "Roll something in. With nobody on the roster, only the crowd will react to it."
-          : `Roll something in. The party closes on it; everybody else gets out of the way.`}
+          ? "Roll somebody in. With nobody on the roster, only the crowd will react to them."
+          : "Roll somebody in. The party closes on whatever turns up; the crowd scatters from a monster and gathers round a guest."}
       </p>
 
       <button
@@ -61,11 +62,13 @@ export default function PartyEncountersPanel({
 
       {latest && (
         <div style={{ display: "grid", gap: 6, padding: "9px 10px", borderRadius: 9, background: "rgba(255, 255, 255, 0.05)" }}>
-          <span style={{ fontSize: 14, color: accent, fontWeight: 600 }}>{latest.monster}</span>
+          <span style={{ fontSize: 14, color: accent, fontWeight: 600 }}>{latest.who}</span>
           <span style={{ fontSize: 12, color: "rgba(232, 236, 244, 0.78)" }}>{latest.hook}</span>
           <span style={{ fontSize: 11, color: "rgba(232, 236, 244, 0.5)" }}>
-            <span style={{ letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 10 }}>Loot</span>{" "}
-            · {latest.loot}
+            <span style={{ letterSpacing: "0.08em", textTransform: "uppercase", fontSize: 10 }}>
+              {latest.kind === "welcome" ? "Gift" : "Loot"}
+            </span>{" "}
+            · {latest.reward}
           </span>
         </div>
       )}
@@ -91,7 +94,7 @@ export default function PartyEncountersPanel({
         ) : (
           encounters.slice(1).map((entry) => (
             <div key={entry.id}>
-              {entry.monster} — {entry.hook}
+              {entry.who} — {entry.hook}
             </div>
           ))
         )}
@@ -100,10 +103,10 @@ export default function PartyEncountersPanel({
       <button
         type="button"
         onClick={onClear}
-        title="Send whatever is prowling about on its way"
-        style={{ ...panelButton, opacity: prowling > 0 ? 1 : 0.4 }}
+        title="Send whoever has wandered in on their way"
+        style={{ ...panelButton, opacity: visiting > 0 ? 1 : 0.4 }}
       >
-        {prowling > 1 ? `Send all ${prowling} away` : "Send it away"}
+        {visiting > 1 ? `Send all ${visiting} away` : "Send them away"}
       </button>
     </>
   );
