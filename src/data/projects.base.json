@@ -1,5 +1,15 @@
 [
   {
+    "slug": "card-binder",
+    "name": "card-binder",
+    "kind": "trading-card scanner & binder",
+    "blurb": "Catalogue a trading-card collection with a camera: photograph a card — or a whole binder page — and it works out which print it is, prices it against the market, and files it away in a binder you can sort and export. Magic, Pokémon and Yu-Gi-Oh. It is what fills the Cards shelf in Collections.",
+    "built": "Node 22 standard library · SQLite · vanilla JS · Canvas",
+    "closedSource": true,
+    "thumb": "/projects/thumbs/card-binder.webp",
+    "shot": "/projects/card-binder.png"
+  },
+  {
     "slug": "cairn",
     "name": "cairn",
     "kind": "local-first notes editor",

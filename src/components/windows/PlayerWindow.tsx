@@ -111,8 +111,10 @@ const SEEK_STEPS = 10;
 // end of the track by half that — pad for it, and measure positions inside it.
 const THUMB_INSET = 9;
 
-/* Toolbar glyphs, drawn on a 12px grid in the same flat black as the ⏮ ⏹ ⏭
-   buttons beside them, square-edged so they stay crisp like Windows 95's. */
+/* Toolbar glyphs, drawn on a 12px grid in flat black, square-edged so they
+   stay crisp like Windows 95's. Every button in the window uses one — the
+   transport included, rather than the ⏮ ⏹ ⏭ characters, which a font draws
+   in its own weight and shape and so never quite matched the rest. */
 function Glyph({ children }: { children: React.ReactNode }) {
   return (
     <svg
@@ -127,6 +129,29 @@ function Glyph({ children }: { children: React.ReactNode }) {
     </svg>
   );
 }
+
+/* Transport trio. All three sit on the same 8×8 footprint as PauseIcon — a
+   bar and a stepped triangle either side of centre, mirrored between prev and
+   next — so the four buttons read as one row. */
+const PrevIcon = () => (
+  <Glyph>
+    <path d="M2 2h2v8H2z" fill="currentColor" />
+    <path d="M6 5h1v2H6zM7 4h1v4H7zM8 3h1v6H8zM9 2h1v8H9z" fill="currentColor" />
+  </Glyph>
+);
+
+const StopIcon = () => (
+  <Glyph>
+    <path d="M2 2h8v8H2z" fill="currentColor" />
+  </Glyph>
+);
+
+const NextIcon = () => (
+  <Glyph>
+    <path d="M2 2h1v8H2zM3 3h1v6H3zM4 4h1v4H4zM5 5h1v2H5z" fill="currentColor" />
+    <path d="M8 2h2v8H8z" fill="currentColor" />
+  </Glyph>
+);
 
 const PlayIcon = () => (
   <Glyph>
@@ -987,7 +1012,7 @@ const PlayerWindow = forwardRef<PlayerWindowHandle, { viz?: VizMode }>(function 
       {/* Transport. */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, flex: "0 0 auto", flexWrap: "wrap" }}>
         <Button size="sm" square title="Previous" aria-label="Previous" disabled={!tracks.length} onClick={() => skip(-1)}>
-          ⏮
+          <PrevIcon />
         </Button>
         <Button
           size="sm"
@@ -1001,10 +1026,10 @@ const PlayerWindow = forwardRef<PlayerWindowHandle, { viz?: VizMode }>(function 
           {playing ? <PauseIcon /> : <PlayIcon />}
         </Button>
         <Button size="sm" square title="Stop" aria-label="Stop" disabled={!track} onClick={stop}>
-          ⏹
+          <StopIcon />
         </Button>
         <Button size="sm" square title="Next" aria-label="Next" disabled={!tracks.length} onClick={() => skip(1)}>
-          ⏭
+          <NextIcon />
         </Button>
         <span aria-hidden style={{ width: 6 }} />
         <Button
