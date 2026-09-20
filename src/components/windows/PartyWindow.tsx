@@ -7,11 +7,42 @@ import FloatingPanel from "@/components/windows/FloatingPanel";
 import PartyPanel from "@/components/windows/PartyPanel";
 import { WALK_MS, WALK_STAGGER_MS, type Character } from "@/lib/dnd";
 import { NO_LIGHTS, type FrameLights } from "@/components/windows/FrameLights";
+import PartyConsole from "@/components/windows/PartyConsole";
+import {
+  Dial,
+  Field,
+  Group,
+  panelButton,
+  Segmented,
+  Slider,
+  Stat,
+} from "@/components/windows/PartyControls";
 import { emojiSprite } from "@/lib/emojiSprite";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
+import {
+  applyForces,
+  drawLinks,
+  DEFAULT_LINKS,
+  LINK_ALL,
+  NO_FORCES,
+  type Forces,
+  type LinkColour,
+  type Links,
+  type Node,
+  type PointerMode,
+} from "@/lib/partyCanvas";
 import { useParty } from "@/lib/useParty";
+import { usePartyLog } from "@/lib/usePartyLog";
 
-export type PanelId = "palette" | "motion" | "readout" | "frame" | "party";
+export type PanelId =
+  | "palette"
+  | "motion"
+  | "forces"
+  | "links"
+  | "readout"
+  | "frame"
+  | "console"
+  | "party";
 
 /**
  * What the Frame panel is doing to the window around this one: 0–1 of warp,
@@ -24,8 +55,11 @@ export const NO_FRAME: FrameSettings = { melt: 0, lights: NO_LIGHTS };
 const PANELS: { id: PanelId; label: string; title: string; width: number }[] = [
   { id: "palette", label: "Palette", title: "Palette", width: 258 },
   { id: "motion", label: "Motion", title: "Motion", width: 246 },
+  { id: "forces", label: "Forces", title: "Forces", width: 258 },
+  { id: "links", label: "Links", title: "Links", width: 252 },
   { id: "readout", label: "Readout", title: "Readout", width: 214 },
   { id: "frame", label: "Frame", title: "Frame", width: 246 },
+  { id: "console", label: "Console", title: "Console", width: 306 },
   { id: "party", label: "Party", title: "Party", width: 322 },
 ];
 
@@ -56,27 +90,14 @@ type Settings = {
   /** 0 = the canvas is wiped every frame; up towards 1 the crowd smears. */
   trails: number;
   shape: NodeShape;
+  /** What the Forces panel is pushing the crowd around with. */
+  forces: Forces;
+  /** What the Links panel is doing to the lines strung between them. */
+  links: Links;
 };
 
 // What one node has been told to be, as against what the crowd around it is.
 type NodeOverride = { shape?: NodeShape; color?: string };
-
-// Which of the painted figures this node is, which way it faces and how big it
-// is — rolled once when the node is born so a guy doesn't flicker into someone
-// else every frame. The id is what selection and per-node edits hold on to,
-// since the array itself shuffles as the density changes.
-type Node = {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  guy: number;
-  flip: boolean;
-  size: number;
-  /** Set on the nodes standing in for party members, to the character's id. */
-  charId?: string;
-};
 
 const DEFAULTS: Settings = {
   accent: ACCENTS[0],
@@ -86,7 +107,70 @@ const DEFAULTS: Settings = {
   reach: 120,
   trails: 0,
   shape: "guys",
+  forces: NO_FORCES,
+  links: DEFAULT_LINKS,
 };
+
+// What the Console calls each setting, and how its value reads there — the log
+// is written for someone watching the window, so "trails 0 → 40" rather than
+// "trails 0 → 0.4", and "nodes guy → rat" rather than the value behind it.
+const SETTING_LABEL: Record<keyof Settings, string> = {
+  accent: "accent",
+  surface: "surface",
+  density: "density",
+  speed: "speed",
+  reach: "reach",
+  trails: "trails",
+  shape: "nodes",
+  forces: "forces",
+  links: "links",
+};
+
+const FORCE_LABEL: Record<keyof Forces, string> = {
+  gravityAngle: "gravity heading",
+  gravity: "gravity",
+  wind: "wind",
+  jitter: "jitter",
+  pointer: "pointer",
+  pull: "pointer force",
+  separation: "separation",
+  alignment: "alignment",
+  cohesion: "cohesion",
+};
+
+const LINK_LABEL: Record<keyof Links, string> = {
+  opacity: "link opacity",
+  weight: "link weight",
+  max: "links per node",
+  curve: "curve",
+  colour: "link colour",
+  mesh: "mesh",
+};
+
+const percent = (value: number) => Math.round(value * 100);
+
+const showSetting = (key: keyof Settings, value: Settings[keyof Settings]) => {
+  if (key === "trails") return `${percent(value as number)}`;
+  if (key === "surface") return (SURFACES.find((s) => s.value === value)?.label ?? "").toLowerCase();
+  if (key === "shape") return SHAPE_NAMES[value as NodeShape];
+  return String(value);
+};
+
+const showForce = (key: keyof Forces, value: Forces[keyof Forces]) =>
+  key === "gravityAngle"
+    ? `${Math.round(value as number)}°`
+    : typeof value === "number"
+      ? `${percent(value)}`
+      : String(value);
+
+const showLink = (key: keyof Links, value: Links[keyof Links]) => {
+  if (key === "max") return value === LINK_ALL ? "all" : String(value);
+  if (key === "weight") return (value as number).toFixed(1);
+  if (key === "colour") return String(value);
+  return `${percent(value as number)}`;
+};
+
+const nameOf = (character: Character) => character.name.trim() || "someone unnamed";
 
 // How tall a guy stands on the canvas, before his own size roll. A party member
 // stands a little taller than the crowd — the loadout tile has more in it.
@@ -94,13 +178,6 @@ const GUY_HEIGHT = 26;
 const PARTY_HEIGHT = 34;
 
 const heightOf = (node: Node) => (node.charId ? PARTY_HEIGHT : GUY_HEIGHT) * node.size;
-
-// How many opacity steps the links are drawn in. Five is under the threshold
-// where the banding shows and well under the point where the draw calls hurt.
-const LINK_STEPS = 5;
-const bucketFor = (closeness: number) =>
-  Math.max(0, Math.min(LINK_STEPS - 1, Math.floor(closeness * LINK_STEPS)));
-const bucketAlpha = (index: number) => (index + 0.5) / LINK_STEPS;
 
 const channels = (hex: string) => {
   const n = parseInt(hex.slice(1), 16);
@@ -160,6 +237,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   const [overrides, setOverrides] = useState<Record<number, NodeOverride>>({});
 
   const party = useParty();
+  const log = usePartyLog();
+  // Pulled out so the effects below can depend on it: the log itself is a new
+  // object every time a line is written, this is the same function throughout.
+  const { note } = log;
   // Who is mid-walk-off and where each of them set out from, in viewport px —
   // taken from where they were standing on the canvas when the clock ran out.
   const [walk, setWalk] = useState<{
@@ -204,13 +285,22 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     setSelectedChar(null);
   }, []);
 
-  const openPanel = (id: PanelId) =>
+  const panelName = (id: PanelId) => PANELS.find((p) => p.id === id)?.label.toLowerCase() ?? id;
+  const openPanel = (id: PanelId) => {
+    note(`${panelName(id)} panel ${stack.includes(id) ? "closed" : "opened"}`);
     setStack((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  };
   const focusPanel = useCallback(
     (id: PanelId) => setStack((prev) => (prev[prev.length - 1] === id ? prev : [...prev.filter((p) => p !== id), id])),
     [],
   );
-  const closePanel = useCallback((id: PanelId) => setStack((prev) => prev.filter((p) => p !== id)), []);
+  const closePanel = useCallback(
+    (id: PanelId) => {
+      note(`${PANELS.find((p) => p.id === id)?.label.toLowerCase() ?? id} panel closed`);
+      setStack((prev) => prev.filter((p) => p !== id));
+    },
+    [note],
+  );
 
   // The tool windows can borrow the desktop's frame — border and title bar, and
   // no more of it than that. party.webp is a modern window in old dressing;
@@ -227,8 +317,39 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     [],
   );
 
-  const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
+  const set = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    if (settings[key] !== value) {
+      log.changed(key, SETTING_LABEL[key], showSetting(key, settings[key]), showSetting(key, value));
+    }
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Forces and Links are written a field at a time, the same way the Frame
+  // panel's lights are: two controls moved before a re-render can't then each
+  // write back the other's old value.
+  const setForce = <K extends keyof Forces>(key: K, value: Forces[K]) => {
+    if (settings.forces[key] !== value) {
+      log.changed(
+        `forces.${key}`,
+        FORCE_LABEL[key],
+        showForce(key, settings.forces[key]),
+        showForce(key, value),
+      );
+    }
+    setSettings((prev) => ({ ...prev, forces: { ...prev.forces, [key]: value } }));
+  };
+  const setLink = <K extends keyof Links>(key: K, value: Links[K]) => {
+    if (settings.links[key] !== value) {
+      log.changed(
+        `links.${key}`,
+        LINK_LABEL[key],
+        showLink(key, settings.links[key]),
+        showLink(key, value),
+      );
+    }
+    setSettings((prev) => ({ ...prev, links: { ...prev.links, [key]: value } }));
+  };
+  const { forces, links } = settings;
 
   // Turning Colour up from nothing lights the frame and sets it moving, rather
   // than handing back a frame that is lit but stone still and looks broken.
@@ -363,25 +484,6 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       }
     };
 
-    // One reusable path per opacity step, for both the node-to-node links and
-    // the ones reaching for the pointer.
-    const makeBuckets = () =>
-      Array.from({ length: LINK_STEPS }, () => ({
-        path: new Path2D(),
-        used: false,
-        reset(this: { path: Path2D; used: boolean }) {
-          this.path = new Path2D();
-          this.used = false;
-        },
-        line(this: { path: Path2D; used: boolean }, x1: number, y1: number, x2: number, y2: number) {
-          this.path.moveTo(x1, y1);
-          this.path.lineTo(x2, y2);
-          this.used = true;
-        },
-      }));
-    const linkBuckets = makeBuckets();
-    const pointerBuckets = makeBuckets();
-
     fit();
     spawn(DEFAULTS.density);
 
@@ -399,7 +501,8 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       const dt = Math.min(now - last, 50);
       last = now;
 
-      const { accent, surface, density, speed, reach, trails, shape } = settingsRef.current;
+      const { accent, surface, density, speed, reach, trails, shape, forces, links } =
+        settingsRef.current;
       spawn(density);
       syncParty();
       // The crowd and the party drift, link and are picked as one lot; they are
@@ -440,6 +543,12 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         ctx.globalAlpha = 1;
       }
 
+      // Whatever the Forces panel is doing lands on vx/vy first; the step below
+      // is the same one it always was, and with every force at rest it moves
+      // the crowd exactly as it used to.
+      const pointer = pointerRef.current;
+      applyForces(nodes, forces, { step, now, reach, pointer });
+
       for (const node of nodes) {
         node.x += node.vx * step;
         node.y += node.vy * step;
@@ -449,51 +558,6 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         if (node.y < -reach) node.y = height + reach;
         if (node.y > height + reach) node.y = -reach;
       }
-
-      const pointer = pointerRef.current;
-      ctx.lineWidth = 1;
-
-      // Every link is its own colour, since it fades with distance — but a
-      // stroke() per link is hundreds of draw calls a frame. Sorting them into
-      // a handful of opacity steps costs nothing visible and collapses the lot
-      // into one path per step.
-      for (const bucket of linkBuckets) bucket.reset();
-      for (const bucket of pointerBuckets) bucket.reset();
-      const pointerReach = reach * 1.6;
-
-      for (let i = 0; i < nodes.length; i += 1) {
-        const a = nodes[i];
-        for (let j = i + 1; j < nodes.length; j += 1) {
-          const b = nodes[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq > reach * reach) continue;
-          const closeness = 1 - Math.sqrt(distSq) / reach;
-          linkBuckets[bucketFor(closeness)].line(a.x, a.y, b.x, b.y);
-        }
-
-        if (pointer.on) {
-          const dist = Math.hypot(a.x - pointer.x, a.y - pointer.y);
-          if (dist < pointerReach) {
-            const closeness = 1 - dist / pointerReach;
-            pointerBuckets[bucketFor(closeness)].line(a.x, a.y, pointer.x, pointer.y);
-          }
-        }
-      }
-
-      linkBuckets.forEach((bucket, index) => {
-        if (!bucket.used) return;
-        ctx.strokeStyle = `rgba(${ink}, ${bucketAlpha(index) * 0.24})`;
-        ctx.stroke(bucket.path);
-      });
-      pointerBuckets.forEach((bucket, index) => {
-        if (!bucket.used) return;
-        ctx.strokeStyle = accent;
-        ctx.globalAlpha = bucketAlpha(index) * 0.55;
-        ctx.stroke(bucket.path);
-        ctx.globalAlpha = 1;
-      });
 
       const sheet = guysRef.current;
       const nodeOverrides = overridesRef.current;
@@ -508,6 +572,19 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         }
         return tone;
       };
+
+      drawLinks(ctx, nodes, {
+        reach,
+        links,
+        ink,
+        // Toned for a pale surface like everything else the canvas draws, or
+        // the lines wash out of Mist entirely.
+        accent: toneOf(accent),
+        pointer,
+        // A party member is painted in the palette's colour whatever the crowd
+        // around them has been dressed in, so their links are too.
+        colourOf: (node) => toneOf(node.charId ? accent : (nodeOverrides[node.id]?.color ?? accent)),
+      });
 
       const byId = new Map(rosterRef.current.map((member) => [member.id, member] as const));
 
@@ -654,6 +731,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     setSelectedChar(best?.charId ?? null);
     const member = best?.charId ? party.roster.find((c) => c.id === best.charId) : undefined;
     if (member) party.select(member);
+    if (member) note(`picked ${nameOf(member)}`);
+    else if (best) note(`picked node #${best.id}`);
+    else if (selectedId !== null) note("nothing picked");
   };
 
   // The other way round: a row in the Party panel rings that member on canvas.
@@ -666,6 +746,36 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     },
     [party],
   );
+
+  // The Console's own reporting. Everything above writes down what you did to
+  // it; this is the window writing down what happened to it.
+  const bootedRef = useRef(false);
+  useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
+    note("party.webp ready");
+  }, [note]);
+
+  // Who was in the party last time the Console looked. Nobody is reported as
+  // having left when the whole party goes — that gets its own line.
+  const knownRef = useRef<Character[]>([]);
+  useEffect(() => {
+    const before = knownRef.current;
+    knownRef.current = party.roster;
+    for (const member of party.roster) {
+      if (!before.some((c) => c.id === member.id)) note(`${nameOf(member)} joined the party`);
+    }
+    if (party.departing) return;
+    for (const member of before) {
+      if (!party.roster.some((c) => c.id === member.id)) note(`${nameOf(member)} left the party`);
+    }
+  }, [party.roster, party.departing, note]);
+
+  useEffect(() => {
+    if (!party.departing) return;
+    const count = party.departing.members.length;
+    note(`the party departed — ${count} ${count === 1 ? "adventurer" : "adventurers"} away`);
+  }, [party.departing, note]);
 
   // When the party walks off, everyone sets out from wherever they were
   // standing, crosses the desktop behind the windows, and is gone.
@@ -881,6 +991,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   type="button"
                   onClick={() => {
                     wipeRef.current = true;
+                    note("canvas wiped");
                   }}
                   style={{ ...panelButton, opacity: settings.trails > 0 ? 1 : 0.4 }}
                 >
@@ -888,6 +999,198 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 </button>
               </>
             )}
+
+            {id === "forces" && (
+              <>
+                <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
+                  Something for the crowd to push against.
+                </p>
+                <div style={{ display: "flex", gap: 13, alignItems: "center" }}>
+                  <Dial
+                    label="Gravity"
+                    value={forces.gravityAngle}
+                    accent={settings.accent}
+                    onChange={(degrees) => setForce("gravityAngle", degrees)}
+                  />
+                  <div style={{ flex: "1 1 auto", minWidth: 0, display: "grid", gap: 8 }}>
+                    <Slider
+                      label="Pull"
+                      value={percent(forces.gravity)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      accent={settings.accent}
+                      onChange={(v) => setForce("gravity", v / 100)}
+                    />
+                    {/* Below nothing the wind blows the other way, so the
+                        slider is filled from the middle out. */}
+                    <Slider
+                      label="Wind"
+                      value={percent(forces.wind)}
+                      min={-100}
+                      max={100}
+                      step={1}
+                      accent={settings.accent}
+                      onChange={(v) => setForce("wind", v / 100)}
+                    />
+                    <Slider
+                      label="Jitter"
+                      value={percent(forces.jitter)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      accent={settings.accent}
+                      onChange={(v) => setForce("jitter", v / 100)}
+                    />
+                  </div>
+                </div>
+
+                <Field label="Pointer">
+                  <Segmented
+                    options={[
+                      { label: "Ignore", value: "ignore" },
+                      { label: "Attract", value: "attract" },
+                      { label: "Repel", value: "repel" },
+                      { label: "Orbit", value: "orbit" },
+                    ]}
+                    value={forces.pointer}
+                    accent={settings.accent}
+                    onChange={(value) => setForce("pointer", value as PointerMode)}
+                  />
+                </Field>
+                {/* With the pointer ignoring them there is nothing for this to
+                    work on, so it is dimmed rather than left looking broken. */}
+                <Group dim={forces.pointer === "ignore"}>
+                  <Slider
+                    label="Force"
+                    value={percent(forces.pull)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setForce("pull", v / 100)}
+                  />
+                </Group>
+
+                <Group label="Flocking">
+                  <Slider
+                    label="Separation"
+                    value={percent(forces.separation)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setForce("separation", v / 100)}
+                  />
+                  <Slider
+                    label="Alignment"
+                    value={percent(forces.alignment)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setForce("alignment", v / 100)}
+                  />
+                  <Slider
+                    label="Cohesion"
+                    value={percent(forces.cohesion)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    accent={settings.accent}
+                    onChange={(v) => setForce("cohesion", v / 100)}
+                  />
+                </Group>
+                <button
+                  type="button"
+                  onClick={() => {
+                    note("forces let go");
+                    setSettings((prev) => ({ ...prev, forces: NO_FORCES }));
+                  }}
+                  style={panelButton}
+                >
+                  Let them be
+                </button>
+              </>
+            )}
+
+            {id === "links" && (
+              <>
+                <Slider
+                  label="Opacity"
+                  value={percent(links.opacity)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  accent={settings.accent}
+                  onChange={(v) => setLink("opacity", v / 100)}
+                />
+                <Slider
+                  label="Weight"
+                  value={links.weight}
+                  min={0.5}
+                  max={4}
+                  step={0.5}
+                  accent={settings.accent}
+                  format={(v) => v.toFixed(1)}
+                  onChange={(v) => setLink("weight", v)}
+                />
+                {/* At the top of the slider the cap comes off entirely, which
+                    is what the canvas did before there was one. */}
+                <Slider
+                  label="Per node"
+                  value={links.max}
+                  min={1}
+                  max={LINK_ALL}
+                  step={1}
+                  accent={settings.accent}
+                  format={(v) => (v === LINK_ALL ? "all" : String(v))}
+                  onChange={(v) => setLink("max", v)}
+                />
+                <Slider
+                  label="Curve"
+                  value={percent(links.curve)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  accent={settings.accent}
+                  onChange={(v) => setLink("curve", v / 100)}
+                />
+                <Field label="Colour">
+                  <Segmented
+                    options={[
+                      { label: "Ink", value: "ink" },
+                      { label: "Accent", value: "accent" },
+                      { label: "Nodes", value: "nodes" },
+                    ]}
+                    value={links.colour}
+                    accent={settings.accent}
+                    onChange={(value) => setLink("colour", value as LinkColour)}
+                  />
+                </Field>
+                <Slider
+                  label="Mesh"
+                  value={percent(links.mesh)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  accent={settings.accent}
+                  onChange={(v) => setLink("mesh", v / 100)}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    note("links back to plain");
+                    setSettings((prev) => ({ ...prev, links: DEFAULT_LINKS }));
+                  }}
+                  style={panelButton}
+                >
+                  Plain lines
+                </button>
+              </>
+            )}
+
+            {id === "console" && <PartyConsole log={log} accent={settings.accent} />}
 
             {id === "frame" && (
               <>
@@ -1047,17 +1350,6 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   );
 }
 
-const panelButton: React.CSSProperties = {
-  cursor: "pointer",
-  borderRadius: 8,
-  border: "1px solid rgba(255, 255, 255, 0.16)",
-  background: "rgba(255, 255, 255, 0.06)",
-  color: "#e8ecf4",
-  font: "inherit",
-  fontSize: 12,
-  padding: "8px 0",
-};
-
 // Each panel has its own slot down the right edge of the desktop, so opening two
 // at once never lands one on top of the other. This is only where a panel that
 // has never been dragged opens: once it has been moved, the window remembers
@@ -1134,144 +1426,6 @@ function Scope({
           Done
         </button>
       )}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: "grid", gap: 7 }}>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: "0.09em",
-          textTransform: "uppercase",
-          color: "rgba(232, 236, 244, 0.5)",
-        }}
-      >
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function Segmented({
-  options,
-  value,
-  accent,
-  onChange,
-}: {
-  options: { label: string; value: string }[];
-  value: string;
-  accent: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        padding: 3,
-        gap: 3,
-        borderRadius: 9,
-        background: "rgba(255, 255, 255, 0.06)",
-      }}
-    >
-      {options.map((option) => {
-        const on = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            aria-pressed={on}
-            style={{
-              flex: 1,
-              cursor: "pointer",
-              borderRadius: 7,
-              border: "none",
-              padding: "5px 0",
-              font: "inherit",
-              fontSize: 12,
-              background: on ? accent : "transparent",
-              color: on ? "#0b0e14" : "rgba(232, 236, 244, 0.72)",
-              transition: "background 120ms ease",
-            }}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  accent,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  accent: string;
-  onChange: (value: number) => void;
-}) {
-  const pct = ((value - min) / (max - min)) * 100;
-  return (
-    <label style={{ display: "grid", gap: 6 }}>
-      <span style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-        <span style={{ color: "rgba(232, 236, 244, 0.6)" }}>{label}</span>
-        <span style={{ fontVariantNumeric: "tabular-nums", color: accent }}>
-          {step < 1 ? value.toFixed(2) : value}
-        </span>
-      </span>
-      <input
-        type="range"
-        className="ui-range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{
-          appearance: "none",
-          WebkitAppearance: "none",
-          width: "100%",
-          height: 4,
-          borderRadius: 999,
-          outline: "none",
-          cursor: "pointer",
-          background: `linear-gradient(to right, ${accent} ${pct}%, rgba(255, 255, 255, 0.14) ${pct}%)`,
-        }}
-      />
-    </label>
-  );
-}
-
-function Stat({ label, value, accent }: { label: string; value: string; accent: string }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "baseline",
-        padding: "7px 10px",
-        borderRadius: 8,
-        background: "rgba(255, 255, 255, 0.05)",
-      }}
-    >
-      <span style={{ fontSize: 11, letterSpacing: "0.05em", color: "rgba(232, 236, 244, 0.55)" }}>
-        {label}
-      </span>
-      <span style={{ fontVariantNumeric: "tabular-nums", color: accent }}>{value}</span>
     </div>
   );
 }
