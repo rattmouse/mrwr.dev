@@ -3,6 +3,17 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "5.1",
+      "era": "handmade",
+      "name": "small tweaks",
+      "date": "2026-09-20",
+      "summary": "A few changes to constants in Party 2.0.",
+      "issues": [],
+      "changes": [
+        "Jimothy is a good guy and density is up to 500. Party can crash if it gets too wild."
+      ]
+    },
+    {
       "version": "5.0",
       "era": "claude",
       "name": "Party 2.0",
