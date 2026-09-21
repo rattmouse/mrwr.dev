@@ -161,9 +161,9 @@ type NodeOverride = { shape?: NodeShape; color?: string };
 const DEFAULTS: Settings = {
   accent: ACCENTS[0],
   surface: SURFACES[0].value,
-  density: 46,
+  density: 50,
   speed: 0.5,
-  reach: 120,
+  reach: 150,
   trails: 0,
   loose: false,
   shape: "guys",
@@ -1392,8 +1392,8 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 <Slider
                   label="Density"
                   value={settings.density}
-                  min={8}
-                  max={140}
+                  min={10}
+                  max={500}
                   step={1}
                   accent={settings.accent}
                   onChange={(v) => set("density", v)}

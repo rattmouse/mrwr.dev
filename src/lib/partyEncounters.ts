@@ -65,7 +65,6 @@ type Somebody = { name: string; face: string; size: number };
 const BESTIARY: Somebody[] = [
   { name: "goblin", face: "👺", size: 0.3 },
   { name: "tech bro", face: "👨🏻‍💻", size: 0.25 },
-  { name: "jimothy", face: "🦝", size: 0.2 },
   { name: "wolf", face: "🐺", size: 0.45 },
   { name: "big foot", face: "🫈", size: 0.8 },
   { name: "skeleton", face: "💀", size: 0.4 },
@@ -80,7 +79,7 @@ const BESTIARY: Somebody[] = [
   { name: "troll", face: "🧌", size: 0.75 },
   { name: "work", face: "🖥", size: 0.3 },
   { name: "vampire", face: "🧛🏻‍♂️", size: 0.4 },
-  { name: "dragon", face: "🐲", size: 1 },
+  { name: "dragon", face: "🐲", size: 0.9 },
   { name: "boss", face: "🦹🏻‍♂️", size: 1 },
 ];
 
@@ -90,8 +89,9 @@ const GUESTS: Somebody[] = [
   { name: "phoebe", face: "🧝🏻‍♀️", size: 0.2 },
   { name: "the cat", face: "🐈", size: 0.18 },
   { name: "wizard", face: "🧙🏼‍♂️", size: 0.3 },
+  { name: "jimothy", face: "🦝", size: 0.2 },
   { name: "sea man", face: "🧜🏻‍♂️", size: 0.34 },
-  { name: "loot", face: "🪎", size: 0.65 },
+  { name: "loot", face: "🪎", size: 0.45 },
 ];
 
 const HOOKS = [
