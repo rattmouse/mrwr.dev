@@ -75,7 +75,17 @@ export type Input = {
   jump: boolean;
 };
 
-export type Events = { fell: boolean; reached: boolean };
+export type Events = {
+  fell: boolean;
+  reached: boolean;
+  /**
+   * How far into the frame the finish was touched. The physics runs in slices
+   * of a hundred and twentieth of a second, so the moment of finishing is
+   * known far more closely than "some time during this frame" — which is what
+   * the last digit of the clock is made of.
+   */
+  at: number;
+};
 
 /** Below this there is nothing but sky, and the ball has plainly missed. */
 const VOID = -25;
@@ -83,7 +93,14 @@ const VOID = -25;
 const GRAVITY = 26;
 const PUSH_GROUND = 30;
 const PUSH_AIR = 11;
-const TOP_SPEED = 17;
+/**
+ * How fast a ball can push itself along on the flat. It is a limit on pushing,
+ * not a law: a ball that has been wound up before the off, or has come down
+ * something steep, is over it for a moment and sheds the difference rather
+ * than having it snatched away — SHED is how quickly.
+ */
+export const TOP_SPEED = 17;
+const SHED = 0.6;
 /** How fast rolling bleeds off on the flat, per second. */
 const ROLL_DRAG = 0.9;
 const AIR_DRAG = 0.06;
@@ -210,8 +227,8 @@ function collide(marble: Marble, b: Block, dt: number): { normal: Vec3; safe: bo
  * box in turn. Called in fixed steps however long the frame was, because a fast
  * ball and a thin wall don't survive a variable one.
  */
-function substep(marble: Marble, blocks: Block[], input: Input, dt: number): Events {
-  const events: Events = { fell: false, reached: false };
+function substep(marble: Marble, blocks: Block[], input: Input, dt: number, limit: number): Events {
+  const events: Events = { fell: false, reached: false, at: 0 };
 
   // The keys are in the camera's directions, not the world's.
   const forward = vec(-Math.sin(input.yaw), 0, -Math.cos(input.yaw));
@@ -263,8 +280,8 @@ function substep(marble: Marble, blocks: Block[], input: Input, dt: number): Eve
   }
 
   const flat = Math.hypot(marble.vel.x, marble.vel.z);
-  if (flat > TOP_SPEED) {
-    const k = TOP_SPEED / flat;
+  if (flat > limit) {
+    const k = Math.max(limit / flat, Math.exp(-SHED * dt));
     marble.vel = vec(marble.vel.x * k, marble.vel.y, marble.vel.z * k);
   }
 
@@ -281,9 +298,19 @@ function substep(marble: Marble, blocks: Block[], input: Input, dt: number): Eve
   return events;
 }
 
-/** A whole frame's worth of physics, however long the frame was. */
-export function stepMarble(marble: Marble, blocks: Block[], input: Input, dt: number): Events {
-  const events: Events = { fell: false, reached: false };
+/**
+ * A whole frame's worth of physics, however long the frame was. `limit` is how
+ * fast it may be going this frame — TOP_SPEED for ordinary rolling, and higher
+ * while the ball is being wound up before the off.
+ */
+export function stepMarble(
+  marble: Marble,
+  blocks: Block[],
+  input: Input,
+  dt: number,
+  limit: number = TOP_SPEED,
+): Events {
+  const events: Events = { fell: false, reached: false, at: 0 };
 
   // Taken once, at the top of the frame rather than inside the loop: the key
   // is pressed once and the ball should leave the ground once, however many
@@ -296,10 +323,13 @@ export function stepMarble(marble: Marble, blocks: Block[], input: Input, dt: nu
   }
 
   let left = Math.min(dt, 0.1);
+  let spent = 0;
   while (left > 1e-4) {
     const slice = Math.min(STEP, left);
-    const got = substep(marble, blocks, input, slice);
+    const got = substep(marble, blocks, input, slice, limit);
+    spent += slice;
     events.fell = events.fell || got.fell;
+    if (got.reached && !events.reached) events.at = spent;
     events.reached = events.reached || got.reached;
     left -= slice;
   }
