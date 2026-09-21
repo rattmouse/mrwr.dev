@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Anchor,
   Button,
@@ -18,13 +18,23 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import MidiWindow, { MidiWindowHandle } from "@/components/windows/MidiWindow";
 import PaintWindow, { PaintWindowHandle } from "@/components/windows/PaintWindow";
 import PartyWindow, { NO_FRAME, FrameSettings } from "@/components/windows/PartyWindow";
-import MarblesWindow, { MarblesWindowHandle, RunResult, readClock } from "@/components/windows/MarblesWindow";
+import MarblesWindow, {
+  GhostState,
+  MarblesWindowHandle,
+  RunResult,
+  readClock,
+} from "@/components/windows/MarblesWindow";
+import MarblesBar from "@/components/windows/MarblesBar";
+import MarblesCodePanel from "@/components/windows/MarblesCodePanel";
+import MarblesHelpPanel from "@/components/windows/MarblesHelpPanel";
 import PlayerWindow, { PLAYER_ACCEPT, PlayerWindowHandle, VizMode, VIZ_MODES } from "@/components/windows/PlayerWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import type { SearchIssueLink } from "@/lib/searchHistory.types";
+import { randomSeed, readCode, writeCode } from "@/lib/marblesShare";
+import type { Trail } from "@/lib/marblesGhost";
 import strudelSongs from "@/data/strudelSongs.json";
 
 const SONG_ICON_FILES = [
@@ -111,14 +121,88 @@ export default function ProgramWindow({
   const paintFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerRef = useRef<PlayerWindowHandle>(null);
   const marblesRef = useRef<MarblesWindowHandle>(null);
-  // marbles.exe writes its running time straight into this, rather than
-  // pushing it up as state ten times a second.
-  const marblesClockRef = useRef<HTMLSpanElement | null>(null);
   // Set when a course has been got round, cleared the moment the next run
   // starts. marbles.exe reports both, so this can't be left showing a time for
   // a run that is already over.
   const [marblesRun, setMarblesRun] = useState<RunResult | null>(null);
-  const handleMarblesResult = useCallback((result: RunResult | null) => setMarblesRun(result), []);
+  // Which course marbles.exe is on. It is held out here rather than inside the
+  // game because it is on show in the toolbar, can be typed over, and is what
+  // a shared link carries — the game is handed the seed and rolls it.
+  const [marblesSeed, setMarblesSeed] = useState(randomSeed);
+  // The best time on that course, kept for the toolbar's Share to send along.
+  const [marblesBest, setMarblesBest] = useState<number | null>(null);
+  // A time somebody else did this course in, from the link that brought you
+  // here. It belongs to one course, so rolling another puts it away.
+  const [marblesTarget, setMarblesTarget] = useState<{
+    seed: number;
+    time: number;
+    run: Trail | null;
+  } | null>(null);
+  // The best run riding round again beside you. On unless it is turned off,
+  // and nothing to show until a course has been got round once.
+  const [marblesGhost, setMarblesGhost] = useState(true);
+  // Whether anything is riding this course, and your own best run on it — the
+  // run your link hands on, which is not always the one you are racing.
+  const [marblesRacing, setMarblesRacing] = useState(false);
+  const [marblesMine, setMarblesMine] = useState<Trail | null>(null);
+  // Which of marbles.exe's own little windows is up over the course.
+  const [marblesCodeOpen, setMarblesCodeOpen] = useState(false);
+  const [marblesHelpOpen, setMarblesHelpOpen] = useState(false);
+  const handleMarblesGhosts = useCallback((state: GhostState) => {
+    setMarblesRacing(state.racing);
+    setMarblesMine(state.mine);
+  }, []);
+  const marblesToBeat = marblesTarget && marblesTarget.seed === marblesSeed ? marblesTarget.time : null;
+  // The run that came with it, if one did — held steady between renders, or
+  // marbles.exe would take it as a fresh arrival every time this window drew.
+  // The code for where you are: this course, your best time on it, and your
+  // best run. Worked out only when the code window wants it.
+  const marblesCode = useMemo(
+    () => writeCode(marblesSeed, marblesBest, marblesMine),
+    [marblesSeed, marblesBest, marblesMine],
+  );
+  const marblesSent = useMemo(
+    () =>
+      marblesTarget && marblesTarget.seed === marblesSeed && marblesTarget.run
+        ? { time: marblesTarget.time, run: marblesTarget.run }
+        : null,
+    [marblesTarget, marblesSeed],
+  );
+
+  const handleMarblesResult = useCallback((result: RunResult | null) => {
+    setMarblesRun(result);
+    if (result) setMarblesBest(result.best);
+  }, []);
+
+  const openMarblesSeed = useCallback((seed: number) => {
+    setMarblesSeed(seed);
+    setMarblesBest(null);
+    setMarblesRun(null);
+  }, []);
+
+  // marbles.exe deals a fresh course whenever it is opened, as it always has.
+  const wasMarbles = useRef(false);
+  useEffect(() => {
+    const open = id === "marbles";
+    if (open && !wasMarbles.current) openMarblesSeed(randomSeed());
+    wasMarbles.current = open;
+  }, [id, openMarblesSeed]);
+
+  // A code pasted in — in the code window, or straight into the seed box.
+  // Whatever it carries is what marbles.exe switches to: the course on its
+  // own, or the course with a time to beat and a ghost to race.
+  const takeMarblesCode = useCallback(
+    (text: string) => {
+      const got = readCode(text);
+      if (!got) return false;
+      openMarblesSeed(got.seed);
+      setMarblesTarget(
+        got.beat != null ? { seed: got.seed, time: got.beat, run: got.run } : null,
+      );
+      return true;
+    },
+    [openMarblesSeed],
+  );
   const playerFileInputRef = useRef<HTMLInputElement | null>(null);
   const playerFolderInputRef = useRef<HTMLInputElement | null>(null);
   const playerAddInputRef = useRef<HTMLInputElement | null>(null);
@@ -988,32 +1072,18 @@ export default function ProgramWindow({
         ))}
       </>
     ) : id === "marbles" ? (
-      <>
-        <Button variant="menu" size="sm" title="Put the ball back on the first pad" onClick={() => marblesRef.current?.restart()}>
-          Restart
-        </Button>
-        <Button variant="menu" size="sm" title="Throw this course away and roll another" onClick={() => marblesRef.current?.reroll()}>
-          New course
-        </Button>
-        {/* The clock and the only instructions there are. Both live up here
-            rather than over the view, which is left to the game. */}
-        <span
-          ref={marblesClockRef}
-          title="This run, from when you first set off"
-          style={{
-            marginLeft: 8,
-            fontVariantNumeric: "tabular-nums",
-            fontWeight: "bold",
-            alignSelf: "center",
-            minWidth: 52,
-          }}
-        >
-          0:00.0
-        </span>
-        <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.7, alignSelf: "center" }}>
-          arrows or WASD to roll &middot; space to jump &middot; drag to look round &middot; R to start over
-        </span>
-      </>
+      <MarblesBar
+        seed={marblesSeed}
+        onCode={takeMarblesCode}
+        onRestart={() => marblesRef.current?.restart()}
+        onNewCourse={() => openMarblesSeed(randomSeed())}
+        best={marblesBest}
+        ghost={marblesGhost}
+        onGhost={setMarblesGhost}
+        racing={marblesRacing}
+        onCodeWindow={() => setMarblesCodeOpen(true)}
+        onHelp={() => setMarblesHelpOpen(true)}
+      />
     ) : undefined;
 
   return (
@@ -1129,8 +1199,15 @@ export default function ProgramWindow({
 
       {id === "marbles" && (
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0, display: "flex", position: "relative" }}>
-          <MarblesWindow ref={marblesRef} clock={marblesClockRef} onResult={handleMarblesResult} />
-          {marblesRun && (
+          <MarblesWindow
+            ref={marblesRef}
+            seed={marblesSeed}
+            ghost={marblesGhost}
+            sent={marblesSent}
+            onGhosts={handleMarblesGhosts}
+            onResult={handleMarblesResult}
+          />
+          {(marblesRun || marblesCodeOpen || marblesHelpOpen) && (
             <div
               style={{
                 position: "absolute",
@@ -1145,6 +1222,19 @@ export default function ProgramWindow({
                 pointerEvents: "none",
               }}
             >
+              {/* One panel at a time: asking for the code from the finish puts
+                  the code window in its place, and closing it hands the finish
+                  back. */}
+              {marblesCodeOpen ? (
+                <MarblesCodePanel
+                  code={marblesCode}
+                  carries={marblesBest != null && marblesMine ? "run" : "course"}
+                  onUse={takeMarblesCode}
+                  onClose={() => setMarblesCodeOpen(false)}
+                />
+              ) : marblesHelpOpen ? (
+                <MarblesHelpPanel onClose={() => setMarblesHelpOpen(false)} />
+              ) : marblesRun ? (
               <Window style={{ minWidth: 230, pointerEvents: "auto" }}>
                 <WindowHeader style={{ display: "flex", alignItems: "center" }}>
                   <span>{marblesRun.improved ? "Best time" : "Finished"}</span>
@@ -1158,12 +1248,28 @@ export default function ProgramWindow({
                       ? "round this course, and the quickest yet"
                       : `best on this course: ${readClock(marblesRun.best)}`}
                   </div>
+                  {/* Whoever sent you the course sent a time with it, so the
+                      first thing to say is whether you have taken it off them. */}
+                  {marblesToBeat != null && (
+                    <div style={{ textAlign: "center", marginTop: 6, fontSize: 11, fontWeight: "bold" }}>
+                      {marblesRun.time < marblesToBeat
+                        ? `${readClock(marblesToBeat - marblesRun.time)} quicker than the ${readClock(marblesToBeat)} you were sent`
+                        : `${readClock(marblesRun.time - marblesToBeat)} off the ${readClock(marblesToBeat)} you were sent`}
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: 6, marginTop: 12, justifyContent: "center" }}>
                     <Button onClick={() => marblesRef.current?.restart()}>Try again</Button>
-                    <Button onClick={() => marblesRef.current?.reroll()}>Next course</Button>
+                    <Button onClick={() => openMarblesSeed(randomSeed())}>Next course</Button>
+                    <Button
+                      title="The code for this course, your time on it and the run itself"
+                      onClick={() => setMarblesCodeOpen(true)}
+                    >
+                      Code
+                    </Button>
                   </div>
                 </WindowContent>
               </Window>
+              ) : null}
             </div>
           )}
         </div>

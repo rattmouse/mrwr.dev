@@ -1,16 +1,48 @@
 "use client";
 
-import React, { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { drawSky, makeStars, makeView, paintQueue, vec, type Camera } from "@/lib/marbles3d";
-import { newMarble, resetMarble, stepCourse, stepMarble, type Marble } from "@/lib/marblesCourse";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  drawSky,
+  IDENTITY,
+  makeStars,
+  makeView,
+  paintQueue,
+  sub,
+  vec,
+  type Camera,
+  type Mat3,
+  type Vec3,
+} from "@/lib/marbles3d";
+import {
+  newMarble,
+  resetMarble,
+  stepCourse,
+  stepMarble,
+  TOP_SPEED,
+  type Marble,
+} from "@/lib/marblesCourse";
 import { buildCourse, type Course } from "@/lib/marblesLayout";
-import { collectBlocks, collectMarble, drawFinishGlow } from "@/lib/marblesDraw";
+import {
+  collectBlocks,
+  collectGhost,
+  collectMarble,
+  drawClock,
+  drawCountdown,
+  drawFinishGlow,
+} from "@/lib/marblesDraw";
+import { ghostAt, newTrail, record, rollBy, type Trail } from "@/lib/marblesGhost";
 
 export type MarblesWindowHandle = {
   /** Put the ball back on the first pad of the course it is already on. */
   restart: () => void;
-  /** Throw that course away and roll another one. */
-  reroll: () => void;
+};
+
+/** What there is to race against, and what there is to hand on. */
+export type GhostState = {
+  /** Whether any ghost is riding this course — what the toggle is for. */
+  racing: boolean;
+  /** Your own best run, which is the one your code carries. */
+  mine: Trail | null;
 };
 
 /** How a run ended, for the window to offer another go with. */
@@ -25,11 +57,21 @@ export type RunResult = {
 
 type MarblesWindowProps = {
   /**
-   * Where the running time is written. Handed in as an element rather than
-   * pushed up as state: the clock changes ten times a second and the window
-   * around it has no other reason to redraw that often.
+   * The course to roll. Held by the window around this one, because the seed
+   * is on show up in the toolbar and can be typed over — a different seed here
+   * is a different course, dealt on the next frame.
    */
-  clock?: React.RefObject<HTMLElement | null>;
+  seed: number;
+  /**
+   * Whether the best run known on this course rides round again beside you. It
+   * has nothing to show until the course has been got round once, by you or by
+   * whoever sent it.
+   */
+  ghost?: boolean;
+  /** A run that came in on a pasted code, to be raced from the first go. */
+  sent?: { time: number; run: Trail } | null;
+  /** Called whenever there is a different ghost, or a different run to send. */
+  onGhosts?: (state: GhostState) => void;
   /**
    * Called with the result when a run is finished, and with null the moment
    * the next one begins — whichever way it was started, the toolbar or the R
@@ -38,13 +80,36 @@ type MarblesWindowProps = {
   onResult?: (result: RunResult | null) => void;
 };
 
-/** Minutes, seconds and tenths — long enough for a bad run, short enough to read. */
+/**
+ * Minutes, seconds and hundredths — long enough for a bad run, and fine enough
+ * that two goes at the same course are hardly ever the same time.
+ */
 export function readClock(seconds: number) {
   const whole = Math.max(0, seconds);
   const mins = Math.floor(whole / 60);
   const secs = Math.floor(whole % 60);
-  return `${mins}:${secs.toString().padStart(2, "0")}.${Math.floor((whole * 10) % 10)}`;
+  const bits = Math.floor((whole * 100) % 100);
+  return `${mins}:${secs.toString().padStart(2, "0")}.${bits.toString().padStart(2, "0")}`;
 }
+
+/**
+ * How long the ball spins on the spot before it is let go. The run-up is a
+ * standing start with the handbrake on: the keys wind it up where it stands —
+ * you can see it spinning, and hear nothing, because there is no sound — and
+ * the moment the count runs out it is released with everything it has gathered
+ * and the clock starts on a ball already at speed.
+ */
+export const LEAD_IN = 3;
+
+/**
+ * And how fast it can be wound up to in that time — half again as fast as it
+ * could ever push itself along the flat. What it has gathered grows with the
+ * count rather than arriving in the first half-second, so the ball spins
+ * faster and faster on the spot as the three seconds run out, and what you see
+ * it doing is exactly what it will be doing the moment it is let go.
+ */
+const WIND_UP = TOP_SPEED * 1.4;
+
 
 /** How far behind the ball the camera sits, and how much further at speed. */
 const CAMERA_BACK = 9;
@@ -92,21 +157,30 @@ function turnToward(from: number, to: number) {
 /**
  * marbles.exe: a ball you roll around a course of boxes hanging in the dark.
  *
- * Nothing is drawn over the view — no clock, no counter, no lives. Falling off
+ * Next to nothing is drawn over the view — no clock, no counter, no lives; the
+ * only thing over the picture is the count before the off, which is there for
+ * three seconds and belongs beside the ball it is counting for. Falling off
  * puts you back where you last had firm footing, and reaching the end lights
- * the finish up and starts you over. The whole game is in the picture.
+ * the finish up and stops the clock. The whole game is in the picture.
  */
 const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(function MarblesWindow(
-  { clock, onResult },
+  { seed, ghost = true, sent, onGhosts, onResult },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // A course is rolled when the window opens and lasts as long as it is open.
-  const courseRef = useRef<Course>(buildCourse());
-  const marbleRef = useRef<Marble>(newMarble(courseRef.current.start));
+  // The course the window opens on, rolled once — through useState rather than
+  // straight into the ref, because a ref's initial value is worked out afresh
+  // on every render and a whole course is too much to build and throw away.
+  const [opening] = useState(() => {
+    const course = buildCourse(seed);
+    return { course, marble: newMarble(course.start) };
+  });
+  const courseRef = useRef<Course>(opening.course);
+  const marbleRef = useRef<Marble>(opening.marble);
   const restartRef = useRef(false);
-  const rerollRef = useRef(false);
+  /** A seed waiting to be dealt, put here by the prop and spent by the loop. */
+  const rollRef = useRef<number | null>(null);
 
   // Where the camera is looking from, and the point it is easing toward. Kept
   // in a ref because the draw loop owns it — React never needs to see it.
@@ -123,6 +197,12 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
   // course — just because the window around it re-rendered.
   const resultRef = useRef(onResult);
   resultRef.current = onResult;
+  const ghostsRef = useRef(onGhosts);
+  ghostsRef.current = onGhosts;
+  const showGhostRef = useRef(ghost);
+  showGhostRef.current = ghost;
+  /** A run that arrived in a code, waiting for the loop to set it going. */
+  const sentRef = useRef<{ time: number; run: Trail } | null>(sent ?? null);
 
   const keysRef = useRef(new Set<string>());
   /** Raised by a press of the jump key, lowered by the frame that spends it. */
@@ -138,12 +218,20 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       restart: () => {
         restartRef.current = true;
       },
-      reroll: () => {
-        rerollRef.current = true;
-      },
     }),
     [],
   );
+
+  // A new seed from the toolbar — typed in, or rolled by New course — is left
+  // for the loop to pick up rather than acted on here: the course is the loop's
+  // and swapping it out from under a frame being drawn is asking for trouble.
+  useEffect(() => {
+    if (seed !== courseRef.current.seed) rollRef.current = seed;
+  }, [seed]);
+
+  useEffect(() => {
+    if (sent) sentRef.current = sent;
+  }, [sent]);
 
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
@@ -216,13 +304,27 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
     // the finish is reached, so the time you got stays up while it is lit.
     let elapsed = 0;
     let running = false;
-    let shown = "";
+    // What is left of the run-up. It sits at its full length until your first
+    // push, counts down while you gather speed, and the timed run starts the
+    // moment it runs out.
+    let lead = LEAD_IN;
+    let leading = false;
     // Set when a course has been got round. The ball stops where it is and
     // stays there: what happens next — another go at this one, or a new one —
     // is the window's to ask and yours to answer.
     let finished = false;
     // The quickest this course has been done, which is what a retry is for.
     let best: number | null = null;
+    // The ghost is the quickest run known on this course, whoever did it — your
+    // own, or one that came in on a code — and `mine` is your own best, which
+    // is the one your code hands on. `trail` is the run being laid down now.
+    let ghostPath: Trail | null = null;
+    let ghostTime: number | null = null;
+    let mine: Trail | null = null;
+    let trail: Trail = newTrail();
+    let ghostTurn: Mat3 = IDENTITY;
+    let ghostWas: Vec3 | null = null;
+    const told = () => ghostsRef.current?.({ racing: ghostPath !== null, mine });
 
     const draw = (now: number) => {
       frame = window.requestAnimationFrame(draw);
@@ -234,11 +336,28 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       const cam = camRef.current;
       const keys = keysRef.current;
 
-      if (rerollRef.current) {
-        rerollRef.current = false;
-        courseRef.current = buildCourse();
+      if (rollRef.current !== null) {
+        courseRef.current = buildCourse(rollRef.current);
+        rollRef.current = null;
         restartRef.current = true;
         best = null;
+        // Another course entirely; the old runs have nothing to do with it.
+        ghostPath = null;
+        ghostTime = null;
+        mine = null;
+        told();
+      }
+
+      // A run that arrived in a code is something to race from the very first
+      // go, before there is anything of your own to race.
+      if (sentRef.current) {
+        const arrived = sentRef.current;
+        sentRef.current = null;
+        if (ghostTime === null || arrived.time < ghostTime) {
+          ghostPath = arrived.run;
+          ghostTime = arrived.time;
+          told();
+        }
       }
       const course = courseRef.current;
       const marble = marbleRef.current;
@@ -251,7 +370,12 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
         cam.yaw = facing(course);
         elapsed = 0;
         running = false;
+        lead = LEAD_IN;
+        leading = false;
         finished = false;
+        trail = newTrail();
+        ghostTurn = IDENTITY;
+        ghostWas = null;
         resultRef.current?.(null);
       }
 
@@ -273,25 +397,95 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       // The ferries keep sliding once the run is over — it should look like a
       // place that is still there — but the ball stops where it finished.
       stepCourse(blocks, ticking, dt);
+      // Winding up: how fast it is allowed to have got by this point of the
+      // count. None of it at the start, all of it at the off — so the speed,
+      // and the spin that goes with it, build over the whole three seconds
+      // rather than arriving in the first half-second.
+      const winding = lead > 0 && !finished;
+      const wound = WIND_UP * (1 - Math.min(1, lead / LEAD_IN));
+      // Where it is standing while it winds up. Only the ground it would have
+      // covered is taken back; how fast it is going is its own.
+      const standing = winding ? { ...marble.pos } : null;
       const events = finished
-        ? { fell: false, reached: false }
+        ? { fell: false, reached: false, at: 0 }
         : stepMarble(
             marble,
             blocks,
-            { forward: touchRollRef.current ? 1 : forward, right, yaw: cam.yaw, jump },
+            {
+              forward: touchRollRef.current ? 1 : forward,
+              right,
+              yaw: cam.yaw,
+              // A jump spent during the count is not saved up and let off the
+              // instant the ball is released.
+              jump: winding ? false : jump,
+            },
             dt,
+            // Past the ordinary top speed at the end of the count; the ball
+            // sheds the difference once it is let go.
+            winding ? Math.max(TOP_SPEED, wound) : undefined,
           );
+      if (standing) {
+        // Put back where it stood, but only across the ground: it still has to
+        // fall the last inch onto the pad and stay resting on it, or it is not
+        // touching anything and a ball that is touching nothing does not roll.
+        marble.pos = { x: standing.x, y: marble.pos.y, z: standing.z };
+        const flat = Math.hypot(marble.vel.x, marble.vel.z);
+        const held = flat > wound ? wound / flat : 1;
+        marble.vel = vec(marble.vel.x * held, marble.vel.y, marble.vel.z * held);
+      }
 
-      if (rolling && !running && !finished) running = true;
-      if (running) elapsed += dt;
+      // First push starts the run-up; the clock starts when the run-up is out,
+      // and takes whatever was left over from the frame it ran out on.
+      if (rolling && !running && !leading && !finished) leading = true;
+      if (leading) {
+        lead -= dt;
+        if (lead <= 0) {
+          elapsed -= lead;
+          lead = 0;
+          leading = false;
+          running = true;
+        }
+      } else if (running) {
+        elapsed += dt;
+        record(trail, marble.pos, elapsed);
+      }
       if (events.reached) {
         finished = true;
         running = false;
+        // The pad was touched partway through the frame, not at the end of it:
+        // the rest of the frame is not part of the run.
+        elapsed = Math.max(0, elapsed - Math.max(0, dt - events.at));
+        // The finish goes down as the run's last point, so a ghost of it gets
+        // all the way home rather than stopping a step short of the pad.
+        record(trail, marble.pos, elapsed);
+        // A run of a single point is no run at all — it would take a finish
+        // reached before the ball was ever let go — and a ghost of one would
+        // be a ghost with nowhere to go and a time nothing could beat.
+        const ran = trail.points.length > 1;
         const improved = best === null || elapsed < best;
-        if (improved) best = elapsed;
+        if (improved) {
+          best = elapsed;
+          mine = ran ? trail : null;
+        }
+        // Whoever holds the quickest run is who you ride against next time.
+        if (ran && (ghostTime === null || elapsed < ghostTime)) {
+          ghostPath = trail;
+          ghostTime = elapsed;
+        }
+        if (improved || ghostPath === trail) told();
+        trail = newTrail();
         resultRef.current?.({ time: elapsed, best: best ?? elapsed, improved });
       }
       glow += ((finished ? 1 : 0) - glow) * Math.min(1, GLOW_RATE * dt);
+
+      // Where the best run had got to by now. Once it is home there is nothing
+      // more to show; if you finish first, it stops where it had got to, which
+      // is the margin you won by, standing out there on the course.
+      const riding = ghostPath && showGhostRef.current ? ghostAt(ghostPath, elapsed) : null;
+      if (riding) {
+        if (ghostWas) ghostTurn = rollBy(ghostTurn, sub(riding, ghostWas), marble.radius);
+        ghostWas = riding;
+      }
 
       // Left alone for a moment, the camera drifts round behind wherever the
       // ball is actually going — enough to help, not enough to fight a drag.
@@ -330,14 +524,18 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       paintQueue(ctx, [
         ...collectBlocks(view, blocks, lift),
         ...collectMarble(view, marble, blocks),
+        ...(riding ? collectGhost(view, riding, marble.radius, ghostTurn) : []),
       ]);
       drawFinishGlow(ctx, view, blocks, lift);
-
-      const reading = readClock(elapsed);
-      if (reading !== shown && clock?.current) {
-        shown = reading;
-        clock.current.textContent = reading;
-      }
+      if (!finished) drawCountdown(ctx, view, marble.pos, lead);
+      // The time to beat is whatever the ghost is doing the course in, whether
+      // that is your own best or one that came in on a code.
+      drawClock(
+        ctx,
+        view,
+        readClock(elapsed),
+        ghostTime === null ? null : `${readClock(ghostTime)} to beat`,
+      );
     };
 
     frame = window.requestAnimationFrame(draw);
@@ -345,7 +543,9 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       window.cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [clock]);
+    // Set up once and left alone: everything that changes while it runs comes
+    // in through a ref, because tearing the loop down would deal a new course.
+  }, []);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.preventDefault();

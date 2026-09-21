@@ -17,6 +17,7 @@ import {
   dot,
   fogged,
   length,
+  Mat3,
   normalise,
   project,
   rgb,
@@ -241,7 +242,7 @@ function floorBelow(blocks: Block[], from: Vec3): { point: Vec3; drop: number } 
  * turns the loops with everything else; drawing one means throwing away the
  * part of it that has gone round the back, then projecting what is left.
  */
-type Land = { loop: Vec3[]; tint: Tint };
+type Land = { loop: Vec3[]; tint: Tint; /** A lip drawn round it, for a crater. */ edge?: Tint };
 
 const OCEAN: Tint = [38, 82, 156];
 const GRASS: Tint = [92, 152, 86];
@@ -302,6 +303,62 @@ const GLOBE: Land[] = (() => {
 })();
 
 /**
+ * The far side of the same idea: a moon, for the ghost of a best run. Grey
+ * ground, a few dark seas and a scattering of craters — all of it the same
+ * machinery as the globe, which is the point of keeping loops on a sphere as
+ * the only way this file knows how to mark a ball.
+ */
+// Wider apart than the globe's colours: a ghost is painted half-strength over
+// whatever it is in front of, and anything subtler washes out to a grey blob.
+const ROCK: Tint = [212, 210, 201];
+const MARE: Tint = [96, 100, 118];
+const CRATER: Tint = [140, 138, 133];
+/** The sunlit lip of a crater, which is what makes one read as a hollow. */
+const LIP: Tint = [244, 244, 236];
+const MOONRIM: Tint = [232, 238, 250];
+
+const MOON: Land[] = (() => {
+  let seed = 0x1f35b7d1;
+  const roll = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  const lands: Land[] = [];
+  const spot = (spread: number, tint: Tint, wob: number, points: number, edge?: Tint) => {
+    const y = roll() * 1.8 - 0.9;
+    const a = roll() * Math.PI * 2;
+    const flat = Math.sqrt(Math.max(0, 1 - y * y));
+    lands.push({
+      loop: ring(vec(Math.cos(a) * flat, y, Math.sin(a) * flat), spread, points, (t) =>
+        1 + wob * Math.sin(3 * t + a),
+      ),
+      tint,
+      edge,
+    });
+  };
+  // Seas first, craters over them, the way they are on the real one.
+  for (let i = 0; i < 4; i += 1) spot(0.26 + roll() * 0.22, MARE, 0.18, 16);
+  for (let i = 0; i < 16; i += 1) spot(0.05 + roll() * 0.14, CRATER, 0.07, 10, LIP);
+  return lands;
+})();
+
+/** What a ball is made of: ground, what is marked on it, its edge, its weight. */
+type Skin = {
+  ground: Tint;
+  marks: Land[];
+  rim: Tint;
+  rimLight: number;
+  alpha: number;
+  /** How hard the daylight falls across it. A ghost takes less of it, or the
+      shading washes what is drawn on it away to a plain grey ball. */
+  shade: number;
+};
+
+const EARTH: Skin = { ground: OCEAN, marks: GLOBE, rim: RIM, rimLight: 0.55, alpha: 1, shade: 1 };
+/** The ghost is a thing you can see through, and only just there. */
+const GHOST: Skin = { ground: ROCK, marks: MOON, rim: MOONRIM, rimLight: 0.8, alpha: 0.52, shade: 0.55 };
+
+/**
  * The part of a loop still on the side of the ball facing us. `limb` is where
  * the horizon actually falls: on a ball this close it is not quite halfway
  * round, and using halfway leaves slivers of the far side showing at the edge.
@@ -352,13 +409,26 @@ export function collectMarble(view: View, marble: Marble, blocks: Block[]): Draw
     }
   }
 
-  const eye = toEye(view, marble.pos);
+  queue.push(...collectBall(view, marble.pos, marble.radius, marble.turn, EARTH));
+
+  return queue;
+}
+
+/**
+ * One ball, wherever it is and whatever it is made of: the disc, the marks
+ * that have not gone round the back of it, and the daylight across its face.
+ */
+function collectBall(view: View, at: Vec3, size: number, turn: Mat3, skin: Skin): Drawable[] {
+  const queue: Drawable[] = [];
+  const ballAway = length(sub(at, view.camera.pos));
+
+  const eye = toEye(view, at);
   const depth = -eye.z;
-  if (depth <= marble.radius + 0.15) return queue;
+  if (depth <= size + 0.15) return queue;
 
   const centre = project(view, eye);
-  const radius = (view.focal / depth) * marble.radius;
-  const toCam = normalise(sub(view.camera.pos, marble.pos));
+  const radius = (view.focal / depth) * size;
+  const toCam = normalise(sub(view.camera.pos, at));
   const fog = fogAt(ballAway);
   // Where on the disc the light lands, so the shading turns with the camera.
   const lightEye = apply(view.rot, LIGHT);
@@ -366,23 +436,29 @@ export function collectMarble(view: View, marble: Marble, blocks: Block[]): Draw
   const offY = -lightEye.y * radius * 0.45;
 
   // Where the horizon of a ball this size falls, seen from this far off.
-  const limb = marble.radius / depth;
-  const coasts = GLOBE.map((land) => {
-    const seen = thisSide(land.loop.map((d) => apply(marble.turn, d)), toCam, limb);
+  const limb = size / depth;
+  const coasts = skin.marks.map((land) => {
+    const seen = thisSide(land.loop.map((d) => apply(turn, d)), toCam, limb);
     if (seen.length < 3) return null;
     return {
       fill: rgb(fogged(land.tint, 1, fog, SKY)),
-      shape: seen.map((d) => project(view, toEye(view, add(marble.pos, scale(d, marble.radius))))),
+      // Stroked in its own colour unless the mark has a lip of its own, which
+      // is what turns a grey disc into a hollow with a sunlit rim.
+      edge: rgb(fogged(land.edge ?? land.tint, 1, fog, SKY)),
+      shape: seen.map((d) => project(view, toEye(view, add(at, scale(d, size))))),
     };
-  }).filter((c): c is { fill: string; shape: { x: number; y: number }[] } => c !== null);
+  }).filter(
+    (c): c is { fill: string; edge: string; shape: { x: number; y: number }[] } => c !== null,
+  );
 
-  const sea = rgb(fogged(OCEAN, 1, fog, SKY));
-  const rim = rgb(fogged(RIM, 0.55, fog, SKY));
+  const sea = rgb(fogged(skin.ground, 1, fog, SKY));
+  const rim = rgb(fogged(skin.rim, skin.rimLight, fog, SKY));
 
   queue.push({
     away: ballAway,
     paint: (ctx) => {
       ctx.save();
+      ctx.globalAlpha = skin.alpha;
       ctx.beginPath();
       ctx.arc(centre.x, centre.y, radius, 0, Math.PI * 2);
       ctx.clip();
@@ -397,10 +473,10 @@ export function collectMarble(view: View, marble: Marble, blocks: Block[]): Draw
         ctx.closePath();
         ctx.fillStyle = coast.fill;
         ctx.fill();
-        // Stroked in its own colour: without it the canvas leaves the coastline
+        // Stroked as well as filled: without it the canvas leaves the edge
         // ragged at this size.
         ctx.lineWidth = 1;
-        ctx.strokeStyle = coast.fill;
+        ctx.strokeStyle = coast.edge;
         ctx.stroke();
       }
 
@@ -414,22 +490,105 @@ export function collectMarble(view: View, marble: Marble, blocks: Block[]): Draw
         centre.y + offY * 0.4,
         radius * 1.5,
       );
-      shade.addColorStop(0, "rgba(255,252,236,0.3)");
+      shade.addColorStop(0, `rgba(255,252,236,${0.3 * skin.shade})`);
       shade.addColorStop(0.45, "rgba(255,252,236,0)");
-      shade.addColorStop(1, "rgba(2,6,18,0.72)");
+      shade.addColorStop(1, `rgba(2,6,18,${0.72 * skin.shade})`);
       ctx.fillStyle = shade;
       ctx.fillRect(centre.x - radius, centre.y - radius, radius * 2, radius * 2);
       ctx.restore();
 
+      ctx.save();
+      ctx.globalAlpha = skin.alpha;
       ctx.beginPath();
       ctx.arc(centre.x, centre.y, radius, 0, Math.PI * 2);
       ctx.lineWidth = 1;
       ctx.strokeStyle = rim;
       ctx.stroke();
+      ctx.restore();
     },
   });
 
   return queue;
+}
+
+/**
+ * The best run this course has had, riding round it again a step behind or a
+ * step ahead of you. It is the same ball as yours with the moon's face on it
+ * and half of it missing, and it goes through everything: it is a record of a
+ * run, not a thing in the way.
+ */
+export function collectGhost(view: View, at: Vec3, size: number, turn: Mat3): Drawable[] {
+  return collectBall(view, at, size, turn, GHOST);
+}
+
+/**
+ * The count before the off, standing over the ball while it winds up. It is
+ * the one thing in marbles.exe drawn over the picture rather than in it, and
+ * it is only there for three seconds: the number of whole seconds left, swelling
+ * and fading away as each one runs out, so the release can be felt coming
+ * without looking away from the ball.
+ */
+export function drawCountdown(ctx: CanvasRenderingContext2D, view: View, at: Vec3, left: number) {
+  if (left <= 0) return;
+  const e = toEye(view, add(at, vec(0, 1.5, 0)));
+  const depth = -e.z;
+  if (depth < 0.5) return;
+  const p = project(view, e);
+  // Each whole second is one beat: the numeral comes up full size and lets go
+  // of itself as the second empties.
+  const part = left % 1 || 1;
+  const size = Math.max(16, Math.min(74, (view.focal / depth) * 3.4)) * (0.82 + 0.28 * part);
+  const fade = Math.min(1, part * 2.6);
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `700 ${Math.round(size)}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+  ctx.lineWidth = Math.max(2, size * 0.09);
+  ctx.strokeStyle = `rgba(6,10,22,${0.5 * fade})`;
+  ctx.strokeText(String(Math.ceil(left)), p.x, p.y);
+  ctx.fillStyle = `rgba(226,240,255,${0.88 * fade})`;
+  ctx.fillText(String(Math.ceil(left)), p.x, p.y);
+  ctx.restore();
+}
+
+/**
+ * The clock, over the picture.
+ *
+ * marbles.exe went without a HUD for a while and the run's time sat up in the
+ * window bar with the buttons, where it was one more thing crowding a row of
+ * controls and nowhere near what it was timing. It is a game: the clock goes
+ * in the corner of the picture, in a plain monospace so the figures sit still
+ * as they turn over, with whatever there is to beat under it.
+ */
+export function drawClock(ctx: CanvasRenderingContext2D, view: View, now: string, beat: string | null) {
+  const size = Math.max(15, Math.min(26, view.height * 0.055));
+  const x = Math.round(size * 0.7);
+  const y = Math.round(size * 0.55);
+  const face = (px: number) =>
+    `700 ${px}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  // Written twice, dark underneath: the course goes from near-black sky to a
+  // pale slab and back within a second, and one colour cannot sit on both.
+  ctx.font = face(size);
+  ctx.lineWidth = Math.max(2.5, size * 0.16);
+  ctx.strokeStyle = "rgba(4,8,18,0.6)";
+  ctx.strokeText(now, x, y);
+  ctx.fillStyle = "rgba(236,244,255,0.94)";
+  ctx.fillText(now, x, y);
+
+  if (beat) {
+    const under = y + size * 1.15;
+    ctx.font = face(Math.max(10, size * 0.55));
+    ctx.lineWidth = Math.max(2, size * 0.1);
+    ctx.strokeText(beat, x, under);
+    ctx.fillStyle = "rgba(196,214,238,0.82)";
+    ctx.fillText(beat, x, under);
+  }
+  ctx.restore();
 }
 
 /**
