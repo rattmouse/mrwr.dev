@@ -6,12 +6,12 @@
       "version": "5.1",
       "era": "handmade",
       "name": "Small Tweaks",
-      "date": "2026-09-20",
+      "date": "2026-09-22",
       "summary": "A few changes to constants in Party 2.0.",
       "issues": [],
       "changes": [
         "Jimothy is a good guy and density is up to 500. Party can crash if it gets too wild.",
-        "Better shapes in the Formation tool. Changed Party defaults."
+        "Better shapes in the Formation tool. Changed color defaults."
       ]
     },
     {

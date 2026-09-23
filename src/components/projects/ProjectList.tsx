@@ -130,7 +130,7 @@ export default function ProjectList({ layout }: ProjectListProps) {
 
       <div style={{ display: "flex", gap: 6, lineHeight: 1.4 }}>
         <Anchor href="https://github.com/rattmouse" target="_blank" rel="noreferrer">
-          all repos on github
+          open repos on github
         </Anchor>
         <span style={{ color: "#555" }}>·</span>
         <Anchor href="https://github.com/rattmouse/mrwr.dev" target="_blank" rel="noreferrer">
