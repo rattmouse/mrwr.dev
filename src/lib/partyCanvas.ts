@@ -292,12 +292,10 @@ export function applyForces(
 
 /* -------------------------------------------------------------- formation */
 
-export type FormationShape = "drift" | "grid" | "ring" | "spiral" | "text";
+export type FormationShape = "drift" | "grid" | "square" | "circle" | "triangle";
 
 export type Formation = {
   shape: FormationShape;
-  /** What the crowd spells out, when it has been told to spell something. */
-  text: string;
   /** How hard they hold the shape once they have walked into it. */
   hold: number;
   /** 0 and they hold it for good; up from there they keep breaking out of it. */
@@ -305,7 +303,7 @@ export type Formation = {
 };
 
 /** Nobody arranged: the aimless wander the canvas starts out doing. */
-export const NO_FORMATION: Formation = { shape: "drift", text: "", hold: 0.55, restless: 0 };
+export const NO_FORMATION: Formation = { shape: "drift", hold: 0.55, restless: 0 };
 
 // How hard a node is pulled towards its place in the shape, and how much of its
 // own speed is taken off it on the way — without the second it sails through
@@ -347,11 +345,50 @@ const spread = (count: number) => ({ xs: new Float64Array(count), ys: new Float6
  * underneath itself.
  */
 function placesFor(formation: Formation, count: number, width: number, height: number): Places | null {
-  const key = `${formation.shape}|${formation.text}|${count}|${width}|${height}`;
+  const key = `${formation.shape}|${count}|${width}|${height}`;
   if (placed?.key === key) return placed.places;
   const places = layOut(formation, count, width, height);
   placed = { key, places };
   return places;
+}
+
+/**
+ * The three corners of the triangle the Triangle shape stands in, apex up —
+ * shared with the prism tribute below so the beams it draws meet the crowd's
+ * own faces exactly rather than an approximation of them.
+ */
+export function triangleVertices(width: number, height: number) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const size = Math.min(width, height) * 0.52;
+  return {
+    top: { x: cx, y: cy - size / 2 },
+    left: { x: cx - size / 2, y: cy + size / 2 },
+    right: { x: cx + size / 2, y: cy + size / 2 },
+  };
+}
+
+/** Evenly spaced points around a closed polygon's edges, by arc length. */
+function ringAroundPolygon(points: { x: number; y: number }[], count: number, places: Places) {
+  const edges = points.map((p, i) => {
+    const q = points[(i + 1) % points.length];
+    return { p, q, length: Math.hypot(q.x - p.x, q.y - p.y) };
+  });
+  const perimeter = edges.reduce((sum, e) => sum + e.length, 0);
+  for (let i = 0; i < count; i += 1) {
+    let along = (i / count) * perimeter;
+    let edge = edges[0];
+    for (const e of edges) {
+      if (along <= e.length || e === edges[edges.length - 1]) {
+        edge = e;
+        break;
+      }
+      along -= e.length;
+    }
+    const t = edge.length === 0 ? 0 : along / edge.length;
+    places.xs[i] = edge.p.x + (edge.q.x - edge.p.x) * t;
+    places.ys[i] = edge.p.y + (edge.q.y - edge.p.y) * t;
+  }
 }
 
 function layOut(formation: Formation, count: number, width: number, height: number): Places | null {
@@ -372,7 +409,7 @@ function layOut(formation: Formation, count: number, width: number, height: numb
     return places;
   }
 
-  if (formation.shape === "ring") {
+  if (formation.shape === "circle") {
     const radius = Math.min(width, height) * 0.38;
     for (let i = 0; i < count; i += 1) {
       const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
@@ -382,92 +419,30 @@ function layOut(formation: Formation, count: number, width: number, height: numb
     return places;
   }
 
-  if (formation.shape === "spiral") {
-    const radius = Math.min(width, height) * 0.44;
-    const turns = 3.25;
-    for (let i = 0; i < count; i += 1) {
-      const along = count === 1 ? 0 : i / (count - 1);
-      const angle = along * turns * Math.PI * 2;
-      places.xs[i] = width / 2 + Math.cos(angle) * radius * along;
-      places.ys[i] = height / 2 + Math.sin(angle) * radius * along;
-    }
+  if (formation.shape === "square") {
+    const half = Math.min(width, height) * 0.34;
+    const cx = width / 2;
+    const cy = height / 2;
+    ringAroundPolygon(
+      [
+        { x: cx - half, y: cy - half },
+        { x: cx + half, y: cy - half },
+        { x: cx + half, y: cy + half },
+        { x: cx - half, y: cy + half },
+      ],
+      count,
+      places,
+    );
     return places;
   }
 
-  if (formation.shape === "text") return spellOut(formation.text, count, width, height);
+  if (formation.shape === "triangle") {
+    const { top, left, right } = triangleVertices(width, height);
+    ringAroundPolygon([top, right, left], count, places);
+    return places;
+  }
+
   return null;
-}
-
-// How far apart, in px, the crowd stands along the outline of a word. A figure
-// is about thirteen px across, so at this spacing they stand shoulder to
-// shoulder and the strokes of the letters read as strokes. Further apart and
-// the word is a scattering of dots in roughly the right places.
-const LETTER_SPACING = 15;
-
-/**
- * The crowd in the shape of a word. The word is drawn to a canvas of its own and
- * its lit pixels handed out evenly, and it is *outlined* rather than filled —
- * a crowd scattered through solid letters is a blob, while the same crowd
- * standing along the edges of them is legible.
- *
- * How big the word comes out depends on how many of them there are to spell it:
- * it is drawn once at whatever the canvas will take, and then taken down until
- * the crowd is close enough together to make continuous strokes. So turning
- * Density up doesn't crowd the word, it grows it.
- */
-function spellOut(text: string, count: number, width: number, height: number): Places | null {
-  const word = text.trim();
-  if (!word || typeof document === "undefined") return null;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(width));
-  canvas.height = Math.max(1, Math.round(height));
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return null;
-
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.strokeStyle = "#fff";
-  const weight = (size: number) => Math.max(2, size * 0.045);
-
-  // Everything the letters are drawn in, at a given size.
-  const trace = (size: number) => {
-    ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-    ctx.lineWidth = weight(size);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeText(word, canvas.width / 2, canvas.height / 2);
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    const lit: number[] = [];
-    for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 140) lit.push((i - 3) / 4);
-    return lit;
-  };
-
-  // As large as the canvas will take it, to begin with.
-  let size = Math.round(height * 0.62);
-  ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-  while (size > 12 && ctx.measureText(word).width > width * 0.88) {
-    size = Math.floor(size * 0.86);
-    ctx.font = `700 ${size}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-  }
-
-  let lit = trace(size);
-  if (lit.length === 0) return null;
-  // The lit pixels are the outline's area; its length is that over how thick it
-  // was drawn, and both grow with the size — so one step lands on the size that
-  // puts the crowd the right distance apart.
-  const spacing = lit.length / weight(size) / count;
-  if (spacing > LETTER_SPACING) {
-    size = Math.max(12, Math.round((size * LETTER_SPACING) / spacing));
-    lit = trace(size);
-    if (lit.length === 0) return null;
-  }
-
-  const places = spread(count);
-  for (let i = 0; i < count; i += 1) {
-    const at = lit[Math.min(lit.length - 1, Math.floor(((i + 0.5) * lit.length) / count))];
-    places.xs[i] = at % canvas.width;
-    places.ys[i] = Math.floor(at / canvas.width);
-  }
-  return places;
 }
 
 /**
@@ -569,7 +544,7 @@ export type Links = {
 };
 
 /** The top of the Links slider, where the cap comes off entirely. */
-export const LINK_ALL = 12;
+export const LINK_ALL = 20;
 
 // A triangle is only filled when all three of its nodes are this much closer
 // than the link reach. Three nodes a whole reach apart are linked but they are
@@ -581,9 +556,9 @@ const MESH_REACH = 0.65;
 
 /** What the canvas drew before the Links panel existed. */
 export const DEFAULT_LINKS: Links = {
-  opacity: 0.24,
+  opacity: 0.50,
   weight: 1,
-  max: LINK_ALL,
+  max: 10,
   curve: 0,
   colour: "ink",
   mesh: 0,
@@ -833,4 +808,54 @@ function drawMesh(
     }
   }
   ctx.globalAlpha = 1;
+}
+
+/* ------------------------------------------------------------------- prism */
+
+// The seven bands Pink Floyd's sleeve splits white light into, red to violet.
+const SPECTRUM = ["#ff3b30", "#ff9500", "#ffd60a", "#34c759", "#0a84ff", "#5e5ce6", "#af52de"];
+
+/**
+ * A tribute to The Dark Side of the Moon's cover, drawn behind the crowd
+ * whenever they are standing in the Triangle formation: a single white beam
+ * comes in level with the middle of the triangle's left face, and a fan of
+ * the sleeve's seven colours goes back out through the right one. It rides on
+ * `holdStrength` the same as the shape itself, so the beam fades in and out
+ * with the crowd walking into and out of formation rather than snapping on.
+ */
+export function drawPrismTribute(
+  ctx: CanvasRenderingContext2D,
+  opts: { width: number; height: number; strength: number },
+) {
+  const { width, height, strength } = opts;
+  if (strength <= 0.001) return;
+  const { top, left, right } = triangleVertices(width, height);
+
+  ctx.save();
+  ctx.globalAlpha = strength;
+  ctx.lineCap = "round";
+
+  const inMidX = (top.x + left.x) / 2;
+  const inMidY = (top.y + left.y) / 2;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, inMidY);
+  ctx.lineTo(inMidX, inMidY);
+  ctx.stroke();
+
+  const outMidX = (top.x + right.x) / 2;
+  const outMidY = (top.y + right.y) / 2;
+  const spread = height * 0.34;
+  ctx.lineWidth = 1.6;
+  SPECTRUM.forEach((colour, i) => {
+    const t = i / (SPECTRUM.length - 1);
+    ctx.strokeStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(outMidX, outMidY);
+    ctx.lineTo(width, outMidY - spread / 2 + spread * t);
+    ctx.stroke();
+  });
+
+  ctx.restore();
 }

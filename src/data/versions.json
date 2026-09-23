@@ -10,7 +10,8 @@
       "summary": "A few changes to constants in Party 2.0.",
       "issues": [],
       "changes": [
-        "Jimothy is a good guy and density is up to 500. Party can crash if it gets too wild."
+        "Jimothy is a good guy and density is up to 500. Party can crash if it gets too wild.",
+        "Better shapes in the Formation tool. Changed Party defaults."
       ]
     },
     {

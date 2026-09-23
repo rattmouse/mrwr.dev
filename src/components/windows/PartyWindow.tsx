@@ -20,7 +20,6 @@ import {
   Segmented,
   Slider,
   Stat,
-  TextField,
 } from "@/components/windows/PartyControls";
 import { emojiSprite } from "@/lib/emojiSprite";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
@@ -28,6 +27,7 @@ import {
   applyForces,
   applyFormation,
   drawLinks,
+  drawPrismTribute,
   forcesAtRest,
   formationHolding,
   holdStrength,
@@ -118,7 +118,7 @@ const PANELS: { id: PanelId; label: string; title: string; width: number }[] = [
   { id: "party", label: "Party", title: "Party", width: 322 },
 ];
 
-const ACCENTS = ["#5eead4", "#818cf8", "#f472b6", "#fbbf24", "#a3e635"] as const;
+const ACCENTS = ["#eeeeee", "#00ffff", "#ffff00", "#8ace00","#f0927e", "#ff7e30" ] as const;
 const SURFACES = [
   { label: "Ink", value: "#0b0e14" },
   { label: "Slate", value: "#161a23" },
@@ -203,7 +203,6 @@ const FORCE_LABEL: Record<keyof Forces, string> = {
 
 const FORMATION_LABEL: Record<keyof Formation, string> = {
   shape: "formation",
-  text: "spelling",
   hold: "hold",
   restless: "restless",
 };
@@ -235,7 +234,6 @@ const showForce = (key: keyof Forces, value: Forces[keyof Forces]) =>
       : String(value);
 
 const showFormation = (key: keyof Formation, value: Formation[keyof Formation]) => {
-  if (key === "text") return value ? `"${value}"` : "nothing";
   if (key === "shape") return String(value);
   return `${percent(value as number)}`;
 };
@@ -842,6 +840,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       };
 
       const paint = (into: CanvasRenderingContext2D) => {
+        if (formation.shape === "triangle") {
+          drawPrismTribute(into, { width, height, strength: holdStrength(formation, now) });
+        }
         drawLinks(into, nodes, {
           reach,
           links,
@@ -1563,29 +1564,17 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 <Field label="Shape">
                   <Segmented
                     options={[
-                      { label: "Drift", value: "drift" },
-                      { label: "Grid", value: "grid" },
-                      { label: "Ring", value: "ring" },
-                      { label: "Spiral", value: "spiral" },
-                      { label: "Text", value: "text" },
+                      { label: "⛓️‍💥", value: "drift" },
+                      { label: "🧱", value: "grid" },
+                      { label: "🔲", value: "square" },
+                      { label: "🔘", value: "circle" },
+                      { label: "🌘", value: "triangle" },
                     ]}
                     value={formation.shape}
                     accent={settings.accent}
                     onChange={(value) => setForm("shape", value as FormationShape)}
                   />
                 </Field>
-                {/* Typing moves them onto the word without having to reach for
-                    the switch above first — nobody types into this field and
-                    means anything else by it. */}
-                <TextField
-                  label="Spell out"
-                  value={formation.text}
-                  placeholder="spell something"
-                  onChange={(value) => {
-                    setForm("text", value);
-                    if (value.trim() && formation.shape !== "text") setForm("shape", "text");
-                  }}
-                />
                 <Group dim={formation.shape === "drift"}>
                   <Slider
                     label="Hold"
