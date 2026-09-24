@@ -3,6 +3,17 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "5.2",
+      "era": "claude",
+      "name": "Tasks.exe",
+      "date": "2026-09-24",
+      "summary": "A new game under Toys: survive the workday.",
+      "issues": [],
+      "changes": [
+        "Tasks sits under Toys: a Vampire-Survivors-style arena game built from Party 2.0's own painted figures — emails, meeting invites, urgent bugs and performance reviews close in from every side, each turning up with something it wants over its head, while the office scrolls past under you, your reply swings on a beat in an arc the way you're walking, and you pick up a desk's worth of upgrades trying to last from 9 to 5 — Esc pauses the day and lays out where your numbers stand and what every upgrade you took is doing"
+      ]
+    },
+    {
       "version": "5.1",
       "era": "handmade",
       "name": "Small Tweaks",
