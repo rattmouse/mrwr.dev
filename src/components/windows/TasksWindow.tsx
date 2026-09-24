@@ -486,9 +486,15 @@ export default function TasksWindow() {
               <WindowHeader>tasks.exe</WindowHeader>
               <WindowContent>
                 <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px" }}>
-                  It&rsquo;s 9 AM and everyone wants something. Arrow keys, WASD, or the stick in the corner
-                  to move — you auto-reply on a beat, in an arc the way you&rsquo;re walking. Esc pauses.
-                  Survive to 5.
+                  It&rsquo;s 9 AM and everyone wants something. 
+                  <br></br>
+                  - Arrow keys, WASD, or joystick to move.
+                  <br></br>
+                  - You auto-reply in an arc in front of you. 
+                  <br></br>
+                  - Esc to go on break and view stats.
+                  <br></br>
+                  Survive to 5 PM.
                 </p>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <Button onClick={start}>Clock in</Button>

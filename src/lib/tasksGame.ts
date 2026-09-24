@@ -42,14 +42,14 @@ export const ENEMY_KINDS: EnemyKind[] = [
   {
     id: "meeting",
     label: "Meeting invite",
-    lines: ["Sync (30m)", "No agenda", "Recurring — weekly", "Optional (not really)", "Quick chat?", "Standup", "Calendar hold"],
+    lines: ["Sync (30m)", "No agenda", "Recurring — weekly", "Anonymous Survey", "Quick chat?", "Standup", "Calendar hold"],
     tint: "#f59e0b",
     hp: 22, speed: 42, damage: 6, size: 32, xp: 8, unlockAt: 0.15, weight: 4,
   },
   {
     id: "bug",
     label: "Urgent bug",
-    lines: ["P0", "prod is down", "URGENT", "repro attached", "works on my machine", "needs a hotfix", "customer-facing!"],
+    lines: ["segfault", "prod is down", "URGENT", "repro attached", "works on my machine", "needs a hotfix", "customer-facing!"],
     tint: "#ef4444",
     hp: 15, speed: 104, damage: 7, size: 28, xp: 7, unlockAt: 0.32, weight: 3,
   },
@@ -66,7 +66,7 @@ export const ENEMY_KINDS: EnemyKind[] = [
 export const REPLY_LINES = [
   "Will do!",
   "On it",
-  "Ack",
+  "Nothing from my end",
   "Sounds good!",
   "+1",
   "Noted",
