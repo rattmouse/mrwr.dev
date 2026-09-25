@@ -18,10 +18,11 @@ const KEYS: [string, string][] = [
 ];
 
 const RULES = [
-  "Your first push spins the ball up on the spot. When the count over it runs out it is let go with everything it has gathered, and the clock in the corner starts.",
-  "Roll off the edge and you are put back wherever you last had firm footing. There is nothing to lose but the time.",
+  "Spin during the countdown to gain speed.",
+  "Falling off the edge does not stop the timer.",
   "The lit pad at the end is the finish.",
-  "Ghost sets the quickest run known on this course going again beside you, as a little moon. Code hands the course, your time and your run to somebody else — and takes theirs.",
+  "Ghost moon shows the quickest run known on this course.",
+  "Use Code to share your ghost or race against another ghost.",
 ];
 
 export default function MarblesHelpPanel({ onClose }: { onClose: () => void }) {
