@@ -56,7 +56,7 @@ export const ENEMY_KINDS: EnemyKind[] = [
   {
     id: "review",
     label: "Performance review",
-    lines: ["Self-assessment", "Growth areas", "Let's align on impact", "Peer feedback", "Calibration", "Where do you see yourself?"],
+    lines: ["Self-assessment", "Growth areas", "Let's align on impact", "Mandatory trainings", "Boss knows you're playing at work", "Where do you see yourself?"],
     tint: "#a855f7",
     hp: 50, speed: 34, damage: 10, size: 42, xp: 22, unlockAt: 0.65, weight: 1.5,
   },
