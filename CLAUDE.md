@@ -57,6 +57,12 @@ Orientation notes for working in this repo.
   browser. Each sheet gets its own hand-judged crop. Re-run it only when one of
   those photographs changes or another sheet is painted, and pass `--debug` for
   a contact sheet of the cut-outs to check.
+- `public/mrwr.dev.png` is the README's screenshot of the site, and it is
+  **committed**: the README links it and GitHub renders it from `public/`. It
+  used to have a second job — cubicles.exe's in-world browser showed it when it
+  found itself already running inside one — but that fallback is now a painted
+  feedback loop (see below), so the screenshot is the README's alone. It stays
+  in `public/` regardless; don't move it back under `docs/`.
 - `public/collections/` (everything the Collections window shows) is gitignored
   in full and read only at build time: the album covers, the Bluesky picklists
   behind Paintings and Songs, and — for the Cards tab, the one the window opens

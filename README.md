@@ -1,6 +1,6 @@
 # mrwr.dev
 
-![mrwr.dev](docs/mrwr.dev.png)
+![mrwr.dev](public/mrwr.dev.png)
 
 my website
 - mrwr are my initials
