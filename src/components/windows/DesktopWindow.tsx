@@ -267,6 +267,18 @@ export default function DesktopWindow({
   const isDraggable = hasResizeGutter && !controlsDisabled;
   const showResizeGrip = isDraggable;
 
+  // Double-clicking the title bar throws the window between maximised and
+  // normal, the way every window on this desktop's namesake does — and pulls a
+  // docked one back out, which is the only thing "restore" can mean down there.
+  const onTitleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (controlsDisabled) return;
+    // The controls handle their own clicks; a stray second one isn't a resize.
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    if (isDocked) onRestore();
+    else onToggleMaximize();
+  };
+
   return (
     <>
     {meltAmount > 0 && <MeltFilter id={MELT_FILTER_ID} amount={meltAmount} />}
@@ -298,6 +310,7 @@ export default function DesktopWindow({
       <WindowHeader
         ref={headerRef}
         onPointerDown={startDrag}
+        onDoubleClick={onTitleDoubleClick}
         style={{
           display: "flex",
           alignItems: "center",
@@ -305,6 +318,8 @@ export default function DesktopWindow({
           flex: "0 0 auto",
           cursor: isDraggable ? "grab" : undefined,
           touchAction: isDraggable ? "none" : undefined,
+          // Otherwise the second click of the double-click selects the title.
+          userSelect: "none",
           ...light?.header,
         }}
       >

@@ -28,6 +28,7 @@ import MarblesBar from "@/components/windows/MarblesBar";
 import MarblesCodePanel from "@/components/windows/MarblesCodePanel";
 import MarblesHelpPanel from "@/components/windows/MarblesHelpPanel";
 import PlayerWindow, { PLAYER_ACCEPT, PlayerWindowHandle, VizMode, VIZ_MODES } from "@/components/windows/PlayerWindow";
+import TasksWindow from "@/components/windows/TasksWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
 import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
@@ -261,7 +262,9 @@ export default function ProgramWindow({
                     ? "player.exe"
                     : id === "marbles"
                       ? "marbles.exe"
-                      : "mrwr.dev";
+                      : id === "tasks"
+                        ? "tasks.exe"
+                        : "mrwr.dev";
   const titleIcon =
     id === "welcome"
       ? "../w95_desktop.ico"
@@ -276,12 +279,14 @@ export default function ProgramWindow({
               : id === "paint"
                 ? "../w95_paint.ico"
                 : id === "party"
-                  ? "../w98_file_eye.ico"
+                  ? "../w98_regedit.ico"
                   : id === "player"
                     ? "../w95_player.ico"
                     : id === "marbles"
-                      ? "../w95_marble.ico"
-                      : "../w98_repl.ico";
+                      ? "../w98_world_star.ico"
+                      : id === "tasks"
+                        ? "../w98_joystick.ico"
+                        : "../w98_repl.ico";
 
   const normalHeight =
     id === "welcome" ? 160
@@ -292,9 +297,10 @@ export default function ProgramWindow({
               : id === "party" ? 460
                 : id === "player" ? 420
                   : id === "marbles" ? 420
-                    : 300;
+                    : id === "tasks" ? 480
+                      : 300;
   const normalWidth =
-    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : id === "player" ? 440 : id === "marbles" ? 560 : undefined;
+    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : id === "player" ? 440 : id === "marbles" ? 560 : id === "tasks" ? 620 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -1274,6 +1280,8 @@ export default function ProgramWindow({
           )}
         </div>
       )}
+
+      {id === "tasks" && <TasksWindow />}
     </DesktopWindow>
   );
 }
