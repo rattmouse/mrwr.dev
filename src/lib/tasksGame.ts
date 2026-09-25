@@ -30,35 +30,35 @@ export const ENEMY_KINDS: EnemyKind[] = [
     label: "Email",
     lines: ["Re: Re: Re:", "Quick question", "Just following up", "Per my last email", "Any update?", "Thoughts?", "Circling back", "Adding a few people"],
     tint: "#4fa3ff",
-    hp: 6, speed: 72, damage: 3, size: 26, xp: 3, unlockAt: 0, weight: 6,
+    hp: 6, speed: 58, damage: 3, size: 26, xp: 3, unlockAt: 0, weight: 6,
   },
   {
     id: "slack",
     label: "Slack ping",
     lines: ["got a sec?", "u around?", "@here", "quick q", "sorry to bother!", "did you see my DM?", "hey", "hey :)"],
     tint: "#34d399",
-    hp: 8, speed: 88, damage: 3, size: 26, xp: 3, unlockAt: 0, weight: 6,
+    hp: 8, speed: 70, damage: 3, size: 26, xp: 3, unlockAt: 0, weight: 6,
   },
   {
     id: "meeting",
     label: "Meeting invite",
     lines: ["Sync (30m)", "No agenda", "Recurring — weekly", "Anonymous Survey", "Quick chat?", "Standup", "Calendar hold"],
     tint: "#f59e0b",
-    hp: 22, speed: 42, damage: 6, size: 32, xp: 8, unlockAt: 0.15, weight: 4,
+    hp: 22, speed: 34, damage: 6, size: 32, xp: 8, unlockAt: 0.15, weight: 4,
   },
   {
     id: "bug",
     label: "Urgent bug",
     lines: ["segfault", "prod is down", "URGENT", "repro attached", "works on my machine", "needs a hotfix", "customer-facing!"],
     tint: "#ef4444",
-    hp: 15, speed: 104, damage: 7, size: 28, xp: 7, unlockAt: 0.32, weight: 3,
+    hp: 15, speed: 83, damage: 7, size: 28, xp: 7, unlockAt: 0.32, weight: 3,
   },
   {
     id: "review",
     label: "Performance review",
     lines: ["Self-assessment", "Growth areas", "Let's align on impact", "Mandatory trainings", "Boss knows you're playing at work", "Where do you see yourself?"],
     tint: "#a855f7",
-    hp: 50, speed: 34, damage: 10, size: 42, xp: 22, unlockAt: 0.65, weight: 1.5,
+    hp: 50, speed: 27, damage: 10, size: 42, xp: 22, unlockAt: 0.65, weight: 1.5,
   },
 ];
 
@@ -99,7 +99,7 @@ export type PlayerStats = {
 };
 
 export const BASE_PLAYER_STATS: PlayerStats = {
-  moveSpeed: 200,
+  moveSpeed: 160,
   maxHp: 130,
   attackDamage: 9,
   attackRange: 110,
