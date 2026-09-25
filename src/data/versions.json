@@ -3,6 +3,20 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "5.3",
+      "era": "claude",
+      "name": "Cubicles.exe",
+      "date": "2026-09-24",
+      "summary": "A first-person office you can walk around, and a browser on the desk in it.",
+      "issues": [],
+      "changes": [
+        "Cubicles sits under Toys: you come in through the only door of an empty office, it locks behind you, and a row of four cubicles is the whole of where you now live \u2014 the arrows or WASD to walk, a drag to look around. Three of them hold nothing but a desk, a chair somebody pushed out on their way past, and whatever was too dull to take: a monitor with no tower under it, a printer with one last page still in the tray, a phone and a couple of half-packed boxes. The fourth is yours, and it has the computer",
+        "The computer on the desk is a real browser, and it starts on this site. Look at it and click, and you lean in until the screen fills the view \u2014 mrwr.dev running on the monitor with nothing framing it, every window and menu in there working the way it does out here",
+        "Open Cubicles on the computer inside the cubicle and the monitor stops trying to load the site: it shows you the room it is standing in instead, and the monitor in that picture shows the frame before it, on down until there are no pixels left to spend",
+        "The door is worth trying. It rattles"
+      ]
+    },
+    {
       "version": "5.2",
       "era": "claude",
       "name": "Tasks.exe",
