@@ -10,7 +10,6 @@ import {
   OwnedUpgrade,
   PLAYER_RADIUS,
   REPLY_TEXT_MS,
-  RUN_MS,
   RunState,
   SWING_MS,
   StatLine,
@@ -235,9 +234,74 @@ function draw(ctx: CanvasRenderingContext2D, run: RunState, width: number, heigh
   drawHud(ctx, run, width);
 }
 
-function fmtDuration(ms: number): string {
-  const seconds = Math.round(ms / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+/**
+ * How the day is going: the clock and the tally, the numbers against the ones
+ * you started with, and everything you picked up on the way. The Break window
+ * and the one waiting at 5 o'clock both want exactly this.
+ */
+function RunReport({
+  summary,
+  stats,
+  owned,
+  emptyNote = "Nothing yet \u2014 level up and pick something.",
+}: {
+  summary: { kills: number; level: number; elapsedMs: number };
+  stats: StatLine[];
+  owned: OwnedUpgrade[];
+  emptyNote?: string;
+}) {
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
+        <span>
+          <strong>{workdayClock(summary.elapsedMs)}</strong> &middot; level {summary.level}
+        </span>
+        <span>
+          {summary.kills} task{summary.kills === 1 ? "" : "s"} closed
+        </span>
+      </div>
+
+      <GroupBox label="Desk stats" style={{ marginBottom: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "3px 10px", fontSize: 12 }}>
+          {stats.map((stat) => (
+            <React.Fragment key={stat.label}>
+              <span>{stat.label}</span>
+              <span style={{ fontWeight: "bold" }}>{stat.value}</span>
+              <span style={{ opacity: 0.65 }}>{stat.delta ?? ""}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      </GroupBox>
+
+      <GroupBox label={`Upgrades earned (${owned.reduce((n, o) => n + o.count, 0)})`}>
+        {owned.length === 0 ? (
+          <p style={{ fontSize: 12, margin: 0 }}>{emptyNote}</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {owned.map(({ upgrade, count }, i) => (
+              <React.Fragment key={upgrade.id}>
+                {i > 0 && <Separator />}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
+                    {upgrade.emoji}
+                  </span>
+                  <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                    <div style={{ fontWeight: "bold", fontSize: 12 }}>
+                      {upgrade.label} &times;{count}
+                    </div>
+                    <div style={{ fontSize: 11 }}>
+                      {upgrade.description}
+                      {count > 1 ? `, ${count} times over` : ""}
+                    </div>
+                  </div>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+      </GroupBox>
+    </>
+  );
 }
 
 export default function TasksWindow() {
@@ -317,8 +381,15 @@ export default function TasksWindow() {
     const run = createRun();
     run.phase = "playing";
     runRef.current = run;
+    // The stick unmounts with the run that ended, so its last push has to be
+    // let go of here — otherwise a day that ended mid-drag starts the next one
+    // already walking.
+    keysRef.current.clear();
+    stickRef.current = { x: 0, y: 0 };
+    setStick({ x: 0, y: 0 });
     setChoices([]);
     setOwned([]);
+    setStats([]);
     setPhase("playing");
   }, []);
 
@@ -409,6 +480,7 @@ export default function TasksWindow() {
           setPhase(run.phase);
           setChoices(run.choices);
           setOwned(ownedUpgrades(run));
+          setStats(statLines(run));
           setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs });
         }
       }
@@ -549,68 +621,24 @@ export default function TasksWindow() {
                 </Button>
               </WindowHeader>
               <WindowContent style={{ overflowY: "auto", minHeight: 0 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
-                  <span>
-                    <strong>{workdayClock(summary.elapsedMs)}</strong> &middot; level {summary.level}
-                  </span>
-                  <span>
-                    {summary.kills} task{summary.kills === 1 ? "" : "s"} closed
-                  </span>
-                </div>
-
-                <GroupBox label="Desk stats" style={{ marginBottom: 10 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "3px 10px", fontSize: 12 }}>
-                    {stats.map((stat) => (
-                      <React.Fragment key={stat.label}>
-                        <span>{stat.label}</span>
-                        <span style={{ fontWeight: "bold" }}>{stat.value}</span>
-                        <span style={{ opacity: 0.65 }}>{stat.delta ?? ""}</span>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </GroupBox>
-
-                <GroupBox label={`Upgrades earned (${owned.reduce((n, o) => n + o.count, 0)})`}>
-                  {owned.length === 0 ? (
-                    <p style={{ fontSize: 12, margin: 0 }}>Nothing yet — level up and pick something.</p>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {owned.map(({ upgrade, count }, i) => (
-                        <React.Fragment key={upgrade.id}>
-                          {i > 0 && <Separator />}
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
-                              {upgrade.emoji}
-                            </span>
-                            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-                              <div style={{ fontWeight: "bold", fontSize: 12 }}>
-                                {upgrade.label} &times;{count}
-                              </div>
-                              <div style={{ fontSize: 11 }}>
-                                {upgrade.description}
-                                {count > 1 ? `, ${count} times over` : ""}
-                              </div>
-                            </div>
-                          </div>
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  )}
-                </GroupBox>
-
+                <RunReport summary={summary} stats={stats} owned={owned} />
               </WindowContent>
             </Window>
           )}
 
           {phase === "gameover" && (
-            <Window style={{ width: "min(300px, 92%)", pointerEvents: "auto" }}>
+            <Window style={{ width: "min(400px, 94%)", maxHeight: "94%", pointerEvents: "auto", display: "flex", flexDirection: "column" }}>
               <WindowHeader>Burned out</WindowHeader>
-              <WindowContent>
-                <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px" }}>
-                  You made it to {workdayClock(summary.elapsedMs)}, level {summary.level}, {summary.kills} task
-                  {summary.kills === 1 ? "" : "s"} closed out. Clock back in?
+              <WindowContent style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+                <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px", flex: "0 0 auto" }}>
+                  Burnt out with hours still to go. Here&rsquo;s how far you got.
                 </p>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+
+                <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+                  <RunReport summary={summary} stats={stats} owned={owned} emptyNote="You never got to pick anything." />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, flex: "0 0 auto" }}>
                   <Button onClick={start}>Try again</Button>
                 </div>
               </WindowContent>
@@ -618,14 +646,18 @@ export default function TasksWindow() {
           )}
 
           {phase === "victory" && (
-            <Window style={{ width: "min(300px, 92%)", pointerEvents: "auto" }}>
+            <Window style={{ width: "min(400px, 94%)", maxHeight: "94%", pointerEvents: "auto", display: "flex", flexDirection: "column" }}>
               <WindowHeader>Clocked out</WindowHeader>
-              <WindowContent>
-                <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px" }}>
-                  5 o&rsquo;clock. You made it to level {summary.level} and closed out {summary.kills} task
-                  {summary.kills === 1 ? "" : "s"} in {fmtDuration(RUN_MS)}. Go home.
+              <WindowContent style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+                <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px", flex: "0 0 auto" }}>
+                  5 o&rsquo;clock, and you&rsquo;re still standing. Here&rsquo;s how the day went &mdash; then go home.
                 </p>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+
+                <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+                  <RunReport summary={summary} stats={stats} owned={owned} emptyNote="You took nothing all day." />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, flex: "0 0 auto" }}>
                   <Button onClick={start}>Go again</Button>
                 </div>
               </WindowContent>
