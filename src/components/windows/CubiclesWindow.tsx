@@ -41,6 +41,10 @@ const RATTLE_MS = 420;
 const HOME = "/";
 /** How much of the frame's own resolution the echo on the glass is kept at. */
 const ECHO_SCALE = 0.5;
+/** Never shrink the browser's logical width below this, however small the
+ *  glass lands on screen — narrower than this and the desktop it's showing
+ *  stops being usable, crisp or not. */
+const SCREEN_MIN_WIDTH = 320;
 
 /**
  * The site inside the monitor is this same site, so opening the cubicle in
@@ -77,6 +81,12 @@ export default function CubiclesWindow() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sizeRef = useRef({ width: 600, height: 420 });
+  /** The browser's own logical size, shrunk from SCREEN's 640×512 so a small
+   *  window doesn't have to squash it down onto a tiny quad — which is what
+   *  smeared the start menu's font on small screens instead of just shrinking
+   *  it cleanly. Recomputed on resize, not per frame: it depends only on the
+   *  window's height (see marbles3d.ts's `focal`), not on where you're stood. */
+  const screenSizeRef = useRef({ width: SCREEN.width, height: SCREEN.height });
 
   const poseRef = useRef<Pose>({ ...STANDING });
   const phaseRef = useRef<Phase>("intro");
@@ -266,6 +276,23 @@ export default function CubiclesWindow() {
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // How big the glass actually lands on screen once you're seated at it —
+      // the only pose the browser is legible in. Projection scales with the
+      // viewport's height alone (see marbles3d.ts), so this only needs
+      // recomputing here, on resize, not every animation frame.
+      const seatedQuad = glassQuad(makeView(SEATED, width, height));
+      if (seatedQuad) {
+        const [p0, p1] = seatedQuad;
+        const quadWidth = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+        const screenWidth = Math.min(SCREEN.width, Math.max(SCREEN_MIN_WIDTH, Math.round(quadWidth)));
+        const screen = screenRef.current;
+        screenSizeRef.current = { width: screenWidth, height: Math.round((screenWidth * SCREEN.height) / SCREEN.width) };
+        if (screen) {
+          screen.style.width = `${screenSizeRef.current.width}px`;
+          screen.style.height = `${screenSizeRef.current.height}px`;
+        }
+      }
     };
     fit();
     const observer = new ResizeObserver(fit);
@@ -380,7 +407,8 @@ export default function CubiclesWindow() {
         // The browser is a real DOM element over the canvas, so no amount of
         // wall paints over it — the one thing in the room you can see from
         // anywhere in it. Left that way deliberately.
-        const matrix = quad ? quadTransform(quad, SCREEN.width, SCREEN.height) : null;
+        const { width: screenWidth, height: screenHeight } = screenSizeRef.current;
+        const matrix = quad ? quadTransform(quad, screenWidth, screenHeight) : null;
         if (matrix) {
           screen.style.transform = matrix;
           screen.style.visibility = "visible";
@@ -452,8 +480,8 @@ export default function CubiclesWindow() {
               position: "absolute",
               top: 0,
               left: 0,
-              width: SCREEN.width,
-              height: SCREEN.height,
+              width: screenSizeRef.current.width,
+              height: screenSizeRef.current.height,
               transformOrigin: "0 0",
               willChange: "transform",
               visibility: "hidden",

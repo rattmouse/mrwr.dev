@@ -16,6 +16,7 @@ const React95GlobalStyle = createGlobalStyle`
     src: url('${ms_sans_serif}') format('woff2');
     font-weight: 400;
     font-style: normal;
+    font-display: swap;
   }
 
   @font-face {
@@ -23,6 +24,7 @@ const React95GlobalStyle = createGlobalStyle`
     src: url('${ms_sans_serif_bold}') format('woff2');
     font-weight: bold;
     font-style: normal;
+    font-display: swap;
   }
 
   /* --- Window control icons (Storybook-style helpers) --- */
@@ -76,7 +78,7 @@ const React95GlobalStyle = createGlobalStyle`
   }
 
   body {
-    font-family: 'ms_sans_serif';
+    font-family: 'ms_sans_serif', Tahoma, sans-serif;
     font-size: 12px;              /* big one: keeps spacing/menu right */
     line-height: 1.2;
 
