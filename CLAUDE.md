@@ -85,7 +85,7 @@ Orientation notes for working in this repo.
   is a no-op. In-memory only — a restart drops sessions mid-flight, but the
   NDJSON archive still has every record.
 
-## Every PR updates the changelog
+## Every PR bumps the version and updates the changelog
 
 The **changes app** (`changes.exe` / the "Version history" window) is driven by
 the hand-curated `src/data/versions.json`. Update it **in the same PR** that makes
@@ -94,21 +94,28 @@ follow-up commit or a separate "record PR #NN" PR after merge.
 
 Do this on your feature branch before the PR merges:
 
-1. **Add one bullet** to `versions[0].changes[]` — the newest card (currently
-   v4.9). Describe the **user-facing effect**, not the mechanics, and match the
-   voice of the bullets already there (short, plain, no hashes or file paths).
-2. **Record closed issues.** If the PR closes any issues, add their numbers to
+1. **Bump the version.** `npm run version:bump` (a patch; `-- minor` /
+   `-- major` for a new milestone) moves `package.json`, `package-lock.json`
+   and `versions[0].version` on together — see `scripts/version.mjs`. A patch
+   just relabels the newest card (`6.0` → `6.0.1` → `6.0.2`); a minor or major
+   opens a new empty card at the top for you to name. `containers/ci.sh ci`
+   fails on a branch that isn't ahead of `origin/main`, and every build
+   (`prebuild`) fails if the three files disagree — so don't hand-edit one.
+2. **Add one bullet** to `versions[0].changes[]` — the newest card. Describe
+   the **user-facing effect**, not the mechanics, and match the voice of the
+   bullets already there (short, plain, no hashes or file paths).
+3. **Record closed issues.** If the PR closes any issues, add their numbers to
    `versions[0].issues[]` (deduped, keep it sorted). Their titles and the "closed
    by PR #NN" link are resolved automatically from `issues.json` at build time —
    do **not** hand-write those.
-3. **Put a closing keyword in the PR description** (`Closes #NN` / `Fixes #NN`)
-   for every issue you listed in step 2. That is what lets `link-prs.mjs` attach
+4. **Put a closing keyword in the PR description** (`Closes #NN` / `Fixes #NN`)
+   for every issue you listed in step 3. That is what lets `link-prs.mjs` attach
    the "closed by PR #NN" link automatically once the PR merges — nothing to add
    by hand afterward. See below.
-4. **Stats are optional.** `versions[0].stats` (commits / files / +− lines) is a
+5. **Stats are optional.** `versions[0].stats` (commits / files / +− lines) is a
    milestone-time chore, not a per-PR one. Leave it unless you're keeping it
    roughly current on purpose.
-5. **Never write up a cubicles.exe secret.** The nested `/hacks/` directory
+6. **Never write up a cubicles.exe secret.** The nested `/hacks/` directory
    bash.exe exposes only when it's running on the computer inside cubicles.exe
    (`lights.exe`, `unlock.exe`, and whatever gets added there later) stays out
    of every changelog bullet, no matter how much of the PR it was. Same for any
@@ -120,9 +127,9 @@ Nothing here needs the PR number — the bullet carries no hashes, and the issue
 PR link is resolved from the closing keyword at build time. So there is no
 after-merge step.
 
-Start a **new** `versions[0]` object (bump `version`, set `era` / `name` / `date`)
-only when the work opens a genuinely new milestone — most PRs are just a new
-bullet on the current card.
+Start a **new** `versions[0]` card (`npm run version:bump -- minor`, then set
+`era` / `name` / `summary`) only when the work opens a genuinely new milestone —
+most PRs are a patch bump plus a new bullet on the current card.
 
 ### How the issue ↔ PR links work
 

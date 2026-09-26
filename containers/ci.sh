@@ -173,6 +173,15 @@ cmd_ci() {
     scripts/content/refresh-projects.sh \
       || echo "[ci] warning: project metadata refresh failed; falling back to projects.base.json." >&2
 
+    # Every PR bumps the version (node scripts/version.mjs bump patch). On a
+    # branch, fail unless it is ahead of main; on main itself there is nothing
+    # to compare against, and the build still checks the three files agree.
+    if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ]; then
+      git fetch -q origin main 2>/dev/null \
+        || echo "[ci] warning: could not fetch origin/main; comparing against the local copy." >&2
+      node scripts/version.mjs check --against origin/main || exit 1
+    fi
+
     set -e
     if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
 
