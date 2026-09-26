@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
@@ -280,12 +280,14 @@ function scatterTiles(
   });
 }
 
-// Where every tile was left, per tab and per layout (flung across the desktop,
-// or inside the maximized window), so a reload — or a resize, or a trip to
-// another tab — puts them all back rather than dealing a fresh pile. Positions
-// are kept as fractions of the space they were dropped in, so a different
-// screen size stretches the arrangement instead of scrambling it. Tiles are
-// keyed by picture, not by index: Albums comes back in a new order every load.
+// Where every tile was left, per tab, so a reload — or a resize, a trip to
+// another tab, or maximizing the window — puts them all back rather than
+// dealing a fresh pile. A pile is only ever dealt the first time a tab is
+// opened (or on Shuffle). Positions are kept as fractions of the space they
+// were dropped in: across the desktop, or inside the maximized window, which
+// covers nearly the same stretch of screen — so a tile stays about where it
+// was on screen either way, and a different screen size stretches the
+// arrangement instead of scrambling it.
 const TILE_LAYOUT_KEY = "mrwr:collections";
 
 type SavedTile = { x: number; y: number; rot: number; z: number };
@@ -334,9 +336,18 @@ function writeSavedLayout(slot: string, layout: SavedLayout | null) {
   }
 }
 
-function tileKey(entry: AlbumCover): string {
-  return entry.image ?? `${entry.artist}|${entry.title}`;
+// Tiles are keyed by what they show, not by index: Albums comes back in a new
+// order every load. An album goes by its name, since whether its cover is
+// found (and where) can change from one load to the next; everything else by
+// its picture, since one post can carry several.
+function tileKey(entry: AlbumCover, category: CollectionCategory): string {
+  return category === "albums" || !entry.image ? `${entry.artist}|${entry.title}` : entry.image;
 }
+
+// The deal: fresh tiles fly out from the middle of the collections window, one
+// after another, to wherever they were dealt.
+const DEAL_MS = 800;
+const DEAL_STAGGER_MS = 22;
 
 // Size a box of the given aspect ratio so its longest edge is `size`. Undefined
 // aspect (album covers) stays square.
@@ -371,6 +382,10 @@ export default function DocumentWindow({
   const [category, setCategory] = useState<CollectionCategory>("cards");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
+  // Which tab the tiles in `albums` belong to. Switching tabs renders once with
+  // the old tab's tiles still loaded; laying those out (and saving them) under
+  // the new tab's name would overwrite where its own tiles were left.
+  const [albumsCategory, setAlbumsCategory] = useState<CollectionCategory | null>(null);
   const title = programDef(id).title;
   const titleIcon = programDef(id).icon;
   const emptyEntry =
@@ -428,7 +443,11 @@ export default function DocumentWindow({
   // What the tiles on screen were last laid out for, so a resize can tell it
   // only needs to stretch them back into place rather than deal them again.
   const placedForRef = useRef<{ albums: AlbumCover[]; slot: string; shuffle: number } | null>(null);
-  const layoutSlot = `${category}:${scatterToDesktop ? "desktop" : "window"}`;
+  const layoutSlot: string = category;
+  // While a pile is being dealt: each fresh tile's place in the deal, and
+  // whether they are still gathered in the middle or on their way out.
+  const [deal, setDeal] = useState<{ order: Map<number, number>; phase: "gather" | "spread" } | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setPortalHost(document.body);
@@ -571,7 +590,10 @@ export default function DocumentWindow({
               : category === "cards"
                 ? await loadCards()
                 : await loadAlbumsSource();
-        if (!cancelled) setAlbums(next);
+        if (!cancelled) {
+          setAlbums(next);
+          setAlbumsCategory(category);
+        }
       } catch (error) {
         console.error("Failed to load collection tiles:", error);
       } finally {
@@ -676,22 +698,26 @@ export default function DocumentWindow({
     albums.forEach((entry, index) => {
       const pos = positions[index];
       if (!pos) return;
-      tiles[tileKey(entry)] = {
+      tiles[tileKey(entry, category)] = {
         x: round(pos.x / width),
         y: round(pos.y / height),
         rot: round(pos.rot),
         z: stack[index] ?? 0,
       };
     });
-    writeSavedLayout(layoutSlot, { tiles, active: albums[active] ? tileKey(albums[active]) : undefined });
+    writeSavedLayout(layoutSlot, { tiles, active: albums[active] ? tileKey(albums[active], category) : undefined });
   };
 
   // Lay the tiles out. Tiles that have been placed before go back exactly where
   // they were left (stretched to the space they are in now); only tiles never
   // seen before — or all of them, after Shuffle — are dealt fresh. Resizing the
-  // window or the browser, picking a tile, or switching tabs never reshuffles.
-  useEffect(() => {
-    if (id !== "collections" || albumsLoading || albums.length === 0) return;
+  // window or the browser, maximizing it, picking a tile, or switching tabs
+  // never reshuffles. A layout effect, so a fresh deal is gathered in the
+  // middle before the tiles are first painted anywhere else.
+  useLayoutEffect(() => {
+    // Minimized, the tiles go away with the window; leave the saved layout be.
+    if (id !== "collections" || layout === "minimized" || albumsLoading || albums.length === 0) return;
+    if (albumsCategory !== category) return;
     // Nothing to lay out into until the space has been measured; placing into
     // a 0×0 field would crush every saved position into the corner.
     if (fieldWidth < iconSize * 2 || fieldHeight < iconSize * 2) return;
@@ -711,7 +737,7 @@ export default function DocumentWindow({
     const boxes = albums.map((entry) => fitBox(iconSize, entry.aspect));
 
     const positions: (AlbumTilePosition | null)[] = albums.map((entry, index) => {
-      const tile = saved?.tiles[tileKey(entry)];
+      const tile = saved?.tiles[tileKey(entry, category)];
       if (!tile) return null;
       const at = clampTilePosition(tile.x * width, tile.y * height, boxes[index].w, boxes[index].h);
       return { ...at, rot: tile.rot };
@@ -733,12 +759,15 @@ export default function DocumentWindow({
       });
     }
     const next = positions as AlbumTilePosition[];
-    setAlbumTilePositions(next);
-    if (sameDeal) return;
+    if (sameDeal) {
+      setDeal(null);
+      setAlbumTilePositions(next);
+      return;
+    }
 
     // A new deal picks what the frame shows: whatever it showed when this pile
     // was last left, or else the tile that landed nearest the middle.
-    let active = saved?.active ? albums.findIndex((entry) => tileKey(entry) === saved.active) : -1;
+    let active = saved?.active ? albums.findIndex((entry) => tileKey(entry, category) === saved.active) : -1;
     if (active < 0) {
       let nearestDist = Number.POSITIVE_INFINITY;
       next.forEach((pos, index) => {
@@ -751,13 +780,46 @@ export default function DocumentWindow({
     }
     // Saved stacking order where there is one; a fresh pile lies flat with the
     // one the window is showing on top.
-    const stack = albums.map((entry, index) => saved?.tiles[tileKey(entry)]?.z ?? (index === active ? 1 : 0));
+    const stack = albums.map((entry, index) => saved?.tiles[tileKey(entry, category)]?.z ?? (index === active ? 1 : 0));
     albumTileStackTopRef.current = Math.max(1, ...stack);
     setActiveAlbum(active);
     setAlbumTileStack(stack);
     saveLayout(next, stack, active);
+
+    if (missing.length === 0) {
+      setDeal(null);
+      setAlbumTilePositions(next);
+      return;
+    }
+
+    // Deal the fresh tiles out of the middle of the collections window: gather
+    // them there (no transition), then on the next frame send them off.
+    const windowRect = frameRef.current?.closest('[data-desktop-window="true"]')?.getBoundingClientRect();
+    const originX = windowRect ? windowRect.left + windowRect.width / 2 - field.originLeft : width / 2;
+    const originY = windowRect ? windowRect.top + windowRect.height / 2 - field.originTop : height / 2;
+    const order = new Map(missing.map((index, i) => [index, i]));
+    setDeal({ order, phase: "gather" });
+    setAlbumTilePositions(
+      next.map((pos, index) =>
+        order.has(index) ? { x: originX - boxes[index].w / 2, y: originY - boxes[index].h / 2, rot: 0 } : pos
+      )
+    );
+    // A beat for the gathered pile to paint, then send it off. Timers rather
+    // than animation frames: a tab in the background never gets a frame, and
+    // its tiles would sit gathered in the middle until it was looked at.
+    const spread = window.setTimeout(() => {
+      setDeal({ order, phase: "spread" });
+      setAlbumTilePositions(next);
+    }, 30);
+    const done = window.setTimeout(() => setDeal(null), 30 + DEAL_MS + missing.length * DEAL_STAGGER_MS + 100);
+    return () => {
+      // Interrupted (a resize, a tab switch): the rerun lays everything out
+      // from the saved layout, which already holds where the deal was going.
+      window.clearTimeout(spread);
+      window.clearTimeout(done);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [albums, albumsLoading, id, iconSize, layoutSlot, fieldWidth, fieldHeight, shuffleCount]);
+  }, [albums, albumsCategory, albumsLoading, id, layout, iconSize, layoutSlot, fieldWidth, fieldHeight, shuffleCount]);
 
   const endDragBookkeeping = (pointerTarget: EventTarget & Element, pointerId: number) => {
     draggingAlbumIndexRef.current = null;
@@ -842,6 +904,9 @@ export default function DocumentWindow({
     const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
     const tileBox = fitBox(iconSize, entry.aspect);
     const isDraggingThis = draggingAlbumIndexRef.current === index;
+    const dealtAt = deal?.order.get(index);
+    const dealEase = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+    const dealDelay = (dealtAt ?? 0) * DEAL_STAGGER_MS;
     return (
       <div
         key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
@@ -873,9 +938,11 @@ export default function DocumentWindow({
           pointerEvents: "auto",
           // Track the pointer 1:1 while dragging; ease back into place otherwise.
           transition:
-            isDraggingThis && draggedRef.current
+            (isDraggingThis && draggedRef.current) || (dealtAt !== undefined && deal?.phase === "gather")
               ? "none"
-              : "left 180ms ease-out, top 180ms ease-out, transform 180ms ease-out",
+              : dealtAt !== undefined
+                ? ["left", "top", "transform"].map((p) => `${p} ${DEAL_MS}ms ${dealEase} ${dealDelay}ms`).join(", ")
+                : "left 180ms ease-out, top 180ms ease-out, transform 180ms ease-out",
         }}
         aria-label={entry.title}
       >
@@ -980,6 +1047,7 @@ export default function DocumentWindow({
               }}
             >
               <div
+                ref={frameRef}
                 style={{
                   position: "absolute",
                   left: "50%",
