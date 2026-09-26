@@ -76,6 +76,12 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
   // up, so closing a window doesn't shuffle the ones still open.
   const cascadeSeed = useRef(1);
   const { state: power } = usePower();
+  // Shutting down closes everything at once. The shutdown and "off" screens
+  // cover the whole desktop, so nothing here is seen again before the reboot's
+  // reload — but left mounted, every window would carry on drawing, playing
+  // and running its loops behind them. Unmounting stops all of that the moment
+  // Shut Down is picked.
+  const poweredDown = power === "shuttingDown" || power === "off";
 
   // Pick up the desktop where the last visit left it. The page is prerendered
   // with just the welcome window, so the saved one can only be read once it's
@@ -308,7 +314,7 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
       // the whole page scroll sideways (a phone widens its layout to fit it).
       style={{ width: "100dvw", height: "100dvh", position: "relative", overflow: "hidden" }}
     >
-      {taskOrder.map((w) => {
+      {!poweredDown && taskOrder.map((w) => {
         const shared = {
           layout: w.layout,
           box: w.box,
@@ -346,15 +352,17 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
         return null;
       })}
 
-      <StartMenu
-        searchHistory={searchHistory}
-        openWindow={openWindow}
-        onOpenSearch={openSearch}
-        tasks={taskbarItems}
-        focused={focused}
-        onTaskClick={toggleFromTaskbar}
-        onTaskAction={taskAction}
-      />
+      {!poweredDown && (
+        <StartMenu
+          searchHistory={searchHistory}
+          openWindow={openWindow}
+          onOpenSearch={openSearch}
+          tasks={taskbarItems}
+          focused={focused}
+          onTaskClick={toggleFromTaskbar}
+          onTaskAction={taskAction}
+        />
+      )}
     </main>
   );
 }

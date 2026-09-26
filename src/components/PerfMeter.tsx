@@ -199,9 +199,6 @@ export default function PerfMeter({ windowCount }: { windowCount: number }) {
               ))}
             </tbody>
           </table>
-          <div style={{ marginTop: 6, fontSize: 11, opacity: 0.75 }}>
-            Last {HISTORY} frames. Minimized windows keep running.
-          </div>
         </Frame>
       )}
     </div>
