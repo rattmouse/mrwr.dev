@@ -6,6 +6,7 @@ import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
 import { usePower } from "@/components/power/PowerProvider";
 import { WindowAction, WindowId } from "@/components/windows/windowTypes";
+import { MenuFolder, WINDOW_IDS, programDef } from "@/components/windows/programs";
 import SearchBox from "@/components/SearchBox";
 import TaskbarButtons, { TaskbarItem } from "@/components/TaskbarButtons";
 import PerfMeter from "@/components/PerfMeter";
@@ -240,61 +241,33 @@ export default function StartMenu({
     shutdown();
   };
 
+  // Every window listed in a folder, in the order programs.ts gives them.
+  const listed = (folder: MenuFolder): MenuLeafItem[] =>
+    WINDOW_IDS.flatMap((id) => {
+      const def = programDef(id);
+      return def.menu?.folder === folder
+        ? [{ label: def.menu.label, icon: def.icon, size: "sm" as Sizes, onClick: () => pick(id) }]
+        : [];
+    });
+  const folder = (label: string, id: MenuFolder): MenuParentItem => ({
+    label,
+    icon: "../w95_programs.ico",
+    size: "sm",
+    submenu: listed(id),
+  });
+
   const menuItems = [
     {
       label: "Documents",
       size: "lg",
       icon: "../w95_documents.ico",
-      submenu:
-        [
-          { label: "About", icon: "../w95_default.ico", size: "sm", onClick: () => pick("about") },
-          { label: "Projects", icon: "../w95_default.ico", size: "sm", onClick: () => pick("projects") },
-          { label: "Demos", icon: "../w95_default.ico", size: "sm", onClick: () => pick("demos") },
-          { label: "Contact", icon: "../w95_default.ico", size: "sm", onClick: () => pick("contact") }
-        ],
+      submenu: listed("documents"),
     },
     {
       label: "Programs",
       icon: "../w95_programs.ico",
       size: "lg",
-      submenu:
-        [
-          { label: "Welcome", icon: "../w95_desktop.ico", size: "sm", onClick: () => pick("welcome") },
-          {
-            label: "App",
-            icon: "../w95_programs.ico",
-            size: "sm",
-            submenu: [
-              { label: "Issues", icon: "../w98_issues.ico", size: "sm", onClick: () => pick("issues") },
-              { label: "Changes", icon: "../w95_changes.ico", size: "sm", onClick: () => pick("changes") },
-            ],
-          },
-          {
-            label: "Tools",
-            icon: "../w95_programs.ico",
-            size: "sm",
-            submenu: [
-              { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
-              { label: "Paint", icon: "../w95_paint.ico", size: "sm", onClick: () => pick("paint") },
-              { label: "Media", icon: "../w95_player.ico", size: "sm", onClick: () => pick("player") },
-              { label: "Terminal", icon: "../w98_console_prompt.ico", size: "sm", onClick: () => pick("bash") },
-            ],
-          },
-          {
-            label: "Toys",
-            icon: "../w95_programs.ico",
-            size: "sm",
-            submenu: [
-              { label: "Collections", icon: "../w98_collections_cards.ico", size: "sm", onClick: () => pick("collections") },
-              { label: "Sounds", icon: "../w98_repl.ico", size: "sm", onClick: () => pick("music") },
-              { label: "Keys", icon: "../w98_music.ico", size: "sm", onClick: () => pick("midi") },
-              { label: "Party", icon: "../w98_regedit.ico", size: "sm", onClick: () => pick("party") },
-              { label: "Marbles", icon: "../w98_world_star.ico", size: "sm", onClick: () => pick("marbles") },
-              { label: "Tasks", icon: "../w98_installer_file_gear.ico", size: "sm", onClick: () => pick("tasks") },
-              { label: "Cubicles", icon: "../w98_joystick.ico", size: "sm", onClick: () => pick("cubicles") },
-            ],
-          },
-        ],
+      submenu: [...listed("programs"), folder("App", "app"), folder("Tools", "tools"), folder("Toys", "toys")],
     },
     { separator: true },
     { label: "Shut Down...", icon: "../w95_shutdown.ico", size: "lg", onClick: handleShutdown },

@@ -1,5 +1,5 @@
 import { Layout, WindowBox, WindowId } from "@/components/windows/windowTypes";
-import { WINDOW_TITLES } from "@/components/windows/windowMeta";
+import { isWindowId } from "@/components/windows/programs";
 
 /**
  * The desktop as it was left: which windows were open, in what stacking order,
@@ -37,10 +37,6 @@ export function canPersistDesktop(): boolean {
 }
 
 const LAYOUTS: Layout[] = ["normal", "minimized", "maximized"];
-
-function isWindowId(value: unknown): value is WindowId {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(WINDOW_TITLES, value);
-}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
