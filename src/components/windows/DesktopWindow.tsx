@@ -1,16 +1,37 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Toolbar, Window, WindowContent, WindowHeader } from "react95";
 import { Z } from "@/constants/zIndex";
 import MeltFilter, { MELT_FILTER_ID, meltStyle } from "@/components/windows/MeltFilter";
 import FrameLightsStyle, { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
-import { Layout } from "@/components/windows/windowTypes";
+import { Layout, WindowBox } from "@/components/windows/windowTypes";
 
 type DesktopWindowProps = {
   title: string;
   titleIcon?: string;
   layout: Layout;
+  /**
+   * Where this window sits in the desktop's stack — 0 is the bottom. Only the
+   * focused window is on top, and focusing one raises it.
+   */
+  stackIndex?: number;
+  /** Whether this is the one window taking the keyboard and wearing a lit title bar. */
+  active?: boolean;
+  /** A click anywhere in the frame asks the desktop to bring this window forward. */
+  onFocus?: () => void;
+  /**
+   * How far down and right to step this window from the middle, so a second
+   * window opened on top of a first doesn't land exactly on it.
+   */
+  cascadeX?: number;
+  cascadeY?: number;
+  /**
+   * Where the window has been dragged to and how big it has been made. Held by
+   * the desktop, not the window, so it can be saved and brought back.
+   */
+  box?: WindowBox | null;
+  onBoxChange?: (box: WindowBox) => void;
   normalWidth?: number;
   normalHeight: number;
   normalPosition?: "center" | "topRightQuadrantCenter";
@@ -23,7 +44,6 @@ type DesktopWindowProps = {
   toolbarJitterY?: number;
   onClose: () => void;
   onMinimize: () => void;
-  onRestore: () => void;
   onToggleMaximize: () => void;
   controlsDisabled?: boolean;
   /**
@@ -44,6 +64,13 @@ export default function DesktopWindow({
   title,
   titleIcon,
   layout,
+  stackIndex = 0,
+  active = true,
+  onFocus,
+  cascadeX = 0,
+  cascadeY = 0,
+  box = null,
+  onBoxChange,
   normalWidth = 280,
   normalHeight,
   normalPosition = "center",
@@ -56,7 +83,6 @@ export default function DesktopWindow({
   toolbarJitterY = 0,
   onClose,
   onMinimize,
-  onRestore,
   onToggleMaximize,
   controlsDisabled = false,
   melt,
@@ -65,20 +91,23 @@ export default function DesktopWindow({
   children,
 }: DesktopWindowProps) {
   const isMax = layout === "maximized";
-  const isDocked = layout === "docked";
+  const isMinimized = layout === "minimized";
+  // Minimizing must not cost the window its contents — a tune mid-play, a game
+  // mid-run — so a minimized frame stays mounted and simply stops being drawn.
+  const zIndex = Z.WINDOW + stackIndex;
 
   const TASKBAR_H = 50;
   const GAP = 8;
   const MIN_W = 220;
   const MIN_H = 130;
 
-  // In the normal layout the window is centred with a transform. The first
-  // finished drag — of the title bar or of the resize grip — freezes it to an
-  // explicit top-left + size; this override is cleared whenever the layout
-  // changes or a different window takes over the frame, so positions and sizes
-  // never persist.
-  type Box = { left: number; top: number; width: number; height: number };
-  const [box, setBox] = useState<Box | null>(null);
+  // A window opens centred (stepped along the cascade) at its natural size, and
+  // the moment it's on screen that spot is pinned as an explicit top-left +
+  // size. From then on it stays exactly there: resizing the browser leaves it
+  // alone, and only a drag of the title bar or the resize grip moves it. That
+  // box belongs to the desktop, which remembers it across visits, and it
+  // outlives a trip to the taskbar or to full screen.
+  type Box = WindowBox;
   // Like Windows 95, a drag doesn't move the window itself: a dotted outline
   // follows the pointer and the window jumps there when you let go. Escape (or a
   // cancelled pointer) drops the outline and leaves the window where it was.
@@ -87,9 +116,27 @@ export default function DesktopWindow({
   const headerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setBox(null);
     setGhost(null);
-  }, [layout, title, normalWidth, normalHeight]);
+  }, [layout]);
+
+  // Pin a window that hasn't got a box yet to wherever it has just been laid
+  // out. It's measured before paint, so there's no visible jump — the window
+  // simply stops being centred by CSS and starts being held where it is.
+  useLayoutEffect(() => {
+    if (box || layout !== "normal") return;
+    const frame = headerRef.current?.parentElement;
+    if (!frame) return;
+    const rect = frame.getBoundingClientRect();
+    // The music window's shake rides on the same transform; take it back out
+    // so the pinned spot is where the window really lives.
+    onBoxChange?.({
+      left: Math.round(rect.left - jitterX),
+      top: Math.round(rect.top - jitterY),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box, layout]);
 
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -129,7 +176,7 @@ export default function DesktopWindow({
       document.body.style.userSelect = prevUserSelect;
       document.body.style.cursor = prevCursor;
       setGhost(null);
-      if (commit && latest) setBox(latest);
+      if (commit && latest) onBoxChange?.(latest);
     };
     const onUp = () => finish(true);
     const onCancel = () => finish(false);
@@ -143,7 +190,7 @@ export default function DesktopWindow({
   };
 
   const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isMax || isDocked || controlsDisabled) return;
+    if (isMax || isMinimized || controlsDisabled) return;
     // The title-bar controls are buttons first and drag handles never.
     if ((e.target as HTMLElement).closest("button")) return;
     const frame = headerRef.current?.parentElement;
@@ -163,7 +210,7 @@ export default function DesktopWindow({
   };
 
   const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isMax || isDocked || controlsDisabled) return;
+    if (isMax || isMinimized || controlsDisabled) return;
     const frame = gripRef.current?.parentElement;
     if (!frame) return;
 
@@ -179,12 +226,6 @@ export default function DesktopWindow({
   };
 
   const NORMAL_W = normalWidth;
-  const DOCK_W = 200;
-  const DOCK_H = 60;
-  const TITLE_CHAR_PX = 10;
-  const DOCK_BASE_CHROME_PX = 124; // tighter header padding + 3 control buttons
-  const TITLE_ICON_PX = titleIcon ? 22 : 0;
-  const dockWidth = Math.max(DOCK_W, DOCK_BASE_CHROME_PX + TITLE_ICON_PX + title.length * TITLE_CHAR_PX);
   const normalLeft = normalPosition === "topRightQuadrantCenter" ? "75vw" : "50%";
   const normalTop = normalPosition === "topRightQuadrantCenter" ? `calc(25vh + ${TASKBAR_H / 2}px)` : `calc(50% + ${TASKBAR_H / 2}px)`;
   const outline = Math.max(0, Math.min(1, effectOutline));
@@ -210,73 +251,77 @@ export default function DesktopWindow({
         left: GAP,
         width: `calc(100vw - ${GAP * 2}px)`,
         height: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
-        zIndex: Z.WINDOW,
+        zIndex,
         display: "flex",
         flexDirection: "column",
         boxShadow,
       }
-    : isDocked
+    : box
       ? {
           position: "absolute",
-          left: GAP,
-          bottom: GAP,
-          width: dockWidth,
-          height: DOCK_H,
-          zIndex: Z.WINDOW,
+          // Held where it was put. clamp() only steps in when the browser
+          // shrinks past the window, keeping enough of it on screen to grab
+          // back; it never moves a window that is still in view.
+          left: `clamp(${KEEP_ON_SCREEN - box.width}px, ${box.left}px, calc(100% - ${KEEP_ON_SCREEN}px))`,
+          top: `clamp(${TASKBAR_H}px, ${box.top}px, calc(100% - ${KEEP_ON_SCREEN}px))`,
+          transform: jitterX || jitterY ? `translate(${jitterX}px, ${jitterY}px)` : undefined,
+          width: box.width,
+          height: box.height,
+          maxWidth: `calc(100vw - ${GAP * 2}px)`,
+          maxHeight: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
+          zIndex,
           display: "flex",
           flexDirection: "column",
           boxShadow,
         }
-      : box
-        ? {
-            position: "absolute",
-            left: box.left,
-            top: box.top,
-            width: box.width,
-            height: box.height,
-            zIndex: Z.WINDOW,
-            display: "flex",
-            flexDirection: "column",
-            boxShadow,
-          }
-        : {
-            position: "absolute",
-            left: normalLeft,
-            top: normalTop,
-            transform: `translate(calc(-50% + ${jitterX}px), calc(-50% + ${jitterY}px))`,
-            width: NORMAL_W,
-            height: normalHeight,
-            // A window's natural size is a wish, not a promise: on a phone the
-            // screen is narrower than any of them, and a window centred at its
-            // full width hangs off both edges with its controls out of reach.
-            maxWidth: `calc(100vw - ${GAP * 2}px)`,
-            maxHeight: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
-            zIndex: Z.WINDOW,
-            display: "flex",
-            flexDirection: "column",
-            boxShadow,
-          };
+      : {
+          position: "absolute",
+          left: normalLeft,
+          top: normalTop,
+          // The cascade step is a desktop-sized step: on a phone a whole one would
+          // walk the third window off the edge, so it shrinks with the screen.
+          transform: `translate(calc(-50% + ${jitterX}px + min(${cascadeX}px, ${cascadeX * 0.1}vw)), calc(-50% + ${jitterY}px + min(${cascadeY}px, ${cascadeY * 0.1}vh)))`,
+          width: NORMAL_W,
+          height: normalHeight,
+          // A window's natural size is a wish, not a promise: on a phone the
+          // screen is narrower than any of them, and a window centred at its
+          // full width hangs off both edges with its controls out of reach.
+          maxWidth: `calc(100vw - ${GAP * 2}px)`,
+          maxHeight: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
+          zIndex,
+          display: "flex",
+          flexDirection: "column",
+          boxShadow,
+        };
+
+  // Sent to the taskbar, the window keeps its place and its size — it just isn't
+  // painted and can't be touched. visibility rather than display so everything
+  // inside keeps the box it measured itself against: canvases don't collapse to
+  // nothing and then have to be re-laid-out on the way back.
+  if (isMinimized) {
+    style.visibility = "hidden";
+    style.pointerEvents = "none";
+    style.zIndex = Z.WINDOW - 1;
+  }
 
   Object.assign(style, meltStyle(meltAmount));
 
   // The grip lives in its own corner gutter so it never lands on a scrollbar or
   // content edge. The gutter tracks the layout only (not controlsDisabled) so
   // toggling the title-bar controls doesn't reflow the window body.
-  const hasResizeGutter = !isMax && !isDocked;
+  const hasResizeGutter = !isMax && !isMinimized;
   // The title bar drags and the grip resizes under exactly the same conditions.
   const isDraggable = hasResizeGutter && !controlsDisabled;
   const showResizeGrip = isDraggable;
 
   // Double-clicking the title bar throws the window between maximised and
-  // normal, the way every window on this desktop's namesake does — and pulls a
-  // docked one back out, which is the only thing "restore" can mean down there.
+  // normal, the way every window on this desktop's namesake does.
   const onTitleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (controlsDisabled) return;
     // The controls handle their own clicks; a stray second one isn't a resize.
     if ((e.target as HTMLElement).closest("button")) return;
     e.preventDefault();
-    if (isDocked) onRestore();
-    else onToggleMaximize();
+    onToggleMaximize();
   };
 
   return (
@@ -292,7 +337,7 @@ export default function DesktopWindow({
           top: ghost.top,
           width: ghost.width,
           height: ghost.height,
-          zIndex: Z.WINDOW + 1,
+          zIndex: zIndex + 1,
           pointerEvents: "none",
           boxSizing: "border-box",
           padding: 3,
@@ -306,9 +351,10 @@ export default function DesktopWindow({
         }}
       />
     )}
-    <Window style={style}>
+    <Window style={style} onPointerDownCapture={onFocus}>
       <WindowHeader
         ref={headerRef}
+        active={active}
         onPointerDown={startDrag}
         onDoubleClick={onTitleDoubleClick}
         style={{
@@ -337,10 +383,7 @@ export default function DesktopWindow({
 
         <div style={{ display: "flex", gap: 2 }}>
           <Button
-            onClick={() => {
-              if (layout === "docked") onRestore();
-              else onMinimize();
-            }}
+            onClick={onMinimize}
             disabled={controlsDisabled}
             square
             size="sm"
@@ -365,7 +408,7 @@ export default function DesktopWindow({
         </div>
       </WindowHeader>
 
-      {toolbar && !isDocked && (
+      {toolbar && (
         <Toolbar
           style={{
             padding: "1px 1px",
@@ -384,23 +427,21 @@ export default function DesktopWindow({
         </Toolbar>
       )}
 
-      {!isDocked && (
-        <WindowContent
-          style={{
-            flex: "1 1 auto",
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            padding: 6,
-            paddingBottom: hasResizeGutter ? 15 : 6,
-            gap: 2,
-            position: "relative",
-            zIndex: 1,
-          }}
-        >
-          {children}
-        </WindowContent>
-      )}
+      <WindowContent
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          padding: 6,
+          paddingBottom: hasResizeGutter ? 15 : 6,
+          gap: 2,
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        {children}
+      </WindowContent>
 
       {showResizeGrip && (
         <div

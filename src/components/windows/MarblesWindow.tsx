@@ -68,6 +68,8 @@ type MarblesWindowProps = {
    * whoever sent it.
    */
   ghost?: boolean;
+  /** Whether this is the focused window — only then does it take the keyboard. */
+  active?: boolean;
   /** A run that came in on a pasted code, to be raced from the first go. */
   sent?: { time: number; run: Trail } | null;
   /** Called whenever there is a different ghost, or a different run to send. */
@@ -164,7 +166,7 @@ function turnToward(from: number, to: number) {
  * the finish up and stops the clock. The whole game is in the picture.
  */
 const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(function MarblesWindow(
-  { seed, ghost = true, sent, onGhosts, onResult },
+  { seed, ghost = true, active = true, sent, onGhosts, onResult },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -205,6 +207,15 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
   const sentRef = useRef<{ time: number; run: Trail } | null>(sent ?? null);
 
   const keysRef = useRef(new Set<string>());
+  // Only the focused window hears the keyboard. Held keys are let go the moment
+  // it loses the focus, or they'd stay held down while you're somewhere else.
+  const focusedRef = useRef(active);
+  useEffect(() => {
+    focusedRef.current = active;
+    if (!active) {
+      keysRef.current.clear();
+    }
+  }, [active]);
   /** Raised by a press of the jump key, lowered by the frame that spends it. */
   const jumpRef = useRef(false);
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -242,6 +253,7 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
         target.tagName === "SELECT");
 
     const down = (event: KeyboardEvent) => {
+      if (!focusedRef.current) return;
       if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
       if (!MOVE_KEYS.has(event.code)) return;
       event.preventDefault();

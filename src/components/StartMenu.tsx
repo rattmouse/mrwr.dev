@@ -5,8 +5,10 @@ import { AppBar, Button, MenuList, MenuListItem, Separator, Toolbar } from "reac
 import { Z } from "@/constants/zIndex";
 import { Sizes } from "react95/dist/types";
 import { usePower } from "@/components/power/PowerProvider";
-import { WindowId } from "@/components/windows/windowTypes";
+import { WindowAction, WindowId } from "@/components/windows/windowTypes";
 import SearchBox from "@/components/SearchBox";
+import TaskbarButtons, { TaskbarItem } from "@/components/TaskbarButtons";
+import PerfMeter from "@/components/PerfMeter";
 import type { SearchHistorySession } from "@/lib/searchHistory.types";
 
 type MenuAction = () => void;
@@ -212,10 +214,18 @@ export default function StartMenu({
   openWindow,
   searchHistory = [],
   onOpenSearch,
+  tasks = [],
+  focused = null,
+  onTaskClick,
+  onTaskAction,
 }: {
   openWindow: (id: WindowId) => void;
   searchHistory?: SearchHistorySession[];
   onOpenSearch?: (session: SearchHistorySession, text: string) => void;
+  tasks?: TaskbarItem[];
+  focused?: WindowId | null;
+  onTaskClick?: (id: WindowId) => void;
+  onTaskAction?: (id: WindowId, action: WindowAction) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -307,8 +317,8 @@ export default function StartMenu({
 
   return (
     <AppBar style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: Z.TASKBAR }}>
-      <Toolbar style={{ justifyContent: "space-between" }}>
-        <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
+      <Toolbar style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+        <div ref={rootRef} style={{ position: "relative", display: "inline-block", flex: "0 0 auto" }}>
           <Button
             onClick={() => setOpen((v) => !v)}
             active={open}
@@ -323,6 +333,15 @@ export default function StartMenu({
             </div>
           )}
         </div>
+
+        <TaskbarButtons
+          tasks={tasks}
+          focused={focused}
+          onTaskClick={(id) => onTaskClick?.(id)}
+          onTaskAction={(id, action) => onTaskAction?.(id, action)}
+        />
+
+        <PerfMeter windowCount={tasks.length} />
 
         <SearchBox history={searchHistory} onOpen={onOpenSearch} />
       </Toolbar>

@@ -57,6 +57,8 @@ export type MidiWindowHandle = {
 
 type MidiWindowProps = {
   maximized?: boolean;
+  /** Whether this is the focused window — only then does the keyboard play it. */
+  active?: boolean;
   onMetersOpenChange?: (open: boolean) => void;
   onScopeOpenChange?: (open: boolean) => void;
   onPlayingChange?: (playing: boolean) => void;
@@ -964,6 +966,7 @@ function PlayableKeyboard({
 const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWindow(
   {
     maximized = false,
+    active = true,
     onMetersOpenChange,
     onScopeOpenChange,
     onPlayingChange,
@@ -1543,6 +1546,16 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     return () => cancelAnimationFrame(raf);
   }, [metersOpen]);
 
+  // Only the focused window hears the keyboard. Held keys are let go the moment
+  // it loses the focus, or they'd stay held down while you're somewhere else.
+  const focusedRef = useRef(active);
+  useEffect(() => {
+    focusedRef.current = active;
+    if (active) return;
+    pressedCodesRef.current.forEach((note) => handleKeyNote(note, false));
+    pressedCodesRef.current.clear();
+  }, [active, handleKeyNote]);
+
   // Computer-keyboard playing. A typing target — the search box, Notepad —
   // always wins so letters go there instead; playback disables it too.
   useEffect(() => {
@@ -1554,6 +1567,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
       );
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!focusedRef.current) return;
       if (playingRef.current || event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
       if (event.code === "KeyZ") {

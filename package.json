@@ -1,6 +1,6 @@
 {
   "name": "mrwr.dev",
-  "version": "5.3.1",
+  "version": "6.0.0",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-react95.mjs",

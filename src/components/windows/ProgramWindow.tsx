@@ -33,7 +33,8 @@ import CubiclesWindow from "@/components/windows/CubiclesWindow";
 import BashWindow from "@/components/windows/BashWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
-import { Layout, ProgramWindowId, WindowId } from "@/components/windows/windowTypes";
+import { Layout, ProgramWindowId, WindowBox, WindowId } from "@/components/windows/windowTypes";
+import { WINDOW_ICONS, WINDOW_TITLES } from "@/components/windows/windowMeta";
 import { VersionEntry } from "@/lib/versions.types";
 import type { SearchIssueLink } from "@/lib/searchHistory.types";
 import { randomSeed, readCode, writeCode } from "@/lib/marblesShare";
@@ -81,6 +82,14 @@ function downloadBlob(data: string | Uint8Array | Blob, filename: string, mime?:
 type ProgramWindowProps = {
   id: ProgramWindowId;
   layout: Layout;
+  stackIndex?: number;
+  /** The focused window. Only it takes the keyboard, so the games don't fight over it. */
+  active?: boolean;
+  onFocus?: () => void;
+  cascadeX?: number;
+  cascadeY?: number;
+  box?: WindowBox | null;
+  onBoxChange?: (box: WindowBox) => void;
   versions: VersionEntry[];
   notepadDoc?: NotepadIncoming | null;
   onNotepadDocApplied?: () => void;
@@ -88,7 +97,6 @@ type ProgramWindowProps = {
   onIssueRevealed?: () => void;
   onClose: () => void;
   onMinimize: () => void;
-  onRestore: () => void;
   onToggleMaximize: () => void;
   onOpenWindow?: (id: WindowId) => void;
 };
@@ -96,6 +104,13 @@ type ProgramWindowProps = {
 export default function ProgramWindow({
   id,
   layout,
+  stackIndex = 0,
+  active = true,
+  onFocus,
+  cascadeX = 0,
+  cascadeY = 0,
+  box = null,
+  onBoxChange,
   versions,
   notepadDoc,
   onNotepadDocApplied,
@@ -103,7 +118,6 @@ export default function ProgramWindow({
   onIssueRevealed,
   onClose,
   onMinimize,
-  onRestore,
   onToggleMaximize,
   onOpenWindow,
 }: ProgramWindowProps) {
@@ -247,58 +261,8 @@ export default function ProgramWindow({
     [],
   );
 
-  const title =
-    id === "notepad"
-      ? "notepad.exe"
-      : id === "issues"
-        ? "issues.exe"
-        : id === "changes"
-          ? "changes.exe"
-          : id === "music"
-            ? "strudel.cc"
-            : id === "midi"
-              ? "midi.exe"
-              : id === "paint"
-                ? "paint.exe"
-                : id === "party"
-                  ? "party.webp"
-                  : id === "player"
-                    ? "player.exe"
-                    : id === "marbles"
-                      ? "marbles.exe"
-                      : id === "tasks"
-                        ? "tasks.exe"
-                        : id === "cubicles"
-                          ? "cubicles.exe"
-                          : id === "bash"
-                            ? "cmd.exe"
-                            : "mrwr.dev";
-  const titleIcon =
-    id === "welcome"
-      ? "../w95_desktop.ico"
-      : id === "notepad"
-        ? "../w95_notepad.ico"
-        : id === "issues"
-          ? "../w98_issues.ico"
-          : id === "changes"
-            ? "../w95_changes.ico"
-            : id === "midi"
-              ? "../w98_music.ico"
-              : id === "paint"
-                ? "../w95_paint.ico"
-                : id === "party"
-                  ? "../w98_regedit.ico"
-                  : id === "player"
-                    ? "../w95_player.ico"
-                    : id === "marbles"
-                      ? "../w98_world_star.ico"
-                      : id === "tasks"
-                        ? "../w98_installer_file_gear.ico"
-                        : id === "cubicles"
-                          ? "../w98_joystick.ico"
-                          : id === "bash"
-                            ? "../w98_console_prompt.ico"
-                            : "../w98_repl.ico";
+  const title = WINDOW_TITLES[id];
+  const titleIcon = WINDOW_ICONS[id];
 
   const normalHeight =
     id === "welcome" ? 160
@@ -1111,6 +1075,13 @@ export default function ProgramWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
+      stackIndex={stackIndex}
+      active={active}
+      onFocus={onFocus}
+      cascadeX={cascadeX}
+      cascadeY={cascadeY}
+      box={box}
+      onBoxChange={onBoxChange}
       normalWidth={normalWidth}
       normalHeight={normalHeight}
       effectOutline={musicFrameEffect}
@@ -1122,7 +1093,6 @@ export default function ProgramWindow({
       toolbarJitterY={id === "music" ? musicTextJitter.y * 0.5 : 0}
       onClose={onClose}
       onMinimize={onMinimize}
-      onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
       controlsDisabled={contentModalOpen}
       melt={id === "party" ? frame.melt : undefined}
@@ -1201,6 +1171,7 @@ export default function ProgramWindow({
       {id === "midi" && (
         <MidiWindow
           ref={midiRef}
+          active={active}
           maximized={layout === "maximized"}
           onMetersOpenChange={setMidiMetersOpen}
           onScopeOpenChange={setMidiScopeOpen}
@@ -1221,6 +1192,7 @@ export default function ProgramWindow({
         <div style={{ flex: "1 1 auto", minHeight: 0, minWidth: 0, display: "flex", position: "relative" }}>
           <MarblesWindow
             ref={marblesRef}
+            active={active}
             seed={marblesSeed}
             ghost={marblesGhost}
             sent={marblesSent}
@@ -1295,9 +1267,9 @@ export default function ProgramWindow({
         </div>
       )}
 
-      {id === "tasks" && <TasksWindow />}
+      {id === "tasks" && <TasksWindow active={active} />}
 
-      {id === "cubicles" && <CubiclesWindow />}
+      {id === "cubicles" && <CubiclesWindow active={active} />}
       {id === "bash" && <BashWindow onOpenWindow={onOpenWindow} onClose={onClose} />}
     </DesktopWindow>
   );

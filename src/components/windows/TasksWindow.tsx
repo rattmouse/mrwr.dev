@@ -304,7 +304,7 @@ function RunReport({
   );
 }
 
-export default function TasksWindow() {
+export default function TasksWindow({ active = true }: { active?: boolean }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sizeRef = useRef({ width: 600, height: 400 });
@@ -312,6 +312,16 @@ export default function TasksWindow() {
   const sheetRef = useRef<GuySheet | null>(null);
   const keysRef = useRef<Set<string>>(new Set());
   const stickRef = useRef({ x: 0, y: 0 });
+  // Only the focused window hears the keyboard. Held keys are let go the moment
+  // it loses the focus, or they'd stay held down while you're somewhere else.
+  const focusedRef = useRef(active);
+  useEffect(() => {
+    focusedRef.current = active;
+    if (!active) {
+      keysRef.current.clear();
+      stickRef.current = { x: 0, y: 0 };
+    }
+  }, [active]);
 
   const [phase, setPhase] = useState<GamePhase>("ready");
   const [choices, setChoices] = useState<Upgrade[]>([]);
@@ -336,6 +346,7 @@ export default function TasksWindow() {
       (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
 
     const down = (event: KeyboardEvent) => {
+      if (!focusedRef.current) return;
       if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
       if (PAUSE_KEYS.has(event.code)) {
         const run = runRef.current;
