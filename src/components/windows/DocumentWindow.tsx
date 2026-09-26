@@ -364,6 +364,17 @@ function fitWithin(room: { w: number; h: number }, aspect: number | undefined): 
   return { w: Math.round(w), h: Math.round(w / a) };
 }
 
+// Two crossed arrows, drawn on a 16px grid in the same flat black as the
+// title-bar glyphs.
+function ShuffleIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
+      <path d="M1 4.5h3l6 7h2M1 11.5h3l6-7h2" fill="none" stroke="currentColor" strokeWidth={1.5} />
+      <path d="M12 1.5l3 3-3 3zM12 8.5l3 3-3 3z" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default function DocumentWindow({
   id,
   layout,
@@ -1004,7 +1015,7 @@ export default function DocumentWindow({
             gap: 8,
           }}
         >
-          <div style={{ alignSelf: "stretch", display: "flex", gap: 4 }}>
+          <div style={{ alignSelf: "stretch", display: "flex", flexWrap: "wrap", gap: 4 }}>
             {([
               { value: "cards", label: "Cards" },
               { value: "albums", label: "Albums" },
@@ -1014,13 +1025,24 @@ export default function DocumentWindow({
               <Button
                 key={value}
                 size="sm"
-                style={{ fontWeight: "bold" }}
+                style={{ fontWeight: "bold", padding: "0 7px" }}
                 active={category === value}
                 onClick={() => setCategory(value)}
               >
                 {label}
               </Button>
             ))}
+            <Button
+              size="sm"
+              square
+              style={{ marginLeft: "auto", flex: "0 0 auto" }}
+              disabled={albumsLoading || albums.length === 0}
+              onClick={() => setShuffleCount((n) => n + 1)}
+              aria-label="Shuffle"
+              title="Shuffle"
+            >
+              <ShuffleIcon />
+            </Button>
           </div>
 
           <GroupBox
@@ -1116,7 +1138,7 @@ export default function DocumentWindow({
           {/* One line each, whatever the title: a caption that wrapped would
               change the size of the scene above it every time you picked a
               different tile. */}
-          <div style={{ alignSelf: "stretch", display: "flex", alignItems: "center", gap: 4, flex: "0 0 auto" }}>
+          <div style={{ alignSelf: "stretch", display: "flex", flex: "0 0 auto" }}>
             <div style={{ textAlign: "center", flex: "1 1 auto", minWidth: 0 }}>
               {[album.title, album.artist].map((line, index) => (
                 <div
@@ -1133,13 +1155,6 @@ export default function DocumentWindow({
                 </div>
               ))}
             </div>
-            <Button
-              size="sm"
-              disabled={albumsLoading || albums.length === 0}
-              onClick={() => setShuffleCount((n) => n + 1)}
-            >
-              Shuffle
-            </Button>
           </div>
         </div>
       )}

@@ -89,7 +89,7 @@ export const PROGRAMS = {
     kind: "document",
     title: "collections.exe",
     icon: "../w98_collections_cards.ico",
-    size: { width: 340, height: 356 },
+    size: { width: 360, height: 356 },
     menu: { label: "Collections", folder: "toys" },
   },
   music: {
