@@ -283,11 +283,8 @@ function scatterTiles(
 // Where every tile was left, per tab, so a reload — or a resize, a trip to
 // another tab, or maximizing the window — puts them all back rather than
 // dealing a fresh pile. A pile is only ever dealt the first time a tab is
-// opened (or on Shuffle). Positions are kept as fractions of the space they
-// were dropped in: across the desktop, or inside the maximized window, which
-// covers nearly the same stretch of screen — so a tile stays about where it
-// was on screen either way, and a different screen size stretches the
-// arrangement instead of scrambling it.
+// opened (or on Shuffle). Positions are kept as fractions of the screen, so a
+// different screen size stretches the arrangement instead of scrambling it.
 const TILE_LAYOUT_KEY = "mrwr:collections";
 
 type SavedTile = { x: number; y: number; rot: number; z: number };
@@ -357,7 +354,7 @@ function fitBox(size: number, aspect: number | undefined): { w: number; h: numbe
 }
 
 // Largest box of the given aspect ratio that fits inside `room` — how the
-// maximized frame grows to whatever space the window actually has.
+// frame grows to whatever space the window actually has.
 function fitWithin(room: { w: number; h: number }, aspect: number | undefined): { w: number; h: number } {
   const a = aspect && aspect > 0 ? aspect : 1;
   const w = Math.min(room.w, room.h * a);
@@ -408,12 +405,11 @@ export default function DocumentWindow({
           ? EMPTY_CARD
           : EMPTY_ALBUM;
   const album = albums[activeAlbum] ?? emptyEntry;
-  const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
-  const iconSize = layout === "maximized" ? 58 : 42;
-  // In the normal (small) window the tiles are flung across the whole desktop
-  // via a portal that floats above the window chrome; maximized keeps them
-  // inside the window scene.
-  const scatterToDesktop = id === "collections" && layout === "normal";
+  const iconSize = 42;
+  // The tiles are flung across the whole desktop via a portal that floats above
+  // the window chrome — maximized or not, they are the same tiles in the same
+  // places. Minimized, they go away with the window.
+  const scatterToDesktop = id === "collections" && layout !== "minimized";
   const albumsSceneRef = useRef<HTMLDivElement | null>(null);
   const [albumsSceneSize, setAlbumsSceneSize] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
@@ -421,23 +417,16 @@ export default function DocumentWindow({
   // proportions when we know them (cards, paintings), so nothing gets cropped.
   // Album covers have no aspect data and stay square.
   //
-  // Maximized, the frame takes all the room the scene has, less a band wide
-  // enough for the tiles to scatter into — any tighter and the scatter's own
-  // clamp would start dropping tiles on top of the picture. Until the scene has
-  // been measured it falls back to the fixed size the window opens at.
-  const framePadding = iconSize + 32;
+  // The tiles are out on the desktop, so the picture takes the whole scene and
+  // grows and shrinks with the window. Until the scene has been measured it
+  // falls back to the size the window opens at.
   const frameRoom =
-    layout === "maximized" && albumsSceneSize.width > 0 && albumsSceneSize.height > 0
-      ? {
-          w: Math.max(280, albumsSceneSize.width - framePadding * 2),
-          h: Math.max(280, albumsSceneSize.height - framePadding),
-        }
-      : layout === "normal" && albumsSceneSize.width > 0 && albumsSceneSize.height > 0
-        ? // The tiles are out on the desktop, so the picture can take the whole
-          // scene and grow and shrink with the window.
-          { w: Math.max(60, albumsSceneSize.width - 12), h: Math.max(60, albumsSceneSize.height - 12) }
-        : { w: layout === "maximized" ? 280 : 144, h: layout === "maximized" ? 280 : 144 };
+    albumsSceneSize.width > 0 && albumsSceneSize.height > 0
+      ? { w: Math.max(60, albumsSceneSize.width - 12), h: Math.max(60, albumsSceneSize.height - 12) }
+      : { w: 144, h: 144 };
   const { w: frameWidth, h: frameHeight } = fitWithin(frameRoom, album.aspect);
+  // The small scan is plenty for a small frame; a big one gets the full scan.
+  const albumImage = getSizedCover(album.image, Math.max(frameWidth, frameHeight) > 300 ? "high" : "low");
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
   const [albumTilePositions, setAlbumTilePositions] = useState<AlbumTilePosition[]>([]);
   // Stacking order, like windows on the desktop: whatever you touched last sits
@@ -636,28 +625,15 @@ export default function DocumentWindow({
     return () => window.removeEventListener("resize", update);
   }, [id]);
 
-  // Where the tiles live, in the coordinate space of their container. Desktop
-  // mode: a fixed portal pinned to the viewport origin. Window mode: the scene
-  // div inside the maximized window.
-  const getScatterField = () => {
-    if (scatterToDesktop) {
-      return {
-        originLeft: 0,
-        originTop: 0,
-        width: window.innerWidth,
-        height: window.innerHeight,
-        insetTop: TASKBAR_H,
-      };
-    }
-    const rect = albumsSceneRef.current?.getBoundingClientRect();
-    return {
-      originLeft: rect?.left ?? 0,
-      originTop: rect?.top ?? 0,
-      width: rect?.width ?? 0,
-      height: rect?.height ?? 0,
-      insetTop: 0,
-    };
-  };
+  // Where the tiles live: a fixed portal pinned to the viewport origin, kept
+  // below the taskbar.
+  const getScatterField = () => ({
+    originLeft: 0,
+    originTop: 0,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    insetTop: TASKBAR_H,
+  });
 
   const clampTilePosition = (x: number, y: number, tileW: number, tileH: number) => {
     const field = getScatterField();
@@ -671,33 +647,17 @@ export default function DocumentWindow({
     };
   };
 
-  const fieldWidth = scatterToDesktop ? viewportSize.width : albumsSceneSize.width;
-  const fieldHeight = scatterToDesktop ? viewportSize.height : albumsSceneSize.height;
+  const fieldWidth = viewportSize.width;
+  const fieldHeight = viewportSize.height;
 
-  // What the rest of a fresh deal has to keep off. On the desktop: every window
-  // on screen, this one included, so the tiles land on bare desktop wherever
-  // there is any. Inside the maximized window: the centre frame — but never so
-  // wide there is nowhere left.
-  const getAvoidRects = (width: number, height: number): Rect[] => {
-    if (scatterToDesktop) {
-      return Array.from(document.querySelectorAll<HTMLElement>('[data-desktop-window="true"]')).map((node) => {
-        const r = node.getBoundingClientRect();
-        return { x: r.left - 12, y: r.top - 12, w: r.width + 24, h: r.height + 24 };
-      });
-    }
-    // Room for *any* picture in the set, not just the one on show, so picking a
-    // differently shaped one never lands it underneath the tiles.
-    const room = { w: Math.max(280, width - framePadding * 2), h: Math.max(280, height - framePadding) };
-    const frame = { w: 0, h: 0 };
-    for (const entry of albums) {
-      const fit = fitWithin(room, entry.aspect);
-      frame.w = Math.max(frame.w, fit.w);
-      frame.h = Math.max(frame.h, fit.h);
-    }
-    const avoidW = Math.min(frame.w + 16, Math.max(0, width - iconSize * 2 - 24));
-    const avoidH = Math.min(frame.h + 16, Math.max(0, height - iconSize - 16));
-    return [{ x: (width - avoidW) / 2, y: (height - avoidH) / 2, w: avoidW, h: avoidH }];
-  };
+  // What a fresh deal has to keep off: every window on screen, this one
+  // included, so the tiles land on bare desktop wherever there is any. (With
+  // a window maximized there is none, and they fall where they fall.)
+  const getAvoidRects = (): Rect[] =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-desktop-window="true"]')).map((node) => {
+      const r = node.getBoundingClientRect();
+      return { x: r.left - 12, y: r.top - 12, w: r.width + 24, h: r.height + 24 };
+    });
 
   const saveLayout = (positions: AlbumTilePosition[], stack: number[], active: number) => {
     if (positions.length !== albums.length || placedForRef.current?.slot !== layoutSlot) return;
@@ -762,7 +722,7 @@ export default function DocumentWindow({
       const dealt = scatterTiles(
         missing.map((index) => boxes[index]),
         field,
-        getAvoidRects(width, height),
+        getAvoidRects(),
         placed
       );
       missing.forEach((index, i) => {
@@ -1062,7 +1022,7 @@ export default function DocumentWindow({
               style={{
                 width: "100%",
                 height: "100%",
-                minHeight: layout === "maximized" ? 280 : 176,
+                minHeight: 176,
                 position: "relative",
                 overflow: "hidden",
                 touchAction: "none",
@@ -1091,7 +1051,7 @@ export default function DocumentWindow({
                 }}
               >
                 {albumsLoading ? (
-                  <Hourglass size={layout === "maximized" ? 52 : 38} />
+                  <Hourglass size={38} />
                 ) : (
                   <>
                     {albumImage && (
@@ -1115,7 +1075,6 @@ export default function DocumentWindow({
                 )}
               </div>
 
-              {!albumsLoading && !scatterToDesktop && albums.map(renderAlbumTile)}
             </div>
           </GroupBox>
 
