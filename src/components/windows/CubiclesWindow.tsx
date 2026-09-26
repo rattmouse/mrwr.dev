@@ -45,6 +45,12 @@ const ECHO_SCALE = 0.5;
  *  glass lands on screen — narrower than this and the desktop it's showing
  *  stops being usable, crisp or not. */
 const SCREEN_MIN_WIDTH = 320;
+/** ...nor grow it past this, however big a maximized window makes the glass.
+ *  Past a certain point a bigger logical size just means a bigger iframe to
+ *  lay out for no crispness gain, since the transform would otherwise have to
+ *  upscale it to fill the quad — the same smeared-text problem shrinking too
+ *  far causes, just via magnification instead. */
+const SCREEN_MAX_WIDTH = 1280;
 
 /**
  * The site inside the monitor is this same site, so opening the cubicle in
@@ -285,7 +291,7 @@ export default function CubiclesWindow() {
       if (seatedQuad) {
         const [p0, p1] = seatedQuad;
         const quadWidth = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-        const screenWidth = Math.min(SCREEN.width, Math.max(SCREEN_MIN_WIDTH, Math.round(quadWidth)));
+        const screenWidth = Math.min(SCREEN_MAX_WIDTH, Math.max(SCREEN_MIN_WIDTH, Math.round(quadWidth)));
         const screen = screenRef.current;
         screenSizeRef.current = { width: screenWidth, height: Math.round((screenWidth * SCREEN.height) / SCREEN.width) };
         if (screen) {
