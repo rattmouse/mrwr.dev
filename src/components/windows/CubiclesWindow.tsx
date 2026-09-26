@@ -83,7 +83,7 @@ function lerpPose(from: Pose, to: Pose, t: number): Pose {
   };
 }
 
-export default function CubiclesWindow() {
+export default function CubiclesWindow({ active = true }: { active?: boolean }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sizeRef = useRef({ width: 600, height: 420 });
@@ -105,6 +105,16 @@ export default function CubiclesWindow() {
   const rattledRef = useRef(-Infinity);
   const keysRef = useRef<Set<string>>(new Set());
   const stickRef = useRef({ x: 0, y: 0 });
+  // Only the focused window hears the keyboard. Held keys are let go the moment
+  // it loses the focus, or they'd stay held down while you're somewhere else.
+  const focusedRef = useRef(active);
+  useEffect(() => {
+    focusedRef.current = active;
+    if (!active) {
+      keysRef.current.clear();
+      stickRef.current = { x: 0, y: 0 };
+    }
+  }, [active]);
   const dragRef = useRef<{ id: number; x: number; y: number; moved: number } | null>(null);
 
   /** The browser sitting on the monitor, laid over the glass. */
@@ -155,6 +165,7 @@ export default function CubiclesWindow() {
       (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
 
     const down = (event: KeyboardEvent) => {
+      if (!focusedRef.current) return;
       if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.code === "Escape") {
         if (phaseRef.current === "seated") {

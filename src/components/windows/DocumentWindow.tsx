@@ -6,14 +6,21 @@ import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import MockupList from "@/components/projects/MockupList";
 import ProjectList from "@/components/projects/ProjectList";
-import { DocumentWindowId, Layout } from "@/components/windows/windowTypes";
+import { DocumentWindowId, Layout, WindowBox } from "@/components/windows/windowTypes";
+import { WINDOW_ICONS, WINDOW_TITLES } from "@/components/windows/windowMeta";
 
 type DocumentWindowProps = {
   id: DocumentWindowId;
   layout: Layout;
+  stackIndex?: number;
+  active?: boolean;
+  onFocus?: () => void;
+  cascadeX?: number;
+  cascadeY?: number;
+  box?: WindowBox | null;
+  onBoxChange?: (box: WindowBox) => void;
   onClose: () => void;
   onMinimize: () => void;
-  onRestore: () => void;
   onToggleMaximize: () => void;
 };
 
@@ -280,26 +287,23 @@ function fitWithin(room: { w: number; h: number }, aspect: number | undefined): 
 export default function DocumentWindow({
   id,
   layout,
+  stackIndex = 0,
+  active = true,
+  onFocus,
+  cascadeX = 0,
+  cascadeY = 0,
+  box = null,
+  onBoxChange,
   onClose,
   onMinimize,
-  onRestore,
   onToggleMaximize,
 }: DocumentWindowProps) {
   const [activeAlbum, setActiveAlbum] = useState(0);
   const [category, setCategory] = useState<CollectionCategory>("cards");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
-  const title =
-    id === "about"
-      ? "about.txt"
-      : id === "contact"
-        ? "contact.txt"
-        : id === "collections"
-          ? "collections.exe"
-          : id === "demos"
-            ? "demos.txt"
-            : "projects.txt";
-  const titleIcon = id === "collections" ? "../w98_collections_cards.ico" : "../w95_default.ico";
+  const title = WINDOW_TITLES[id];
+  const titleIcon = WINDOW_ICONS[id];
   const emptyEntry =
     category === "paintings"
       ? EMPTY_PAINTING
@@ -777,11 +781,17 @@ export default function DocumentWindow({
       title={title}
       titleIcon={titleIcon}
       layout={layout}
+      stackIndex={stackIndex}
+      active={active}
+      onFocus={onFocus}
+      cascadeX={cascadeX}
+      cascadeY={cascadeY}
+      box={box}
+      onBoxChange={onBoxChange}
       normalHeight={id === "collections" ? 356 : id === "projects" || id === "demos" ? 360 : 200}
       normalWidth={id === "collections" ? 340 : id === "projects" || id === "demos" ? 340 : undefined}
       onClose={onClose}
       onMinimize={onMinimize}
-      onRestore={onRestore}
       onToggleMaximize={onToggleMaximize}
     >
       {id === "projects" && <ProjectList layout={layout} />}

@@ -3,6 +3,20 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "6.0",
+      "era": "claude",
+      "name": "Multitasking",
+      "date": "2026-09-26",
+      "summary": "More than one window at a time, and a taskbar that keeps track of them.",
+      "issues": [],
+      "changes": [
+        "Open as many programs as you like at once: each new window steps in a little from the last, clicking one brings it to the front, and only the one in front has a lit title bar and hears the keyboard \u2014 so two games open side by side don't both run off with your arrow keys",
+        "Every open window gets a button on the taskbar. Minimize sends a window to the taskbar instead of parking it in the corner, and it keeps going while it waits \u2014 music keeps playing, a game keeps its run \u2014 then comes back exactly where you left it. Click the button of the window you're in to put it away, any other to bring that one up. Open more than the taskbar can fit and the rest tuck into a \u00bb menu at the end instead of being squeezed down to a letter each, with the window you're in always kept on the bar. Right-click a window's taskbar button for Restore, Minimize, Maximize, Close and Center, which brings a window back to the middle of the screen",
+        "The desktop remembers how you left it: come back later and the same windows are open, in the same places and at the same sizes, with the same one in front. Windows stay exactly where you put them when the browser is resized, and a window you maximize goes back to exactly where it was when you restore it. Shut Down forgets it all, so powering back on is a clean start",
+        "A performance gauge sits in the taskbar next to the search box: frames per second and a little graph of recent frames that turns amber, then red, when things start to drag. Click it for frame times, hitches, memory and how many windows are open"
+      ]
+    },
+    {
       "version": "5.3",
       "era": "claude",
       "name": "Cubicles.exe",

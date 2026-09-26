@@ -37,3 +37,11 @@ body { margin: 0; }
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* On a phone the taskbar can't fit the gauge's graph as well as Start, the
+   task buttons and the search box: it keeps the number and drops the graph. */
+@media (max-width: 560px) {
+  .perf-meter-graph {
+    display: none;
+  }
+}

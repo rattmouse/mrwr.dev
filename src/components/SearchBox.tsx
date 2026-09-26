@@ -247,7 +247,12 @@ export default function SearchBox({ history, onOpen }: SearchBoxProps) {
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
         placeholder="Search..."
-        width={150}
+        // Its usual size on a desktop; on a phone it gives up some of its room
+        // so the taskbar can still show the window you're in. (react95's
+        // TextInput has no width prop — the size goes on its wrapper, and the
+        // input fills it.)
+        fullWidth
+        style={{ width: "min(174px, 28vw)" }}
       />
 
       {showDropdown && (
