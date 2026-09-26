@@ -108,6 +108,13 @@ Do this on your feature branch before the PR merges:
 4. **Stats are optional.** `versions[0].stats` (commits / files / +− lines) is a
    milestone-time chore, not a per-PR one. Leave it unless you're keeping it
    roughly current on purpose.
+5. **Never write up a cubicles.exe secret.** The nested `/hacks/` directory
+   bash.exe exposes only when it's running on the computer inside cubicles.exe
+   (`lights.exe`, `unlock.exe`, and whatever gets added there later) stays out
+   of every changelog bullet, no matter how much of the PR it was. Same for any
+   other hidden easter egg on the desktop — a changelog entry documenting a
+   secret defeats the secret. Describe the shipped feature around it if there
+   is one worth a bullet; otherwise leave the PR off the changelog entirely.
 
 Nothing here needs the PR number — the bullet carries no hashes, and the issue ↔
 PR link is resolved from the closing keyword at build time. So there is no

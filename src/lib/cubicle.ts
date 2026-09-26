@@ -14,6 +14,13 @@
 
 import { Tint, Vec3, vec } from "@/lib/marbles3d";
 
+/**
+ * postMessage type for flipping the room's lights from outside the frame —
+ * sent by bash.exe's lights.exe when it is running nested inside the
+ * computer on the desk, so it can reach the cubicle actually holding it.
+ */
+export const LIGHTS_MESSAGE_TYPE = "cubicles:toggle-lights";
+
 /** One box in the room. Axis-aligned, so a centre and three half-extents. */
 export type Box = {
   centre: Vec3;

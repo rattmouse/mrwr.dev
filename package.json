@@ -21,6 +21,7 @@
     "deploy:status": "bash scripts/deploy/status.sh"
   },
   "dependencies": {
+    "@fontsource/vt323": "^5.3.0",
     "@strudel/codemirror": "^1.3.0",
     "@strudel/web": "^1.3.0",
     "express": "^5.2.1",

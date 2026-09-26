@@ -30,9 +30,10 @@ import MarblesHelpPanel from "@/components/windows/MarblesHelpPanel";
 import PlayerWindow, { PLAYER_ACCEPT, PlayerWindowHandle, VizMode, VIZ_MODES } from "@/components/windows/PlayerWindow";
 import TasksWindow from "@/components/windows/TasksWindow";
 import CubiclesWindow from "@/components/windows/CubiclesWindow";
+import BashWindow from "@/components/windows/BashWindow";
 import NotepadWindow, { NotepadIncoming, NotepadWindowHandle } from "@/components/windows/NotepadWindow";
 import FileMenu from "@/components/windows/FileMenu";
-import { Layout, ProgramWindowId } from "@/components/windows/windowTypes";
+import { Layout, ProgramWindowId, WindowId } from "@/components/windows/windowTypes";
 import { VersionEntry } from "@/lib/versions.types";
 import type { SearchIssueLink } from "@/lib/searchHistory.types";
 import { randomSeed, readCode, writeCode } from "@/lib/marblesShare";
@@ -89,6 +90,7 @@ type ProgramWindowProps = {
   onMinimize: () => void;
   onRestore: () => void;
   onToggleMaximize: () => void;
+  onOpenWindow?: (id: WindowId) => void;
 };
 
 export default function ProgramWindow({
@@ -103,6 +105,7 @@ export default function ProgramWindow({
   onMinimize,
   onRestore,
   onToggleMaximize,
+  onOpenWindow,
 }: ProgramWindowProps) {
   const getSubmenuTopForRow = (target: EventTarget & Element) => {
     const row = target as HTMLElement;
@@ -267,7 +270,9 @@ export default function ProgramWindow({
                         ? "tasks.exe"
                         : id === "cubicles"
                           ? "cubicles.exe"
-                          : "mrwr.dev";
+                          : id === "bash"
+                            ? "cmd.exe"
+                            : "mrwr.dev";
   const titleIcon =
     id === "welcome"
       ? "../w95_desktop.ico"
@@ -291,7 +296,9 @@ export default function ProgramWindow({
                         ? "../w98_installer_file_gear.ico"
                         : id === "cubicles"
                           ? "../w98_joystick.ico"
-                          : "../w98_repl.ico";
+                          : id === "bash"
+                            ? "../w98_console_prompt.ico"
+                            : "../w98_repl.ico";
 
   const normalHeight =
     id === "welcome" ? 160
@@ -304,9 +311,10 @@ export default function ProgramWindow({
                   : id === "marbles" ? 420
                     : id === "tasks" ? 480
                       : id === "cubicles" ? 460
-                        : 300;
+                        : id === "bash" ? 360
+                          : 300;
   const normalWidth =
-    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : id === "player" ? 440 : id === "marbles" ? 560 : id === "tasks" ? 620 : id === "cubicles" ? 640 : undefined;
+    id === "changes" ? 420 : id === "paint" ? 410 : id === "midi" ? 560 : id === "party" ? 560 : id === "player" ? 440 : id === "marbles" ? 560 : id === "tasks" ? 620 : id === "cubicles" ? 640 : id === "bash" ? 560 : undefined;
   const musicFrameEffect = 0;
   const shouldShakeMusicUi = id === "music" && strudelPlaying && layout === "normal";
   const contentModalScale = 1;
@@ -1290,6 +1298,7 @@ export default function ProgramWindow({
       {id === "tasks" && <TasksWindow />}
 
       {id === "cubicles" && <CubiclesWindow />}
+      {id === "bash" && <BashWindow onOpenWindow={onOpenWindow} onClose={onClose} />}
     </DesktopWindow>
   );
 }

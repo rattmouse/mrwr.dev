@@ -7,6 +7,7 @@ import { makeView, applyT, normalise, rgb, vec, Vec3 } from "@/lib/marbles3d";
 import {
   DOOR_RANGE,
   EYE_STANDING,
+  LIGHTS_MESSAGE_TYPE,
   Pose,
   ROOM,
   SCREEN,
@@ -97,6 +98,17 @@ export default function CubiclesWindow() {
   const [phase, setPhase] = useState<Phase>("intro");
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const [prompt, setPrompt] = useState<string | null>(null);
+  // lights.exe lives one frame in, on the computer on this desk, so it flips
+  // this switch by shouting across the frame boundary rather than a prop.
+  const [lightsOn, setLightsOn] = useState(true);
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type === LIGHTS_MESSAGE_TYPE) setLightsOn((v) => !v);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   /* ----------------------------------------------------------- the moving */
 
@@ -406,7 +418,12 @@ export default function CubiclesWindow() {
     >
       <canvas
         ref={canvasRef}
-        style={{ display: "block", cursor: walking ? "crosshair" : "default" }}
+        style={{
+          display: "block",
+          cursor: walking ? "crosshair" : "default",
+          filter: lightsOn ? "none" : "brightness(0.1) saturate(0.5)",
+          transition: "filter 120ms ease-out",
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

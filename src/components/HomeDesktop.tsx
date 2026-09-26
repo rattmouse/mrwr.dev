@@ -116,6 +116,7 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
           onMinimize={dockWindow}
           onRestore={restoreWindow}
           onToggleMaximize={toggleMaximize}
+          onOpenWindow={openWindow}
         />
       )}
 
