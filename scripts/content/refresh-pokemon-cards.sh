@@ -11,7 +11,7 @@
 # collection only changes when you scan something new, so run it by hand and the
 # downloaded scans serve every build after that.
 #
-#   scripts/content/refresh-pokemon-cards.sh                 # top 48 cards
+#   scripts/content/refresh-pokemon-cards.sh                 # top 40 cards
 #   scripts/content/refresh-pokemon-cards.sh --limit 100
 #   scripts/content/refresh-pokemon-cards.sh --all
 #

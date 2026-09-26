@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
@@ -234,40 +234,117 @@ function extractBlueskyPosts(payload: unknown): BlueskyPost[] {
   return posts;
 }
 
-type AvoidRect = { x: number; y: number; w: number; h: number };
+type Rect = { x: number; y: number; w: number; h: number };
 
-function buildScatterPositions(
-  count: number,
-  width: number,
-  height: number,
-  iconSize: number,
-  opts?: { avoid?: AvoidRect[]; insetTop?: number }
+function overlapArea(a: Rect, b: Rect): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+// Deal tiles onto open ground. Each tile tries a handful of random spots and
+// keeps the one that covers the least of anything in `avoid` (the windows on
+// the desktop, or the centre frame), with tiles already dealt counting for far
+// less — so the pile prefers bare desktop, spreads out while there is room, and
+// only ends up on a window when there is nowhere else left.
+function scatterTiles(
+  boxes: { w: number; h: number }[],
+  field: { width: number; height: number; insetTop: number },
+  avoid: Rect[],
+  placed: Rect[] = []
 ): AlbumTilePosition[] {
-  const avoid = opts?.avoid ?? [];
   const minX = 6;
-  const minY = 6 + (opts?.insetTop ?? 0);
-  const maxX = Math.max(minX, width - iconSize - 6);
-  const maxY = Math.max(minY, height - iconSize - 6);
+  const minY = 6 + field.insetTop;
   const rand = (min: number, max: number) => min + Math.random() * Math.max(0, max - min);
-  // Keep tiles clear of any avoid rect (the centre frame, or the window itself).
-  const hitsAvoid = (x: number, y: number) =>
-    avoid.some(
-      (r) =>
-        x - 4 < r.x + r.w &&
-        x + iconSize + 4 > r.x &&
-        y - 4 < r.y + r.h &&
-        y + iconSize + 4 > r.y
-    );
-  return Array.from({ length: count }, () => {
-    let x = rand(minX, maxX);
-    let y = rand(minY, maxY);
-    for (let attempt = 0; attempt < 24 && hitsAvoid(x, y); attempt += 1) {
-      x = rand(minX, maxX);
-      y = rand(minY, maxY);
+  const occupied = placed.slice();
+  return boxes.map((box) => {
+    const maxX = Math.max(minX, field.width - box.w - 6);
+    const maxY = Math.max(minY, field.height - box.h - 6);
+    let best = { x: minX, y: minY };
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (let attempt = 0; attempt < 48; attempt += 1) {
+      const x = rand(minX, maxX);
+      const y = rand(minY, maxY);
+      const margin = { x: x - 4, y: y - 4, w: box.w + 8, h: box.h + 8 };
+      let score = 0;
+      for (const r of avoid) score += overlapArea(margin, r) * 8;
+      for (const r of occupied) score += overlapArea(margin, r);
+      if (score < bestScore) {
+        best = { x, y };
+        bestScore = score;
+        if (score === 0) break;
+      }
     }
-    return { x, y, rot: rand(-8, 8) };
+    occupied.push({ x: best.x, y: best.y, w: box.w, h: box.h });
+    return { x: best.x, y: best.y, rot: rand(-8, 8) };
   });
 }
+
+// Where every tile was left, per tab, so a reload — or a resize, a trip to
+// another tab, or maximizing the window — puts them all back rather than
+// dealing a fresh pile. A pile is only ever dealt the first time a tab is
+// opened (or on Shuffle). Positions are kept as fractions of the screen, so a
+// different screen size stretches the arrangement instead of scrambling it.
+const TILE_LAYOUT_KEY = "mrwr:collections";
+
+type SavedTile = { x: number; y: number; rot: number; z: number };
+type SavedLayout = { tiles: Record<string, SavedTile>; active?: string };
+
+// The parsed store, kept in memory too, so a browser that refuses localStorage
+// still holds its tiles still for as long as the page is open.
+let savedLayoutsCache: Record<string, SavedLayout> | null = null;
+
+function readSavedLayouts(): Record<string, SavedLayout> {
+  if (savedLayoutsCache) return savedLayoutsCache;
+  const layouts: Record<string, SavedLayout> = {};
+  try {
+    const raw = window.localStorage.getItem(TILE_LAYOUT_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [slot, value] of Object.entries(parsed as Record<string, unknown>)) {
+        const rawTiles = (value as { tiles?: unknown } | null)?.tiles;
+        if (!rawTiles || typeof rawTiles !== "object") continue;
+        const tiles: Record<string, SavedTile> = {};
+        for (const [key, tile] of Object.entries(rawTiles as Record<string, unknown>)) {
+          const t = tile as Partial<SavedTile> | null;
+          if (!t || ![t.x, t.y, t.rot, t.z].every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+          tiles[key] = { x: t.x!, y: t.y!, rot: t.rot!, z: t.z! };
+        }
+        const active = (value as { active?: unknown }).active;
+        layouts[slot] = { tiles, active: typeof active === "string" ? active : undefined };
+      }
+    }
+  } catch {
+    // Unreadable or blocked — start from an empty desktop.
+  }
+  savedLayoutsCache = layouts;
+  return layouts;
+}
+
+function writeSavedLayout(slot: string, layout: SavedLayout | null) {
+  const layouts = { ...readSavedLayouts() };
+  if (layout) layouts[slot] = layout;
+  else delete layouts[slot];
+  savedLayoutsCache = layouts;
+  try {
+    window.localStorage.setItem(TILE_LAYOUT_KEY, JSON.stringify(layouts));
+  } catch {
+    // Full or blocked — the in-memory copy still holds for this visit.
+  }
+}
+
+// Tiles are keyed by what they show, not by index: Albums comes back in a new
+// order every load. An album goes by its name, since whether its cover is
+// found (and where) can change from one load to the next; everything else by
+// its picture, since one post can carry several.
+function tileKey(entry: AlbumCover, category: CollectionCategory): string {
+  return category === "albums" || !entry.image ? `${entry.artist}|${entry.title}` : entry.image;
+}
+
+// The deal: fresh tiles fly out from the middle of the collections window, one
+// after another, to wherever they were dealt.
+const DEAL_MS = 800;
+const DEAL_STAGGER_MS = 22;
 
 // Size a box of the given aspect ratio so its longest edge is `size`. Undefined
 // aspect (album covers) stays square.
@@ -277,11 +354,22 @@ function fitBox(size: number, aspect: number | undefined): { w: number; h: numbe
 }
 
 // Largest box of the given aspect ratio that fits inside `room` — how the
-// maximized frame grows to whatever space the window actually has.
+// frame grows to whatever space the window actually has.
 function fitWithin(room: { w: number; h: number }, aspect: number | undefined): { w: number; h: number } {
   const a = aspect && aspect > 0 ? aspect : 1;
   const w = Math.min(room.w, room.h * a);
   return { w: Math.round(w), h: Math.round(w / a) };
+}
+
+// Two crossed arrows, drawn on a 16px grid in the same flat black as the
+// title-bar glyphs.
+function ShuffleIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
+      <path d="M1 4.5h3l6 7h2M1 11.5h3l6-7h2" fill="none" stroke="currentColor" strokeWidth={1.5} />
+      <path d="M12 1.5l3 3-3 3zM12 8.5l3 3-3 3z" fill="currentColor" />
+    </svg>
+  );
 }
 
 export default function DocumentWindow({
@@ -302,6 +390,10 @@ export default function DocumentWindow({
   const [category, setCategory] = useState<CollectionCategory>("cards");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
+  // Which tab the tiles in `albums` belong to. Switching tabs renders once with
+  // the old tab's tiles still loaded; laying those out (and saving them) under
+  // the new tab's name would overwrite where its own tiles were left.
+  const [albumsCategory, setAlbumsCategory] = useState<CollectionCategory | null>(null);
   const title = programDef(id).title;
   const titleIcon = programDef(id).icon;
   const emptyEntry =
@@ -313,33 +405,28 @@ export default function DocumentWindow({
           ? EMPTY_CARD
           : EMPTY_ALBUM;
   const album = albums[activeAlbum] ?? emptyEntry;
-  const albumImage = getSizedCover(album.image, layout === "maximized" ? "high" : "low");
-  const iconSize = layout === "maximized" ? 58 : 42;
-  // In the normal (small) window the tiles are flung across the whole desktop
-  // via a portal that floats above the window chrome; maximized keeps them
-  // inside the window scene.
-  const scatterToDesktop = id === "collections" && layout === "normal";
+  const iconSize = 42;
+  // The tiles are flung across the whole desktop via a portal that floats above
+  // the window chrome — maximized or not, they are the same tiles in the same
+  // places. Minimized, they go away with the window.
+  const scatterToDesktop = id === "collections" && layout !== "minimized";
   const albumsSceneRef = useRef<HTMLDivElement | null>(null);
-  const collectionsRootRef = useRef<HTMLDivElement | null>(null);
   const [albumsSceneSize, setAlbumsSceneSize] = useState({ width: 0, height: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   // The centre frame and the scattered tiles take each picture's own
   // proportions when we know them (cards, paintings), so nothing gets cropped.
   // Album covers have no aspect data and stay square.
   //
-  // Maximized, the frame takes all the room the scene has, less a band wide
-  // enough for the tiles to scatter into — any tighter and the scatter's own
-  // clamp would start dropping tiles on top of the picture. Until the scene has
-  // been measured it falls back to the fixed size the window opens at.
-  const framePadding = iconSize + 32;
+  // The tiles are out on the desktop, so the picture takes the whole scene and
+  // grows and shrinks with the window. Until the scene has been measured it
+  // falls back to the size the window opens at.
   const frameRoom =
-    layout === "maximized" && albumsSceneSize.width > 0 && albumsSceneSize.height > 0
-      ? {
-          w: Math.max(280, albumsSceneSize.width - framePadding * 2),
-          h: Math.max(280, albumsSceneSize.height - framePadding),
-        }
-      : { w: layout === "maximized" ? 280 : 144, h: layout === "maximized" ? 280 : 144 };
+    albumsSceneSize.width > 0 && albumsSceneSize.height > 0
+      ? { w: Math.max(60, albumsSceneSize.width - 12), h: Math.max(60, albumsSceneSize.height - 12) }
+      : { w: 144, h: 144 };
   const { w: frameWidth, h: frameHeight } = fitWithin(frameRoom, album.aspect);
+  // The small scan is plenty for a small frame; a big one gets the full scan.
+  const albumImage = getSizedCover(album.image, Math.max(frameWidth, frameHeight) > 300 ? "high" : "low");
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
   const [albumTilePositions, setAlbumTilePositions] = useState<AlbumTilePosition[]>([]);
   // Stacking order, like windows on the desktop: whatever you touched last sits
@@ -350,6 +437,17 @@ export default function DocumentWindow({
   const draggingOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const draggedRef = useRef(false);
+  // Bumped by the Shuffle button: the one thing that deals a pile from scratch
+  // once it has been laid out.
+  const [shuffleCount, setShuffleCount] = useState(0);
+  // What the tiles on screen were last laid out for, so a resize can tell it
+  // only needs to stretch them back into place rather than deal them again.
+  const placedForRef = useRef<{ albums: AlbumCover[]; slot: string; shuffle: number } | null>(null);
+  const layoutSlot: string = category;
+  // While a pile is being dealt: each fresh tile's place in the deal, and
+  // whether they are still gathered in the middle or on their way out.
+  const [deal, setDeal] = useState<{ order: Map<number, number>; phase: "gather" | "spread" } | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setPortalHost(document.body);
@@ -492,7 +590,10 @@ export default function DocumentWindow({
               : category === "cards"
                 ? await loadCards()
                 : await loadAlbumsSource();
-        if (!cancelled) setAlbums(next);
+        if (!cancelled) {
+          setAlbums(next);
+          setAlbumsCategory(category);
+        }
       } catch (error) {
         console.error("Failed to load collection tiles:", error);
       } finally {
@@ -524,103 +625,15 @@ export default function DocumentWindow({
     return () => window.removeEventListener("resize", update);
   }, [id]);
 
-  // How much room the centre frame needs for *any* picture in the current set,
-  // not just the one on show. Reserving the union means switching to a
-  // differently shaped picture never lands it underneath the tiles, and the
-  // scatter can stay out of the selection's way — it is read from a ref so a
-  // plain selection never re-triggers a full re-scatter.
-  const frameReserveRef = useRef({ w: frameWidth, h: frameHeight });
-  useEffect(() => {
-    let w = frameWidth;
-    let h = frameHeight;
-    for (const entry of albums) {
-      const box = fitWithin(frameRoom, entry.aspect);
-      w = Math.max(w, box.w);
-      h = Math.max(h, box.h);
-    }
-    frameReserveRef.current = { w, h };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [albums, frameRoom.w, frameRoom.h, frameWidth, frameHeight]);
-
-  // Where the tiles live, in the coordinate space of their container. Desktop
-  // mode: a fixed portal pinned to the viewport origin. Window mode: the scene
-  // div inside the maximized window.
-  const getScatterField = () => {
-    if (scatterToDesktop) {
-      return {
-        originLeft: 0,
-        originTop: 0,
-        width: viewportSize.width,
-        height: viewportSize.height,
-        insetTop: TASKBAR_H,
-      };
-    }
-    const rect = albumsSceneRef.current?.getBoundingClientRect();
-    return {
-      originLeft: rect?.left ?? 0,
-      originTop: rect?.top ?? 0,
-      width: albumsSceneSize.width,
-      height: albumsSceneSize.height,
-      insetTop: 0,
-    };
-  };
-
-  // Scatter the tiles. Runs when the tile set, the container size, or the layout
-  // changes — never on a plain selection.
-  useEffect(() => {
-    if (id !== "collections" || albumsLoading || albums.length === 0) return;
-    const field = getScatterField();
-    const width = Math.max(1, field.width);
-    const height = Math.max(1, field.height);
-
-    const avoid: { x: number; y: number; w: number; h: number }[] = [];
-    if (scatterToDesktop) {
-      // Keep every tile clear of the collections window itself.
-      const r = collectionsRootRef.current?.getBoundingClientRect();
-      if (r) avoid.push({ x: r.left - 28, y: r.top - 52, w: r.width + 56, h: r.height + 76 });
-    } else {
-      // Keep tiles off the centre frame, but never so wide there is nowhere left.
-      const frame = frameReserveRef.current;
-      const avoidW = Math.min(frame.w + 16, Math.max(0, width - iconSize * 2 - 24));
-      const avoidH = Math.min(frame.h + 16, Math.max(0, height - iconSize - 16));
-      avoid.push({ x: (width - avoidW) / 2, y: (height - avoidH) / 2, w: avoidW, h: avoidH });
-    }
-
-    const scattered = buildScatterPositions(albums.length, width, height, iconSize, {
-      avoid,
-      insetTop: field.insetTop,
-    });
-
-    let nearest = 0;
-    let nearestDist = Number.POSITIVE_INFINITY;
-    const centerX = width / 2;
-    const centerY = height / 2;
-    scattered.forEach((pos, index) => {
-      const dist = Math.hypot(pos.x + iconSize / 2 - centerX, pos.y + iconSize / 2 - centerY);
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = index;
-      }
-    });
-
-    setActiveAlbum(nearest);
-    setAlbumTilePositions(scattered);
-    // A fresh scatter deals the pile again: everything flat, the one the window
-    // is showing on top.
-    albumTileStackTopRef.current = 1;
-    setAlbumTileStack(scattered.map((_, index) => (index === nearest ? 1 : 0)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    albums,
-    albumsLoading,
-    id,
-    iconSize,
-    scatterToDesktop,
-    albumsSceneSize.width,
-    albumsSceneSize.height,
-    viewportSize.width,
-    viewportSize.height,
-  ]);
+  // Where the tiles live: a fixed portal pinned to the viewport origin, kept
+  // below the taskbar.
+  const getScatterField = () => ({
+    originLeft: 0,
+    originTop: 0,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    insetTop: TASKBAR_H,
+  });
 
   const clampTilePosition = (x: number, y: number, tileW: number, tileH: number) => {
     const field = getScatterField();
@@ -633,6 +646,151 @@ export default function DocumentWindow({
       y: Math.max(minY, Math.min(maxY, y)),
     };
   };
+
+  const fieldWidth = viewportSize.width;
+  const fieldHeight = viewportSize.height;
+
+  // What a fresh deal has to keep off: every window on screen, this one
+  // included, so the tiles land on bare desktop wherever there is any. (With
+  // a window maximized there is none, and they fall where they fall.)
+  const getAvoidRects = (): Rect[] =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-desktop-window="true"]')).map((node) => {
+      const r = node.getBoundingClientRect();
+      return { x: r.left - 12, y: r.top - 12, w: r.width + 24, h: r.height + 24 };
+    });
+
+  const saveLayout = (positions: AlbumTilePosition[], stack: number[], active: number) => {
+    if (positions.length !== albums.length || placedForRef.current?.slot !== layoutSlot) return;
+    const field = getScatterField();
+    const width = Math.max(1, field.width);
+    const height = Math.max(1, field.height);
+    const round = (n: number) => Math.round(n * 10000) / 10000;
+    const tiles: Record<string, SavedTile> = {};
+    albums.forEach((entry, index) => {
+      const pos = positions[index];
+      if (!pos) return;
+      tiles[tileKey(entry, category)] = {
+        x: round(pos.x / width),
+        y: round(pos.y / height),
+        rot: round(pos.rot),
+        z: stack[index] ?? 0,
+      };
+    });
+    writeSavedLayout(layoutSlot, { tiles, active: albums[active] ? tileKey(albums[active], category) : undefined });
+  };
+
+  // Lay the tiles out. Tiles that have been placed before go back exactly where
+  // they were left (stretched to the space they are in now); only tiles never
+  // seen before — or all of them, after Shuffle — are dealt fresh. Resizing the
+  // window or the browser, maximizing it, picking a tile, or switching tabs
+  // never reshuffles. A layout effect, so a fresh deal is gathered in the
+  // middle before the tiles are first painted anywhere else.
+  useLayoutEffect(() => {
+    // Minimized, the tiles go away with the window; leave the saved layout be.
+    if (id !== "collections" || layout === "minimized" || albumsLoading || albums.length === 0) return;
+    if (albumsCategory !== category) return;
+    // Nothing to lay out into until the space has been measured; placing into
+    // a 0×0 field would crush every saved position into the corner.
+    if (fieldWidth < iconSize * 2 || fieldHeight < iconSize * 2) return;
+    const field = getScatterField();
+    const width = field.width;
+    const height = field.height;
+
+    const previous = placedForRef.current;
+    const reshuffled = previous !== null && previous.shuffle !== shuffleCount;
+    // Same tiles, same slot: only the space changed, so keep the selection and
+    // the stacking order and just stretch everything back into place.
+    const sameDeal = previous !== null && previous.albums === albums && previous.slot === layoutSlot && !reshuffled;
+    placedForRef.current = { albums, slot: layoutSlot, shuffle: shuffleCount };
+
+    if (reshuffled) writeSavedLayout(layoutSlot, null);
+    const saved = readSavedLayouts()[layoutSlot];
+    const boxes = albums.map((entry) => fitBox(iconSize, entry.aspect));
+
+    const positions: (AlbumTilePosition | null)[] = albums.map((entry, index) => {
+      const tile = saved?.tiles[tileKey(entry, category)];
+      if (!tile) return null;
+      const at = clampTilePosition(tile.x * width, tile.y * height, boxes[index].w, boxes[index].h);
+      return { ...at, rot: tile.rot };
+    });
+
+    const missing = positions.flatMap((pos, index) => (pos ? [] : [index]));
+    if (missing.length > 0) {
+      const placed = positions.flatMap((pos, index) =>
+        pos ? [{ x: pos.x, y: pos.y, w: boxes[index].w, h: boxes[index].h }] : []
+      );
+      const dealt = scatterTiles(
+        missing.map((index) => boxes[index]),
+        field,
+        getAvoidRects(),
+        placed
+      );
+      missing.forEach((index, i) => {
+        positions[index] = dealt[i];
+      });
+    }
+    const next = positions as AlbumTilePosition[];
+    if (sameDeal) {
+      setDeal(null);
+      setAlbumTilePositions(next);
+      return;
+    }
+
+    // A new deal picks what the frame shows: whatever it showed when this pile
+    // was last left, or else the tile that landed nearest the middle.
+    let active = saved?.active ? albums.findIndex((entry) => tileKey(entry, category) === saved.active) : -1;
+    if (active < 0) {
+      let nearestDist = Number.POSITIVE_INFINITY;
+      next.forEach((pos, index) => {
+        const dist = Math.hypot(pos.x + iconSize / 2 - width / 2, pos.y + iconSize / 2 - height / 2);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          active = index;
+        }
+      });
+    }
+    // Saved stacking order where there is one; a fresh pile lies flat with the
+    // one the window is showing on top.
+    const stack = albums.map((entry, index) => saved?.tiles[tileKey(entry, category)]?.z ?? (index === active ? 1 : 0));
+    albumTileStackTopRef.current = Math.max(1, ...stack);
+    setActiveAlbum(active);
+    setAlbumTileStack(stack);
+    saveLayout(next, stack, active);
+
+    if (missing.length === 0) {
+      setDeal(null);
+      setAlbumTilePositions(next);
+      return;
+    }
+
+    // Deal the fresh tiles out of the middle of the collections window: gather
+    // them there (no transition), then on the next frame send them off.
+    const windowRect = frameRef.current?.closest('[data-desktop-window="true"]')?.getBoundingClientRect();
+    const originX = windowRect ? windowRect.left + windowRect.width / 2 - field.originLeft : width / 2;
+    const originY = windowRect ? windowRect.top + windowRect.height / 2 - field.originTop : height / 2;
+    const order = new Map(missing.map((index, i) => [index, i]));
+    setDeal({ order, phase: "gather" });
+    setAlbumTilePositions(
+      next.map((pos, index) =>
+        order.has(index) ? { x: originX - boxes[index].w / 2, y: originY - boxes[index].h / 2, rot: 0 } : pos
+      )
+    );
+    // A beat for the gathered pile to paint, then send it off. Timers rather
+    // than animation frames: a tab in the background never gets a frame, and
+    // its tiles would sit gathered in the middle until it was looked at.
+    const spread = window.setTimeout(() => {
+      setDeal({ order, phase: "spread" });
+      setAlbumTilePositions(next);
+    }, 30);
+    const done = window.setTimeout(() => setDeal(null), 30 + DEAL_MS + missing.length * DEAL_STAGGER_MS + 100);
+    return () => {
+      // Interrupted (a resize, a tab switch): the rerun lays everything out
+      // from the saved layout, which already holds where the deal was going.
+      window.clearTimeout(spread);
+      window.clearTimeout(done);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albums, albumsCategory, albumsLoading, id, layout, iconSize, layoutSlot, fieldWidth, fieldHeight, shuffleCount]);
 
   const endDragBookkeeping = (pointerTarget: EventTarget & Element, pointerId: number) => {
     draggingAlbumIndexRef.current = null;
@@ -654,12 +812,10 @@ export default function DocumentWindow({
 
     setActiveAlbum(index);
     albumTileStackTopRef.current += 1;
-    const top = albumTileStackTopRef.current;
-    setAlbumTileStack((prev) => {
-      const next = prev.length === albums.length ? prev.slice() : albums.map(() => 0);
-      next[index] = top;
-      return next;
-    });
+    const stack = albumTileStack.length === albums.length ? albumTileStack.slice() : albums.map(() => 0);
+    stack[index] = albumTileStackTopRef.current;
+    setAlbumTileStack(stack);
+    saveLayout(albumTilePositions, stack, index);
 
     draggingAlbumIndexRef.current = index;
     draggedRef.current = false;
@@ -701,12 +857,16 @@ export default function DocumentWindow({
 
   const onAlbumTilePointerUp = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
     if (draggingAlbumIndexRef.current !== index) return;
+    const moved = draggedRef.current;
     endDragBookkeeping(event.currentTarget, event.pointerId);
+    if (moved) saveLayout(albumTilePositions, albumTileStack, index);
   };
 
   const onAlbumTilePointerCancel = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
     if (draggingAlbumIndexRef.current !== index) return;
+    const moved = draggedRef.current;
     endDragBookkeeping(event.currentTarget, event.pointerId);
+    if (moved) saveLayout(albumTilePositions, albumTileStack, index);
   };
 
   const renderAlbumTile = (entry: AlbumCover, index: number) => {
@@ -715,6 +875,9 @@ export default function DocumentWindow({
     const pos = albumTilePositions[index] ?? { x: 0, y: 0, rot: 0 };
     const tileBox = fitBox(iconSize, entry.aspect);
     const isDraggingThis = draggingAlbumIndexRef.current === index;
+    const dealtAt = deal?.order.get(index);
+    const dealEase = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+    const dealDelay = (dealtAt ?? 0) * DEAL_STAGGER_MS;
     return (
       <div
         key={`${index}-${entry.image ?? `${entry.artist}-${entry.title}`}`}
@@ -746,9 +909,11 @@ export default function DocumentWindow({
           pointerEvents: "auto",
           // Track the pointer 1:1 while dragging; ease back into place otherwise.
           transition:
-            isDraggingThis && draggedRef.current
+            (isDraggingThis && draggedRef.current) || (dealtAt !== undefined && deal?.phase === "gather")
               ? "none"
-              : "left 180ms ease-out, top 180ms ease-out, transform 180ms ease-out",
+              : dealtAt !== undefined
+                ? ["left", "top", "transform"].map((p) => `${p} ${DEAL_MS}ms ${dealEase} ${dealDelay}ms`).join(", ")
+                : "left 180ms ease-out, top 180ms ease-out, transform 180ms ease-out",
         }}
         aria-label={entry.title}
       >
@@ -799,7 +964,6 @@ export default function DocumentWindow({
 
       {id === "collections" && (
         <div
-          ref={collectionsRootRef}
           style={{
             flex: "1 1 auto",
             minHeight: 0,
@@ -811,7 +975,7 @@ export default function DocumentWindow({
             gap: 8,
           }}
         >
-          <div style={{ alignSelf: "stretch", display: "flex", gap: 4 }}>
+          <div style={{ alignSelf: "stretch", display: "flex", flexWrap: "wrap", gap: 4 }}>
             {([
               { value: "cards", label: "Cards" },
               { value: "albums", label: "Albums" },
@@ -821,13 +985,24 @@ export default function DocumentWindow({
               <Button
                 key={value}
                 size="sm"
-                style={{ fontWeight: "bold" }}
+                style={{ fontWeight: "bold", padding: "0 7px" }}
                 active={category === value}
                 onClick={() => setCategory(value)}
               >
                 {label}
               </Button>
             ))}
+            <Button
+              size="sm"
+              square
+              style={{ marginLeft: "auto", flex: "0 0 auto" }}
+              disabled={albumsLoading || albums.length === 0}
+              onClick={() => setShuffleCount((n) => n + 1)}
+              aria-label="Shuffle"
+              title="Shuffle"
+            >
+              <ShuffleIcon />
+            </Button>
           </div>
 
           <GroupBox
@@ -847,13 +1022,14 @@ export default function DocumentWindow({
               style={{
                 width: "100%",
                 height: "100%",
-                minHeight: layout === "maximized" ? 280 : 176,
+                minHeight: 176,
                 position: "relative",
                 overflow: "hidden",
                 touchAction: "none",
               }}
             >
               <div
+                ref={frameRef}
                 style={{
                   position: "absolute",
                   left: "50%",
@@ -875,7 +1051,7 @@ export default function DocumentWindow({
                 }}
               >
                 {albumsLoading ? (
-                  <Hourglass size={layout === "maximized" ? 52 : 38} />
+                  <Hourglass size={38} />
                 ) : (
                   <>
                     {albumImage && (
@@ -899,7 +1075,6 @@ export default function DocumentWindow({
                 )}
               </div>
 
-              {!albumsLoading && !scatterToDesktop && albums.map(renderAlbumTile)}
             </div>
           </GroupBox>
 
@@ -919,9 +1094,26 @@ export default function DocumentWindow({
               </div>,
               portalHost
             )}
-          <div style={{ textAlign: "center", minHeight: 30 }}>
-            <div style={{ fontWeight: 700 }}>{album.title}</div>
-            <div>{album.artist}</div>
+          {/* One line each, whatever the title: a caption that wrapped would
+              change the size of the scene above it every time you picked a
+              different tile. */}
+          <div style={{ alignSelf: "stretch", display: "flex", flex: "0 0 auto" }}>
+            <div style={{ textAlign: "center", flex: "1 1 auto", minWidth: 0 }}>
+              {[album.title, album.artist].map((line, index) => (
+                <div
+                  key={index}
+                  title={line}
+                  style={{
+                    fontWeight: index === 0 ? 700 : undefined,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {line || "\u00a0"}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

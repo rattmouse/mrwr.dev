@@ -72,7 +72,7 @@ Orientation notes for working in this repo.
   for `node:sqlite`), takes the most valuable cards and copies their scans
   locally rather than hotlinking. `deploy.sh` does **not** run it — the
   collection only changes when you scan something new, so run it by hand. Mind
-  the size: the default 48 cards is ~38MB, and `--all` would be 300MB+.
+  the size: the default 40 cards is ~32MB, and `--all` would be 300MB+.
 - `search-sessions.js` (repo root, also shipped by `deploy.sh`) holds the
   session-grouping heuristics shared by `refresh-search-history.mjs` and
   `server.js`. At runtime `server.js` buffers keystroke records per browser
