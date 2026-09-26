@@ -1,6 +1,6 @@
-export type WindowId = "welcome" | "about" | "projects" | "demos" | "contact" | "collections" | "notepad" | "issues" | "changes" | "music" | "midi" | "paint" | "party" | "player" | "marbles" | "tasks" | "cubicles";
+export type WindowId = "welcome" | "about" | "projects" | "demos" | "contact" | "collections" | "notepad" | "issues" | "changes" | "music" | "midi" | "paint" | "party" | "player" | "marbles" | "tasks" | "cubicles" | "bash";
 
-export type ProgramWindowId = "welcome" | "notepad" | "issues" | "changes" | "music" | "midi" | "paint" | "party" | "player" | "marbles" | "tasks" | "cubicles";
+export type ProgramWindowId = "welcome" | "notepad" | "issues" | "changes" | "music" | "midi" | "paint" | "party" | "player" | "marbles" | "tasks" | "cubicles" | "bash";
 export type DocumentWindowId = "about" | "projects" | "demos" | "contact" | "collections";
 
 export type Layout = "normal" | "docked" | "maximized";
@@ -18,7 +18,8 @@ export function isProgramWindow(id: WindowId): id is ProgramWindowId {
     id === "marbles" ||
     id === "player" ||
     id === "tasks" ||
-    id === "cubicles"
+    id === "cubicles" ||
+    id === "bash"
   );
 }
 

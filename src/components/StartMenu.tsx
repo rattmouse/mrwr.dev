@@ -267,6 +267,7 @@ export default function StartMenu({
               { label: "Notepad", icon: "../w95_notepad.ico", size: "sm", onClick: () => pick("notepad") },
               { label: "Paint", icon: "../w95_paint.ico", size: "sm", onClick: () => pick("paint") },
               { label: "Media", icon: "../w95_player.ico", size: "sm", onClick: () => pick("player") },
+              { label: "Terminal", icon: "../w98_console_prompt.ico", size: "sm", onClick: () => pick("bash") },
             ],
           },
           {
