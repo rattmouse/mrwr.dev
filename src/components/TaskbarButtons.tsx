@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Button, MenuList, MenuListItem, Separator } from "react95";
 import { Z } from "@/constants/zIndex";
 import { Layout, WindowAction, WindowId } from "@/components/windows/windowTypes";
-import { WINDOW_ICONS, WINDOW_TITLES } from "@/components/windows/windowMeta";
+import { PROGRAMS } from "@/components/windows/programs";
 
 export type TaskbarItem = {
   id: WindowId;
@@ -104,7 +104,7 @@ function TaskContextMenu({
     <MenuList
       ref={ref}
       role="menu"
-      aria-label={`${WINDOW_TITLES[menu.id]} window`}
+      aria-label={`${PROGRAMS[menu.id].title} window`}
       onContextMenu={(e) => e.preventDefault()}
       style={{ position: "fixed", left: at.left, top: at.top, zIndex: Z.START_MENU, minWidth: 140 }}
     >
@@ -223,8 +223,8 @@ export default function TaskbarButtons({
             active={held}
             onClick={() => onTaskClick(task.id)}
             onContextMenu={openContextMenu(task.id)}
-            title={WINDOW_TITLES[task.id]}
-            aria-label={WINDOW_TITLES[task.id]}
+            title={PROGRAMS[task.id].title}
+            aria-label={PROGRAMS[task.id].title}
             style={{
               // Equal shares of the strip, the way the real taskbar divides it.
               flex: compact ? `0 0 ${ICON_W}px` : "1 1 0",
@@ -241,7 +241,7 @@ export default function TaskbarButtons({
             }}
           >
             <img
-              src={WINDOW_ICONS[task.id]}
+              src={PROGRAMS[task.id].icon}
               width={16}
               height={16}
               alt=""
@@ -259,7 +259,7 @@ export default function TaskbarButtons({
                   textAlign: "left",
                 }}
               >
-                {WINDOW_TITLES[task.id]}
+                {PROGRAMS[task.id].title}
               </span>
             )}
           </Button>
@@ -306,8 +306,8 @@ export default function TaskbarButtons({
               onContextMenu={openContextMenu(task.id)}
               style={{ gap: 8, justifyContent: "flex-start" }}
             >
-              <img src={WINDOW_ICONS[task.id]} width={16} height={16} alt="" aria-hidden style={{ imageRendering: "pixelated" }} />
-              <span>{WINDOW_TITLES[task.id]}</span>
+              <img src={PROGRAMS[task.id].icon} width={16} height={16} alt="" aria-hidden style={{ imageRendering: "pixelated" }} />
+              <span>{PROGRAMS[task.id].title}</span>
               {task.layout === "minimized" && <span style={{ marginLeft: "auto", opacity: 0.6 }}>minimized</span>}
             </MenuListItem>
           ))}

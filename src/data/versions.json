@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "6.0",
+      "version": "6.0.1",
       "era": "claude",
       "name": "Multitasking",
       "date": "2026-09-26",
@@ -14,7 +14,8 @@
         "Every open window gets a button on the taskbar. Minimize sends a window to the taskbar instead of parking it in the corner, and it keeps going while it waits \u2014 music keeps playing, a game keeps its run \u2014 then comes back exactly where you left it. Click the button of the window you're in to put it away, any other to bring that one up. Open more than the taskbar can fit and the rest tuck into a \u00bb menu at the end instead of being squeezed down to a letter each, with the window you're in always kept on the bar. Right-click a window's taskbar button for Restore, Minimize, Maximize, Close and Center, which brings a window back to the middle of the screen",
         "The desktop remembers how you left it: come back later and the same windows are open, in the same places and at the same sizes, with the same one in front. Windows stay exactly where you put them when the browser is resized, and a window you maximize goes back to exactly where it was when you restore it. Shut Down forgets it all, so powering back on is a clean start",
         "Shut Down closes every window the moment you pick it, so nothing left running \u2014 music, games, the office \u2014 carries on behind the shutdown screen",
-        "A performance gauge sits in the taskbar next to the search box: frames per second and a little graph of recent frames that turns amber, then red, when things start to drag. Click it for frame times, hitches, memory and how many windows are open"
+        "A performance gauge sits in the taskbar next to the search box: frames per second and a little graph of recent frames that turns amber, then red, when things start to drag. Click it for frame times, hitches, memory and how many windows are open",
+        "Behind the scenes, each program now keeps to its own file, and one list says what every window is called, what it looks like and where it sits in the Start menu — so adding a new program no longer means editing the whole desktop"
       ]
     },
     {

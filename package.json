@@ -1,13 +1,16 @@
 {
   "name": "mrwr.dev",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-react95.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/version.mjs check",
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "changelog": "node tools/generate-changelog.mjs",
+    "version:bump": "node scripts/version.mjs bump",
+    "version:check": "node scripts/version.mjs check",
     "guys:sprites": "node scripts/content/make-guys-sprites.mjs",
     "changelog:json": "node tools/generate-changelog.mjs --json --output src/data/changelogs.json",
     "container:image": "bash containers/ci.sh image",

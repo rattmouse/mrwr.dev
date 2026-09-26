@@ -7,7 +7,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import MockupList from "@/components/projects/MockupList";
 import ProjectList from "@/components/projects/ProjectList";
 import { DocumentWindowId, Layout, WindowBox } from "@/components/windows/windowTypes";
-import { WINDOW_ICONS, WINDOW_TITLES } from "@/components/windows/windowMeta";
+import { programDef } from "@/components/windows/programs";
 
 type DocumentWindowProps = {
   id: DocumentWindowId;
@@ -302,8 +302,8 @@ export default function DocumentWindow({
   const [category, setCategory] = useState<CollectionCategory>("cards");
   const [albums, setAlbums] = useState<AlbumCover[]>(ALBUM_COVERS);
   const [albumsLoading, setAlbumsLoading] = useState(false);
-  const title = WINDOW_TITLES[id];
-  const titleIcon = WINDOW_ICONS[id];
+  const title = programDef(id).title;
+  const titleIcon = programDef(id).icon;
   const emptyEntry =
     category === "paintings"
       ? EMPTY_PAINTING
@@ -788,8 +788,8 @@ export default function DocumentWindow({
       cascadeY={cascadeY}
       box={box}
       onBoxChange={onBoxChange}
-      normalHeight={id === "collections" ? 356 : id === "projects" || id === "demos" ? 360 : 200}
-      normalWidth={id === "collections" ? 340 : id === "projects" || id === "demos" ? 340 : undefined}
+      normalHeight={programDef(id).size.height}
+      normalWidth={programDef(id).size.width}
       onClose={onClose}
       onMinimize={onMinimize}
       onToggleMaximize={onToggleMaximize}
