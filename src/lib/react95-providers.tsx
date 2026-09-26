@@ -93,6 +93,16 @@ const React95GlobalStyle = createGlobalStyle<{ $warped: boolean }>`
     -webkit-font-smoothing: ${(p) => (p.$warped ? "antialiased" : "none")};
     -moz-osx-font-smoothing: ${(p) => (p.$warped ? "grayscale" : "auto")};
     text-rendering: ${(p) => (p.$warped ? "optimizeLegibility" : "optimizeSpeed")};
+
+    /* Nothing on that warped copy is worth selecting, and Firefox paints a
+       selection there as text wiping itself out — dragging a window left one
+       behind and blanked every label on the glass. */
+    user-select: ${(p) => (p.$warped ? "none" : "auto")};
+  }
+
+  input,
+  textarea {
+    user-select: text;
   }
 
   textarea {
