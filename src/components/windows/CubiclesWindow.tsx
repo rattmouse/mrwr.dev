@@ -500,14 +500,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
               width: screenSizeRef.current.width,
               height: screenSizeRef.current.height,
               transformOrigin: "0 0",
-              // Deliberately no `willChange: "transform"` here. That hint
-              // gets the browser to promote this to its own layer and keep
-              // reusing one rasterized bitmap of it under cheap composited
-              // scaling as the matrix keeps changing every frame, instead of
-              // re-rasterizing the text at the new effective resolution —
-              // which is why a freshly-opened window on the glass renders
-              // crisp right next to stale, smeared text that's been sitting
-              // there the whole time the transform kept moving.
+              willChange: "transform",
               visibility: "hidden",
               background: "#c0c0c0",
               display: "flex",

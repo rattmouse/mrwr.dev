@@ -91,6 +91,7 @@ const React95GlobalStyle = createGlobalStyle<{ $warped: boolean }>`
        ghost and double instead of just blurring. So the page run inside that
        iframe (self !== top) gets ordinary antialiasing instead. */
     -webkit-font-smoothing: ${(p) => (p.$warped ? "antialiased" : "none")};
+    -moz-osx-font-smoothing: ${(p) => (p.$warped ? "grayscale" : "auto")};
     text-rendering: ${(p) => (p.$warped ? "optimizeLegibility" : "optimizeSpeed")};
   }
 
