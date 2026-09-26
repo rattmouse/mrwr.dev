@@ -224,6 +224,9 @@ const MAN_PAGES: Record<string, string> = {
   cat: "cat <file> - print a file",
   sudo: "sudo <command> - pretend to be root. you are not root.",
   vim: "vim [file] - open the one true editor. good luck leaving.",
+  storage: "storage [key] - list localStorage + sessionStorage keys, or dump one as JSON",
+  env: "env - browser and page facts (user agent, language, screen, url, ...)",
+  cookies: "cookies - list this page's cookies",
 };
 
 type Line = { text: string; kind?: "input" | "output" | "error" };
@@ -324,7 +327,9 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
             "whoami           who you are",
             "history          past commands",
             "man <cmd>        a one-line manual",
-            "info             system info",
+            "storage [key]    inspect local + session storage",
+            "env              browser and page facts",
+            "cookies          list this page's cookies",
             "exit             close this window",
           ].join("\n")
         );
@@ -361,20 +366,6 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
           return;
         }
         print(MAN_PAGES[target] ?? `No manual entry for ${target}`);
-        return;
-      }
-      case "uname":
-      case "info": {
-        print(
-          [
-            "guest@mrwr.dev",
-            "--------------",
-            "OS: mrwr.dev",
-            "Host: your browser tab",
-            "Shell: fake",
-            "Terminal: react95",
-          ].join("\n")
-        );
         return;
       }
       case "ls": {
@@ -423,6 +414,87 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
         print(node.content);
         return;
       }
+      case "storage": {
+        const stores: { label: string; store: Storage }[] = [
+          { label: "localStorage", store: window.localStorage },
+          { label: "sessionStorage", store: window.sessionStorage },
+        ];
+        const key = args[0];
+        if (!key) {
+          const groups = stores.map(({ label, store }) => {
+            const keys: string[] = [];
+            for (let i = 0; i < store.length; i += 1) {
+              const k = store.key(i);
+              if (k) keys.push(k);
+            }
+            keys.sort();
+            const body = keys.length
+              ? keys.map((k) => `${String(store.getItem(k)?.length ?? 0).padStart(6)}  ${k}`).join("\n")
+              : "(empty)";
+            return `${label}:\n${body}`;
+          });
+          print(groups.join("\n\n"));
+          return;
+        }
+        const hit = stores.find(({ store }) => store.getItem(key) !== null);
+        if (!hit) {
+          print(`storage: ${key}: no such key`, "error");
+          return;
+        }
+        const value = hit.store.getItem(key) as string;
+        try {
+          print(JSON.stringify(JSON.parse(value), null, 2));
+        } catch {
+          print(value);
+        }
+        return;
+      }
+      case "env": {
+        if (nested) {
+          print(
+            [
+              "USER_AGENT=Mozilla/2.0 (compatible; MSIE 3.01; Windows 95)",
+              "PLATFORM=Windows 95 Win32",
+              "LANGUAGE=en-US",
+              "SCREEN=640x640",
+              "VIEWPORT=640x620",
+              "ONLINE=false",
+              "URL=https://mrwr.dev/",
+              "REFERRER=(none)",
+              "TITLE=",
+            ].join("\n")
+          );
+          return;
+        }
+        print(
+          [
+            `USER_AGENT=${navigator.userAgent}`,
+            `PLATFORM=${navigator.platform}`,
+            `LANGUAGE=${navigator.language}`,
+            `SCREEN=${window.screen.width}x${window.screen.height}`,
+            `VIEWPORT=${window.innerWidth}x${window.innerHeight}`,
+            `ONLINE=${navigator.onLine}`,
+            `URL=${window.location.href}`,
+            `REFERRER=${document.referrer || "(none)"}`,
+            `TITLE=${document.title}`,
+          ].join("\n")
+        );
+        return;
+      }
+      case "cookies": {
+        const raw = document.cookie;
+        if (!raw) {
+          print("(no cookies)");
+          return;
+        }
+        print(
+          raw
+            .split(";")
+            .map((c) => c.trim())
+            .join("\n")
+        );
+        return;
+      }
       case "sudo": {
         print("guest is not in the sudoers file. This incident will be reported.", "error");
         return;
@@ -437,7 +509,11 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
           }, 900);
           return;
         }
-        print(`rm: ${args[0] ?? ""}: No such file or directory`, "error");
+        if (!args[0]) {
+          print("rm: missing operand", "error");
+          return;
+        }
+        print(`rm: cannot remove '${args[0]}': Permission denied`, "error");
         return;
       }
       case "vim":
