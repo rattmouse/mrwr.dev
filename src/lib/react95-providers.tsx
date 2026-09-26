@@ -8,7 +8,7 @@ import original from "react95/dist/themes/original";
 import ms_sans_serif from "react95/dist/fonts/ms_sans_serif.woff2";
 import ms_sans_serif_bold from "react95/dist/fonts/ms_sans_serif_bold.woff2";
 
-const React95GlobalStyle = createGlobalStyle`
+const React95GlobalStyle = createGlobalStyle<{ $warped: boolean }>`
   ${styleReset}
 
   @font-face {
@@ -84,10 +84,15 @@ const React95GlobalStyle = createGlobalStyle`
 
     background: #008080; /* classic teal */
 
-    /* helps avoid “modern smooth” look */
-    -webkit-font-smoothing: none;
-    -moz-osx-font-smoothing: auto;
-    text-rendering: optimizeSpeed;
+    /* Unsmoothed, aliased glyph edges give the crisp retro look at the size
+       this font is meant for — but cubicles.exe shows this same page again,
+       recursively, on a monitor warped onto the glass by a CSS matrix3d
+       perspective. Aliased edges don't resample cleanly under that warp: they
+       ghost and double instead of just blurring. So the page run inside that
+       iframe (self !== top) gets ordinary antialiasing instead. */
+    -webkit-font-smoothing: ${(p) => (p.$warped ? "antialiased" : "none")};
+    -moz-osx-font-smoothing: ${(p) => (p.$warped ? "grayscale" : "auto")};
+    text-rendering: ${(p) => (p.$warped ? "optimizeLegibility" : "optimizeSpeed")};
   }
 
   textarea {
@@ -101,9 +106,13 @@ export default function React95Providers({
 }: {
   children: React.ReactNode;
 }) {
+  // Same check cubicles.exe itself uses to know it's the one running on the
+  // recursive iframe (see CubiclesWindow.tsx's nestedStore): true only for
+  // the copy of the site sitting on the monitor's glass, warped by CSS.
+  const warped = typeof window !== "undefined" && window.self !== window.top;
   return (
     <ThemeProvider theme={original}>
-      <React95GlobalStyle />
+      <React95GlobalStyle $warped={warped} />
       {children}
     </ThemeProvider>
   );
