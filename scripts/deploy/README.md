@@ -113,6 +113,7 @@ npm run deploy                  # refresh issues + build + deploy
 npm run deploy -- --allow-dirty # deploy with uncommitted local changes (testing)
 npm run deploy -- --skip-build  # re-deploy the existing out/ as-is
 npm run deploy -- --skip-issues # build + deploy without re-pulling issues.json
+npm run deploy -- --skip-probes # build + deploy without re-pulling probes.json
 npm run deploy:status           # what's live on prod right now
 npm run deploy:rollback         # back to the previous release
 npm run deploy:rollback -- 20260905101500   # back to a specific release

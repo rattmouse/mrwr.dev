@@ -46,6 +46,8 @@ yarn-error.log*
 next-env.d.ts
 src/data/issues.json
 src/data/search-history.json
+# build-time probe report (see scripts/content/refresh-probes.sh)
+src/data/probes.json
 # build-time GitHub enrichment for the Projects window (see scripts/content/refresh-projects.sh)
 src/data/projects.json
 /public/projects/remote/
@@ -53,6 +55,8 @@ src/data/projects.json
 
 # durable search-log archive written by server.js at runtime (issue #55)
 /search-log.ndjson*
+# same, for scanner requests server.js's tripwire caught
+/tripwire.ndjson*
 
 # local triage state for scripts/content/search-to-issue.sh (machine-local)
 scripts/content/.search-triage-state.json
