@@ -84,6 +84,10 @@ Orientation notes for working in this repo.
   makes the dir, you drop the (uncommitted) file in by hand. Unset ⇒ notifier
   is a no-op. In-memory only — a restart drops sessions mid-flight, but the
   NDJSON archive still has every record.
+- `src/data/probes.json` is the same deal again: gitignored, build-time only,
+  refreshed by `scripts/content/refresh-probes.sh` (also run by `deploy.sh`).
+  The build imports it, so the script always writes the file, empty when prod
+  is unreachable.
 
 ## Every PR bumps the version and updates the changelog
 

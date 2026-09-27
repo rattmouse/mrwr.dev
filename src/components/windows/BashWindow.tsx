@@ -8,6 +8,7 @@ import issuesRaw from "@/data/issues.json";
 import type { ProgramWindowId, WindowId } from "@/components/windows/windowTypes";
 import { WINDOW_IDS, isProgramWindow, programDef } from "@/components/windows/programs";
 import { LIGHTS_MESSAGE_TYPE } from "@/lib/cubicle";
+import { probesReport } from "@/lib/probes";
 
 /**
  * A toy filesystem, not a real one — no backend, no real process spawns.
@@ -18,14 +19,16 @@ import { LIGHTS_MESSAGE_TYPE } from "@/lib/cubicle";
  */
 type FsNode =
   | { type: "dir"; children: Record<string, FsNode> }
-  | { type: "file"; content: string; program?: ProgramWindowId; special?: "lights" | "denied" };
+  | { type: "file"; content: string; program?: ProgramWindowId; special?: Special };
+
+type Special = "lights" | "denied" | "probes";
 
 const HOME = "/home/guest";
 
 function dir(children: Record<string, FsNode>): FsNode {
   return { type: "dir", children };
 }
-function file(content: string, program?: ProgramWindowId, special?: "lights" | "denied"): FsNode {
+function file(content: string, program?: ProgramWindowId, special?: Special): FsNode {
   return { type: "file", content, program, special };
 }
 
@@ -143,6 +146,11 @@ function buildFs(nested: boolean): FsNode {
               "unlock.exe — try it and see.\ntype \"unlock.exe\" to run it",
               undefined,
               "denied"
+            ),
+            "probes.exe": file(
+              "probes.exe — who came knocking.\ntype \"probes.exe\" to run it",
+              undefined,
+              "probes"
             ),
           }),
         }
@@ -286,6 +294,10 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
       }
       if (node.special === "denied") {
         print("Permission denied.", "error");
+        return true;
+      }
+      if (node.special === "probes") {
+        print(probesReport());
         return true;
       }
       if (node.program) {

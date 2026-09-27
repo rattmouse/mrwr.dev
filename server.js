@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const { execFile } = require("child_process");
 
 // Malicious-search classifier. A missing module (e.g. a deploy that forgot to
 // ship search-guard.js) must not 500 every search — degrade to "nothing is
@@ -71,21 +72,25 @@ try {
   console.error("search-log dir create failed", err);
 }
 
-// Best-effort single-generation rotation so the archive can't grow unbounded.
-function rotateSearchLogIfLarge() {
-  fs.stat(SEARCH_LOG_FILE, (statErr, stats) => {
+// Best-effort single-generation rotation so an archive can't grow unbounded.
+function rotateIfLarge(file) {
+  fs.stat(file, (statErr, stats) => {
     if (statErr || stats.size <= SEARCH_LOG_MAX_BYTES) return;
-    fs.rename(SEARCH_LOG_FILE, `${SEARCH_LOG_FILE}.1`, (renameErr) => {
-      if (renameErr) console.error("search-log rotate failed", renameErr);
+    fs.rename(file, `${file}.1`, (renameErr) => {
+      if (renameErr) console.error(`${path.basename(file)} rotate failed`, renameErr);
     });
   });
 }
 
-function appendSearchRecord(record) {
-  rotateSearchLogIfLarge();
-  fs.appendFile(SEARCH_LOG_FILE, `${JSON.stringify(record)}\n`, (err) => {
-    if (err) console.error("search-log append failed", err);
+function appendNdjson(file, record) {
+  rotateIfLarge(file);
+  fs.appendFile(file, `${JSON.stringify(record)}\n`, (err) => {
+    if (err) console.error(`${path.basename(file)} append failed`, err);
   });
+}
+
+function appendSearchRecord(record) {
+  appendNdjson(SEARCH_LOG_FILE, record);
 }
 
 // --- session notifier ---------------------------------------------------------
@@ -111,12 +116,14 @@ async function postNotify(kind, url, headers, body, signal) {
   }
 }
 
-async function notifySearchSession(payload) {
+// Sends one message through whatever SEARCH_NOTIFY_KIND points at. `ntfy` is
+// the Title/Tags/Priority headers for ntfy; `payload` is the webhook's JSON
+// body (it gets `message: text` added). Best-effort: failures log and drop.
+async function sendNotification({ text, ntfy, payload }) {
   if (!NOTIFY_KIND) return;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS);
-  const text = notifyText(payload);
 
   try {
     if (NOTIFY_KIND === "telegram") {
@@ -149,11 +156,7 @@ async function notifySearchSession(payload) {
         console.error("search-notify: SEARCH_NOTIFY_KIND=ntfy needs NTFY_URL");
         return;
       }
-      const headers = {
-        Title: payload.flagged ? "Flagged search session" : "New search session",
-        Tags: payload.flagged ? "warning" : "mag",
-        Priority: payload.flagged ? "high" : "default",
-      };
+      const headers = { ...ntfy };
       if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
       await postNotify("ntfy", url, headers, text, controller.signal);
       return;
@@ -187,6 +190,18 @@ async function notifySearchSession(payload) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function notifySearchSession(payload) {
+  return sendNotification({
+    text: notifyText(payload),
+    ntfy: {
+      Title: payload.flagged ? "Flagged search session" : "New search session",
+      Tags: payload.flagged ? "warning" : "mag",
+      Priority: payload.flagged ? "high" : "default",
+    },
+    payload,
+  });
 }
 
 function flushSession(key) {
@@ -246,6 +261,224 @@ function bufferSearchEntry(sessionId, entry) {
   buf.timer = setTimeout(() => flushSession(key), SESSION_IDLE_MS);
   if (typeof buf.timer.unref === "function") buf.timer.unref();
 }
+
+// --- tripwire ---------------------------------------------------------------
+// Scanners ask every server for the same handful of paths — /.env, /.git/,
+// /wp-login.php, /phpmyadmin — none of which this site has or will ever have,
+// so any request for one is a bot, not a visitor. Those requests are recorded
+// to their own archive (never mixed into the search log), answered with a
+// plain 404, and summed up once a day through the search notifier. The archive
+// is also what scripts/content/refresh-probes.sh reads at build time.
+//
+// The one exception is .env, answered with DOTENV_FILE when that exists. The
+// file lives only on prod, never in the repo.
+const TRIPWIRE_LOG_FILE =
+  process.env.TRIPWIRE_LOG_FILE || path.join(__dirname, "tripwire.ndjson");
+const DOTENV_FILE = process.env.DOTENV_FILE || "";
+const TRIPWIRE_DIGEST_HOUR_UTC = (() => {
+  const hour = Number.parseInt(process.env.TRIPWIRE_DIGEST_HOUR_UTC || "", 10);
+  return Number.isInteger(hour) && hour >= 0 && hour < 24 ? hour : 16; // 9am Pacific (PDT)
+})();
+const MAX_TRIPWIRE_FIELD_LENGTH = 300;
+
+// [trap, pattern], tested against the lowercased request path, both as sent and
+// percent-decoded. First match names the trap.
+const TRAPS = [
+  ["env", /(^|\/)\.env(\.[\w-]+)?$/],
+  ["git", /(^|\/)\.(git|svn|hg)(\/|$)/],
+  ["wordpress", /(^|\/)(wp-(admin|login|content|includes|config|json)|xmlrpc\.php|wordpress|wp)(\/|\.|$)/],
+  ["php", /\.php\d?$/],
+  [
+    "secrets",
+    /(^|\/)(\.aws|\.ssh|\.docker|\.kube|\.npmrc|\.pypirc|\.htpasswd|\.htaccess|id_(rsa|ed25519)|credentials|secrets?\.(json|ya?ml)|sftp-config\.json|docker-compose\.ya?ml)(\/|$)/,
+  ],
+  [
+    "admin-panel",
+    /(^|\/)(phpmyadmin|pma|myadmin|adminer|server-status|server-info|actuator|jmx-console|manager\/html|solr|cgi-bin|boaform|hnap1|owa|ecp|autodiscover|geoserver|telescope|_ignition|vendor\/phpunit|druid|console|webui|login\.action)(\/|$)/,
+  ],
+  ["backup", /\.(sql|bak|old|orig|save|swp|tar|tgz|gz|zip|7z|rar|dump)$/],
+  ["dotfile", /(^|\/)\.(vscode|idea|ds_store|bash_history|travis\.yml|gitlab-ci\.yml|circleci)(\/|$)/],
+  ["traversal", /\.\.(\/|\\)|\/etc\/passwd|\/proc\/self|win\.ini/],
+];
+
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function trapFor(rawPath) {
+  const raw = rawPath.toLowerCase();
+  const decoded = safeDecode(raw);
+  for (const [trap, pattern] of TRAPS) {
+    if (pattern.test(raw) || pattern.test(decoded)) return trap;
+  }
+  return null;
+}
+
+function clip(value) {
+  return String(value ?? "").slice(0, MAX_TRIPWIRE_FIELD_LENGTH);
+}
+
+try {
+  fs.mkdirSync(path.dirname(TRIPWIRE_LOG_FILE), { recursive: true });
+} catch (err) {
+  console.error("tripwire dir create failed", err);
+}
+
+function tripwire(req, res, next) {
+  const rawPath = (req.originalUrl || req.url || "").split("?")[0];
+  const trap = trapFor(rawPath);
+  if (!trap) return next();
+
+  const record = {
+    at: new Date().toISOString(),
+    ip: req.ip,
+    method: req.method,
+    path: clip(req.originalUrl),
+    ua: clip(req.get("user-agent")),
+    trap,
+  };
+
+  const notFound = () => {
+    appendNdjson(TRIPWIRE_LOG_FILE, record);
+    res.status(404).type("text/plain").send("Not Found");
+  };
+
+  if (trap !== "env" || !DOTENV_FILE || (req.method !== "GET" && req.method !== "HEAD")) {
+    return notFound();
+  }
+  fs.readFile(DOTENV_FILE, "utf8", (err, bait) => {
+    if (err) return notFound();
+    record.bait = true;
+    appendNdjson(TRIPWIRE_LOG_FILE, record);
+    res.status(200).type("text/plain").set("Cache-Control", "no-store").send(bait);
+  });
+}
+
+// --- daily probe digest -----------------------------------------------------
+
+async function readNdjsonSince(file, sinceMs) {
+  const records = [];
+  // .1 first so records stay in chronological order; either may be absent.
+  for (const candidate of [`${file}.1`, file]) {
+    let text;
+    try {
+      text = await fs.promises.readFile(candidate, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      try {
+        const record = JSON.parse(line);
+        if (Date.parse(record.at) >= sinceMs) records.push(record);
+      } catch {
+        // a torn line from a crash mid-append — skip it
+      }
+    }
+  }
+  return records;
+}
+
+// endlessh logs one CLOSE line per client it let go, with how long it held it. Missing endlessh or journalctl ⇒ null, not an error.
+function readTarpitSince(sinceMs) {
+  return new Promise((resolve) => {
+    execFile(
+      "journalctl",
+      ["-u", "endlessh", "-o", "cat", "--no-pager", "--since", `@${Math.floor(sinceMs / 1000)}`],
+      { timeout: 10000, maxBuffer: 64 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        let held = 0;
+        let seconds = 0;
+        let longest = 0;
+        const hosts = new Set();
+        for (const line of stdout.split("\n")) {
+          const m = / CLOSE host=(\S+) .*\btime=([\d.]+)/.exec(line);
+          if (!m) continue;
+          const t = Number.parseFloat(m[2]) || 0;
+          held += 1;
+          seconds += t;
+          longest = Math.max(longest, t);
+          hosts.add(m[1]);
+        }
+        resolve({ held, sources: hosts.size, seconds, longest });
+      }
+    );
+  });
+}
+
+function countBy(items, key) {
+  const counts = new Map();
+  for (const item of items) counts.set(item[key], (counts.get(item[key]) || 0) + 1);
+  return Array.from(counts, ([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+}
+
+function hours(seconds) {
+  return seconds >= 3600 ? `${(seconds / 3600).toFixed(1)}h` : `${Math.round(seconds / 60)}m`;
+}
+
+async function sendProbeDigest() {
+  const sinceMs = Date.now() - 24 * 60 * 60 * 1000;
+  const probes = await readNdjsonSince(TRIPWIRE_LOG_FILE, sinceMs);
+  const tarpit = await readTarpitSince(sinceMs);
+  if (!probes.length && !tarpit?.held) return;
+
+  const sources = new Set(probes.map((p) => p.ip)).size;
+  const bait = probes.filter((p) => p.bait).length;
+  const byTrap = countBy(probes, "trap");
+  const topPaths = countBy(probes, "path").slice(0, 5);
+
+  const lines = [`Caught probes · last 24h`, ""];
+  lines.push(`web: ${probes.length} probe${probes.length === 1 ? "" : "s"} from ${sources} source${sources === 1 ? "" : "s"}`);
+  if (bait) lines.push(`  .env bait handed out: ${bait}`);
+  if (byTrap.length) lines.push(`  ${byTrap.map((t) => `${t.value} ${t.count}`).join(" · ")}`);
+  for (const p of topPaths) lines.push(`  ${String(p.count).padStart(4)}  ${p.value}`);
+  if (tarpit?.held) {
+    lines.push(
+      "",
+      `ssh tarpit: ${tarpit.held} bot${tarpit.held === 1 ? "" : "s"} held, ` +
+        `${hours(tarpit.seconds)} wasted (longest ${hours(tarpit.longest)})`
+    );
+  }
+
+  await sendNotification({
+    text: lines.join("\n"),
+    ntfy: { Title: "Caught probes", Tags: "shield", Priority: "low" },
+    payload: {
+      type: "probe-digest",
+      since: new Date(sinceMs).toISOString(),
+      probes: probes.length,
+      sources,
+      bait,
+      byTrap,
+      topPaths,
+      tarpit,
+    },
+  });
+}
+
+function scheduleProbeDigest() {
+  if (!NOTIFY_KIND) return;
+  const now = new Date();
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), TRIPWIRE_DIGEST_HOUR_UTC)
+  );
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  setTimeout(() => {
+    sendProbeDigest()
+      .catch((err) => console.error("probe digest failed", err))
+      .finally(scheduleProbeDigest);
+  }, next - now);
+}
+
+// Caddy, on this same box, is the only thing that should talk to us — trust
+// its X-Forwarded-For so req.ip is the visitor, not 127.0.0.1.
+app.set("trust proxy", "loopback");
+app.use(tripwire);
 
 app.use(express.json());
 app.use(express.static(OUT_DIR, {
@@ -376,6 +609,11 @@ app.post("/log-search", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Serving ${OUT_DIR} on http://localhost:${PORT}`);
+  console.log(
+    `tripwire armed (log=${TRIPWIRE_LOG_FILE}, dotenv=${DOTENV_FILE || "none"}` +
+      (NOTIFY_KIND ? `, digest=${TRIPWIRE_DIGEST_HOUR_UTC}:00 UTC)` : ")")
+  );
+  scheduleProbeDigest();
   if (NOTIFY_KIND) {
     const known = ["telegram", "ntfy", "webhook"].includes(NOTIFY_KIND);
     console.log(

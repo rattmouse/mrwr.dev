@@ -172,6 +172,8 @@ cmd_ci() {
       || echo "[ci] warning: search-history refresh failed; building with whatever is in the tree." >&2
     scripts/content/refresh-projects.sh \
       || echo "[ci] warning: project metadata refresh failed; falling back to projects.base.json." >&2
+    scripts/content/refresh-probes.sh \
+      || echo "[ci] warning: probe refresh failed; building with whatever is in the tree." >&2
 
     # Every PR bumps the version (node scripts/version.mjs bump patch). On a
     # branch, fail unless it is ahead of main; on main itself there is nothing
