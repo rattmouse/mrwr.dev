@@ -6,7 +6,9 @@ import { PROJECTS } from "@/lib/projects";
 import { getVersions } from "@/lib/versions";
 import issuesRaw from "@/data/issues.json";
 import type { ProgramWindowId, WindowId } from "@/components/windows/windowTypes";
+import { WINDOW_IDS, isProgramWindow, programDef } from "@/components/windows/programs";
 import { LIGHTS_MESSAGE_TYPE } from "@/lib/cubicle";
+import { probesReport } from "@/lib/probes";
 
 /**
  * A toy filesystem, not a real one — no backend, no real process spawns.
@@ -17,31 +19,24 @@ import { LIGHTS_MESSAGE_TYPE } from "@/lib/cubicle";
  */
 type FsNode =
   | { type: "dir"; children: Record<string, FsNode> }
-  | { type: "file"; content: string; program?: ProgramWindowId; special?: "lights" | "denied" };
+  | { type: "file"; content: string; program?: ProgramWindowId; special?: Special };
+
+type Special = "lights" | "denied" | "probes";
 
 const HOME = "/home/guest";
 
 function dir(children: Record<string, FsNode>): FsNode {
   return { type: "dir", children };
 }
-function file(content: string, program?: ProgramWindowId, special?: "lights" | "denied"): FsNode {
+function file(content: string, program?: ProgramWindowId, special?: Special): FsNode {
   return { type: "file", content, program, special };
 }
 
 /** The real programs this desktop has, as files sitting in the guest's home dir. */
-const PROGRAMS: { file: string; id: ProgramWindowId; blurb: string }[] = [
-  { file: "notepad.exe", id: "notepad", blurb: "a blank page, the way it used to be." },
-  { file: "paint.exe", id: "paint", blurb: "a little painting program." },
-  { file: "player.exe", id: "player", blurb: "plays whatever you give it." },
-  { file: "strudel.cc", id: "music", blurb: "live-code some music." },
-  { file: "midi.exe", id: "midi", blurb: "a MIDI keyboard, no piano required." },
-  { file: "party.webp", id: "party", blurb: "a party that broke out of its picture frame." },
-  { file: "marbles.exe", id: "marbles", blurb: "a physics toy: marbles on a course." },
-  { file: "tasks.exe", id: "tasks", blurb: "survive the workday." },
-  { file: "cubicles.exe", id: "cubicles", blurb: "a first-person office you can walk around." },
-  { file: "issues.exe", id: "issues", blurb: "every issue this site has ever had." },
-  { file: "changes.exe", id: "changes", blurb: "the version history." },
-];
+const PROGRAM_FILES = WINDOW_IDS.flatMap((id) => {
+  const def = programDef(id);
+  return isProgramWindow(id) && def.shell ? [{ file: def.title, id, blurb: def.shell.blurb }] : [];
+});
 
 /**
  * Same trick cubicles.exe uses to know it's the browser standing on its own
@@ -125,7 +120,7 @@ function buildHomeDir(): FsNode {
       ["ls", "cat about.txt", "notepad.exe", "cd /changelog", "cat latest.txt", "whoami", "sudo rm -rf /"].join("\n")
     ),
   };
-  for (const p of PROGRAMS) {
+  for (const p of PROGRAM_FILES) {
     children[p.file] = file(`${p.file} — ${p.blurb}\ntype "${p.file}" to run it`, p.id);
   }
   return dir(children);
@@ -151,6 +146,11 @@ function buildFs(nested: boolean): FsNode {
               "unlock.exe — try it and see.\ntype \"unlock.exe\" to run it",
               undefined,
               "denied"
+            ),
+            "probes.exe": file(
+              "probes.exe — who came knocking.\ntype \"probes.exe\" to run it",
+              undefined,
+              "probes"
             ),
           }),
         }
@@ -294,6 +294,10 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
       }
       if (node.special === "denied") {
         print("Permission denied.", "error");
+        return true;
+      }
+      if (node.special === "probes") {
+        print(probesReport());
         return true;
       }
       if (node.program) {

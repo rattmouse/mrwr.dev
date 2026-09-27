@@ -4,6 +4,7 @@
 # Usage:
 #   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build] [--skip-issues]
 #                            [--skip-search-history] [--skip-projects]
+#                            [--skip-probes]
 #
 # Run this from whatever machine has the repo checked out and can reach prod
 # over ssh — that's your Kubuntu box, not a separate build VM. There's no
@@ -25,6 +26,7 @@ SKIP_BUILD=0
 SKIP_ISSUES=0
 SKIP_SEARCH_HISTORY=0
 SKIP_PROJECTS=0
+SKIP_PROBES=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
@@ -32,7 +34,8 @@ for arg in "$@"; do
     --skip-issues) SKIP_ISSUES=1 ;;
     --skip-search-history) SKIP_SEARCH_HISTORY=1 ;;
     --skip-projects) SKIP_PROJECTS=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects)" ;;
+    --skip-probes) SKIP_PROBES=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes)" ;;
   esac
 done
 
@@ -94,6 +97,19 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
       || warn "Project metadata refresh failed; shipping src/data/projects.json as-is."
   else
     warn "Skipping project metadata refresh (--skip-projects) — shipping src/data/projects.json as-is."
+  fi
+
+  if [[ "$SKIP_PROBES" -ne 1 ]]; then
+    log "Refreshing probe report..."
+    # probes.json is gitignored and read at build time. Best-effort, and it
+    # always writes the file (empty on failure) because the build imports it.
+    "$REPO_ROOT/scripts/content/refresh-probes.sh" \
+      || warn "Probe refresh failed; shipping src/data/probes.json as-is."
+  elif [[ ! -f "$REPO_ROOT/src/data/probes.json" ]]; then
+    # The build imports it, so --skip-probes still needs something there.
+    node "$REPO_ROOT/scripts/content/refresh-probes.mjs"
+  else
+    warn "Skipping probe refresh (--skip-probes) — shipping src/data/probes.json as-is."
   fi
 
   log "Installing dependencies..."

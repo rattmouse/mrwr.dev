@@ -1,7 +1,5 @@
-export type WindowId = "welcome" | "about" | "projects" | "demos" | "contact" | "collections" | "notepad" | "issues" | "changes" | "music" | "midi" | "paint" | "party" | "player" | "marbles" | "tasks" | "cubicles" | "bash";
-
-export type ProgramWindowId = "welcome" | "notepad" | "issues" | "changes" | "music" | "midi" | "paint" | "party" | "player" | "marbles" | "tasks" | "cubicles" | "bash";
-export type DocumentWindowId = "about" | "projects" | "demos" | "contact" | "collections";
+export type { WindowId, ProgramWindowId, DocumentWindowId } from "@/components/windows/programs";
+export { isProgramWindow, isDocumentWindow } from "@/components/windows/programs";
 
 /**
  * How a window sits on the desktop. "minimized" is the taskbar state: the
@@ -21,25 +19,3 @@ export type Layout = "normal" | "minimized" | "maximized";
 export type WindowAction = "restore" | "minimize" | "maximize" | "center" | "close";
 
 export type WindowBox = { left: number; top: number; width: number; height: number };
-
-export function isProgramWindow(id: WindowId): id is ProgramWindowId {
-  return (
-    id === "welcome" ||
-    id === "notepad" ||
-    id === "issues" ||
-    id === "changes" ||
-    id === "music" ||
-    id === "midi" ||
-    id === "paint" ||
-    id === "party" ||
-    id === "marbles" ||
-    id === "player" ||
-    id === "tasks" ||
-    id === "cubicles" ||
-    id === "bash"
-  );
-}
-
-export function isDocumentWindow(id: WindowId): id is DocumentWindowId {
-  return id === "about" || id === "projects" || id === "demos" || id === "contact" || id === "collections";
-}

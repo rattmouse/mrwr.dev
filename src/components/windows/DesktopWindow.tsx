@@ -351,7 +351,13 @@ export default function DesktopWindow({
         }}
       />
     )}
-    <Window style={style} onPointerDownCapture={onFocus}>
+    <Window
+      style={style}
+      onPointerDownCapture={onFocus}
+      // Lets things that float over the desktop (collections.exe's scattered
+      // tiles) find the windows on screen and keep out of their way.
+      data-desktop-window={isMinimized ? undefined : "true"}
+    >
       <WindowHeader
         ref={headerRef}
         active={active}

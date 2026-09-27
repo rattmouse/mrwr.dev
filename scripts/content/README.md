@@ -171,7 +171,7 @@ with its name, set, number, rarity and scans. This script opens that database
 `public/collections/cards.json`.
 
 ```
-scripts/content/refresh-pokemon-cards.sh                 # top 48 cards
+scripts/content/refresh-pokemon-cards.sh                 # top 40 cards
 scripts/content/refresh-pokemon-cards.sh --limit 100
 scripts/content/refresh-pokemon-cards.sh --all
 scripts/content/refresh-pokemon-cards.sh --db /path/to/binder.db
@@ -188,7 +188,7 @@ number over its set and rarity, plus `×N` when more than one is owned.
 Two scans come down per card: the full one the maximized window shows, and a
 thumbnail for the tile scattered across the desktop. They are copied locally
 rather than hotlinked so the site still calls nothing at runtime. **Watch the
-size** — a card is about 600KB of PNG, so the default 48 is ~38MB and `--all`
+size** — a card is about 600KB of PNG, so the default 40 is ~32MB and `--all`
 (around 500 cards) would be well over 300MB shipped to prod on the next deploy.
 
 Unlike the issue, project and search-history refreshes this is **not** wired into

@@ -63,14 +63,15 @@ function topmost(windows: OpenWindow[]): WindowId | null {
   return null;
 }
 
+// The welcome window as every visit opens it: centred, at its natural size,
+// in front of everything else.
+const WELCOME: OpenWindow = { id: "welcome", layout: "normal", cascade: 0, box: null };
+
 export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProps) {
   // The open windows and which one has the focus are one piece of state: every
   // change to the desktop touches both (opening focuses, closing hands the
   // focus on), and keeping them together means they can never disagree.
-  const [desktop, setDesktop] = useState<Desktop>({
-    windows: [{ id: "welcome", layout: "normal", cascade: 0, box: null }],
-    focused: "welcome",
-  });
+  const [desktop, setDesktop] = useState<Desktop>({ windows: [WELCOME], focused: "welcome" });
   const { windows, focused } = desktop;
   // Where the next window opened will sit in the cascade. It only ever counts
   // up, so closing a window doesn't shuffle the ones still open.
@@ -86,13 +87,16 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
   // Pick up the desktop where the last visit left it. The page is prerendered
   // with just the welcome window, so the saved one can only be read once it's
   // in the browser — before the first paint, so there's no flash of the wrong
-  // desktop.
+  // desktop. Everything comes back as it was except the welcome window, which
+  // greets every visit the same way — centred, at its natural size, on top
+  // and focused — wherever it was dragged, resized or sent last time.
   const restored = useRef(false);
   useLayoutEffect(() => {
     const saved = loadDesktop();
     if (!saved) return;
-    cascadeSeed.current = saved.windows.reduce((max, w) => Math.max(max, w.cascade + 1), 1);
-    setDesktop(saved);
+    const others = saved.windows.filter((w) => w.id !== "welcome");
+    cascadeSeed.current = others.reduce((max, w) => Math.max(max, w.cascade + 1), 1);
+    setDesktop({ windows: [...others, WELCOME], focused: "welcome" });
   }, []);
 
   // Remember every change — but not the untouched desktop the page first drew,

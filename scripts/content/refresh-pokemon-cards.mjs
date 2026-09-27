@@ -16,7 +16,7 @@
 // Both outputs are gitignored, like everything else under public/collections/,
 // and the scans are copied locally so the site still calls nothing at runtime.
 //
-//   scripts/content/refresh-pokemon-cards.sh                  # top 48 cards
+//   scripts/content/refresh-pokemon-cards.sh                  # top 40 cards
 //   scripts/content/refresh-pokemon-cards.sh --limit 100
 //   scripts/content/refresh-pokemon-cards.sh --all
 //   scripts/content/refresh-pokemon-cards.sh --db /path/to/binder.db
@@ -34,7 +34,7 @@ const IMAGE_PUBLIC = "/collections/cards";
 const DEFAULT_DB = resolve(ROOT, "../card-binder/binder.db");
 
 // Enough to fill a desktop without burying it — the Albums shelf is 26.
-const DEFAULT_LIMIT = 48;
+const DEFAULT_LIMIT = 40;
 // Longest credit line the Collections caption shows before it gets clipped.
 const CREDIT_MAX = 56;
 
