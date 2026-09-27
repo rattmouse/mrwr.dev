@@ -148,8 +148,15 @@ export type Pose = { pos: Vec3; yaw: number; pitch: number; fov: number };
 
 /** With your back to the locked door, looking down the row at the day. */
 export const STANDING: Pose = { pos: vec(DOOR.x, EYE_STANDING, DOOR.z - 1.15), yaw: 0, pitch: 0.07, fov: 1.12 };
-/** Leaning in at the desk: closer, and squinting at the glass. */
-export const SEATED: Pose = { pos: vec(0, 1.19, -0.5), yaw: 0, pitch: 0.29, fov: 0.72 };
+/**
+ * Leaning in at the desk: closer, eye level with the middle of the glass and
+ * looking straight at it. Square-on is deliberate. Facing the glass head-on
+ * leaves the browser laid over it with no perspective at all, just scale and
+ * position — and Firefox drops text from a page under a perspective
+ * transform, so tilting down at the glass left the computer's menus and
+ * windows blank there.
+ */
+export const SEATED: Pose = { pos: vec(0, SCREEN.centre.y, -0.5), yaw: 0, pitch: 0, fov: 0.72 };
 
 /* ------------------------------------------------------------------ props */
 
