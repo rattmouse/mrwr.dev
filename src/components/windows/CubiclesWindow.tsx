@@ -10,19 +10,37 @@ import {
   LIGHTS_MESSAGE_TYPE,
   Pose,
   ROOM,
+  FLOOR,
+  PLAYER_RADIUS,
   SCREEN,
-  SEATED,
   STANDING,
   USE_RANGE,
+  DOOR_MESSAGE_TYPE,
+  EYES_MESSAGE_TYPE,
+  closeDoor,
+  hallBoxes,
+  isDoorLocked,
+  isDoorOpen,
+  openDoor,
+  shutDoor,
+  unlockDoor,
+  throughTheEnd,
+  MONITOR_MESSAGE_TYPE,
+  nextMonitorScale,
+  setMonitorScale,
   aimAtDoor,
   aimAtScreen,
   doorBoxes,
   gaze,
+  seatedPose,
   walk,
 } from "@/lib/cubicle";
 import { Face, Skin, VOID, collectGlass, collectRoom, glassQuad, paintFaces, quadTransform } from "@/lib/cubicleDraw";
 
 type Phase = "intro" | "standing" | "seated";
+
+/** As close to the far wall as the room lets you stand. */
+const ROOM_EDGE = FLOOR.maxZ - PLAYER_RADIUS + 1e-3;
 
 const MOVE_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 /** Radians per pixel dragged. */
@@ -70,14 +88,63 @@ const nestedStore = {
   onServer: () => false,
 };
 
+/**
+ * eyes.exe's broken graphics card. The whole view — room, monitor and all —
+ * is dragged round the colour wheel at four times the saturation, and the room
+ * and the monitor each have their red, green and blue pulled apart and jerked
+ * about (cubicles-split, below). The split goes on those two rather than in
+ * here: a filter list with a url() in it can't be animated, so the hue would
+ * never turn.
+ * The hue moves in steps rather than smoothly: a card on its way out doesn't
+ * fade, it stutters.
+ */
+const TRIP_CSS = `
+@keyframes cubicles-trip {
+  0%   { filter: saturate(4) contrast(1.25) hue-rotate(0deg); }
+  100% { filter: saturate(4) contrast(1.25) hue-rotate(360deg); }
+}
+.cubicles-trip { animation: cubicles-trip 2.2s steps(22) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .cubicles-trip { animation: none; filter: saturate(4) contrast(1.25) hue-rotate(140deg); }
+}
+`;
+
+/** Keeps one colour channel of an image and drops the other two. */
+const CHANNELS = {
+  r: "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0",
+  g: "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0",
+  b: "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0",
+} as const;
+
+/** How far each channel is thrown, in pixels, frame by frame of its jitter. */
+const SPLIT = [
+  { channel: "r", dx: "6;-3;11;2;-8;4", dy: "0;2;-1;0;3" },
+  { channel: "g", dx: "0;4;-2;-9;1;0", dy: "3;-2;0;5;-4" },
+  { channel: "b", dx: "-6;8;-4;3;10;-2", dy: "-2;0;4;-3;1" },
+] as const;
+
+/**
+ * Aiming at the door — or, once it's open, at the doorway it closes over. Only
+ * from in the room: stood in the doorway or out in the hallway, shutting it
+ * would shut you in with nothing.
+ */
+function atTheDoor(from: Vec3, look: Vec3, range?: number): boolean {
+  if (isDoorOpen() && from.z > ROOM_EDGE) return false;
+  return aimAtDoor(from, look, range);
+}
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+/** An angle folded into −π … π, whichever way round it came from. */
+const wrapAngle = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.PI * 2));
 
 function lerpPose(from: Pose, to: Pose, t: number): Pose {
   const mix = (a: number, b: number) => a + (b - a) * t;
   return {
     pos: vec(mix(from.pos.x, to.pos.x), mix(from.pos.y, to.pos.y), mix(from.pos.z, to.pos.z)),
-    yaw: mix(from.yaw, to.yaw),
+    // The short way round: however many turns the two yaws are apart on
+    // paper, sitting down never spins you more than half of one.
+    yaw: from.yaw + wrapAngle(to.yaw - from.yaw) * t,
     pitch: mix(from.pitch, to.pitch),
     fov: mix(from.fov, to.fov),
   };
@@ -103,6 +170,12 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
 
   /** When the door was last tried, so it can shake it off. */
   const rattledRef = useRef(-Infinity);
+  /** Trying the door: locked, it rattles; unlocked (see unlock.exe), it swings open, or shut again. */
+  const tryDoor = () => {
+    if (isDoorOpen()) shutDoor();
+    else if (isDoorLocked()) rattledRef.current = performance.now();
+    else openDoor();
+  };
   const keysRef = useRef<Set<string>>(new Set());
   const stickRef = useRef({ x: 0, y: 0 });
   // Only the focused window hears the keyboard. Held keys are let go the moment
@@ -127,10 +200,29 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
   // lights.exe lives one frame in, on the computer on this desk, so it flips
   // this switch by shouting across the frame boundary rather than a prop.
   const [lightsOn, setLightsOn] = useState(true);
+  // eyes.exe, same deal: the whole view goes the way a dying graphics card
+  // draws it — see TRIP_CSS — until it's run again.
+  const [tripping, setTripping] = useState(false);
+  /** Re-measures the glass after upgrade.exe has swapped the monitor. */
+  const refitRef = useRef<() => void>(() => {});
+  // The monitor is shared module state; a fresh cubicle starts with the one it was issued.
+  useEffect(
+    () => () => {
+      setMonitorScale(1);
+      closeDoor();
+    },
+    [],
+  );
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type === LIGHTS_MESSAGE_TYPE) setLightsOn((v) => !v);
+      if (e.data?.type === EYES_MESSAGE_TYPE) setTripping((v) => !v);
+      if (e.data?.type === DOOR_MESSAGE_TYPE) unlockDoor();
+      if (e.data?.type === MONITOR_MESSAGE_TYPE) {
+        setMonitorScale(nextMonitorScale());
+        refitRef.current();
+      }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -150,7 +242,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     if (into === "seated" && !sitRef.current) standPoseRef.current = { ...poseRef.current };
     sitRef.current = {
       from: { ...poseRef.current },
-      to: into === "seated" ? SEATED : standPoseRef.current,
+      to: into === "seated" ? seatedPose(sizeRef.current.width, sizeRef.current.height) : standPoseRef.current,
       t: 0,
       into,
     };
@@ -179,7 +271,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         const pose = poseRef.current;
         const look = gaze(pose.yaw, pose.pitch);
         if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
-        else if (aimAtDoor(pose.pos, look)) rattledRef.current = performance.now();
+        else if (atTheDoor(pose.pos, look)) tryDoor();
         event.preventDefault();
         return;
       }
@@ -253,7 +345,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     const pose = poseRef.current;
     const look = rayThrough(at.x, at.y, at.width, at.height);
     if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
-    else if (aimAtDoor(pose.pos, look)) rattledRef.current = performance.now();
+    else if (atTheDoor(pose.pos, look)) tryDoor();
   };
 
   const onStickMove = useCallback((x: number, y: number) => {
@@ -298,7 +390,8 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       // the only pose the browser is legible in. Projection scales with the
       // viewport's height alone (see marbles3d.ts), so this only needs
       // recomputing here, on resize, not every animation frame.
-      const seatedQuad = glassQuad(makeView(SEATED, width, height));
+      const seated = seatedPose(width, height);
+      const seatedQuad = glassQuad(makeView(seated, width, height));
       if (seatedQuad) {
         const [p0, p1] = seatedQuad;
         const quadWidth = Math.hypot(p1.x - p0.x, p1.y - p0.y);
@@ -310,8 +403,11 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
           screen.style.height = `${screenSizeRef.current.height}px`;
         }
       }
+      // Already sat down, the view refits to the window's new shape.
+      if (phaseRef.current === "seated" && !sitRef.current) poseRef.current = seated;
     };
     fit();
+    refitRef.current = fit;
     const observer = new ResizeObserver(fit);
     observer.observe(wrap);
 
@@ -358,8 +454,15 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         }
         const moving = Math.hypot(dx, dz) > 1e-3;
         bobRef.current = moving ? bobRef.current + dt * 7.5 : 0;
-        const walked = walk(pose.pos, yaw, dx, dz, dt);
-        yaw = ((yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
+        let walked = walk(pose.pos, yaw, dx, dz, dt);
+        const back = throughTheEnd(walked, yaw);
+        if (back) {
+          walked = back.pos;
+          yaw = back.yaw;
+          // And the door swings to behind you. Still unlocked.
+          shutDoor();
+        }
+        yaw = wrapAngle(yaw);
         poseRef.current = {
           ...pose,
           yaw,
@@ -376,8 +479,10 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         const look = gaze(pose.yaw, pose.pitch);
         if (aimAtScreen(pose.pos, look, USE_RANGE)) {
           hint = "Use the computer — click, or E";
-        } else if (aimAtDoor(pose.pos, look, DOOR_RANGE)) {
-          hint = rattling ? "It doesn't budge." : "The door is locked — click, or E";
+        } else if (atTheDoor(pose.pos, look, DOOR_RANGE)) {
+          if (isDoorOpen()) hint = "Close the door — click, or E";
+          else if (!isDoorLocked()) hint = "Open the door — click, or E";
+          else hint = rattling ? "It doesn't budge." : "The door is locked — click, or E";
         }
       }
       if (hint !== shownPrompt) {
@@ -404,10 +509,12 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       }
 
       const quad = glassQuad(view);
-      // The door is the only thing in the room that moves, so the list handed
-      // to the painter is built once and only its last two entries replaced.
+      // The door (and the hallway behind it, once it's open) is the only thing
+      // in the room that changes, so the list handed to the painter is built
+      // once and only the entries on its end replaced.
       scene.length = ROOM.length;
       for (const box of doorBoxes(shove)) scene.push(box);
+      for (const box of hallBoxes()) scene.push(box);
       collectRoom(view, scene, faces);
       const glass = collectGlass(view, quad, echoSkin);
       if (glass) faces.push(glass);
@@ -449,6 +556,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
   return (
     <div
       ref={wrapRef}
+      className={tripping ? "cubicles-trip" : undefined}
       style={{
         flex: "1 1 auto",
         minHeight: 0,
@@ -466,7 +574,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         style={{
           display: "block",
           cursor: walking ? "crosshair" : "default",
-          filter: lightsOn ? "none" : "brightness(0.1) saturate(0.5)",
+          filter: [lightsOn ? "" : "brightness(0.1) saturate(0.5)", tripping ? "url(#cubicles-split)" : ""].join(" ").trim() || "none",
           transition: "filter 120ms ease-out",
         }}
         onPointerDown={onPointerDown}
@@ -489,6 +597,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
             overflow: "hidden",
             pointerEvents: "none",
             perspective: "none",
+            filter: tripping ? "url(#cubicles-split)" : undefined,
           }}
         >
           <div
@@ -523,6 +632,27 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
             />
           </div>
         </div>
+      )}
+
+      {tripping && (
+        <>
+          <style>{TRIP_CSS}</style>
+          <svg aria-hidden width="0" height="0" style={{ position: "absolute" }}>
+            <filter id="cubicles-split" x="-5%" y="-5%" width="110%" height="110%" colorInterpolationFilters="sRGB">
+              {SPLIT.map(({ channel, dx, dy }) => (
+                <React.Fragment key={channel}>
+                  <feColorMatrix in="SourceGraphic" type="matrix" values={CHANNELS[channel]} result={`${channel}-only`} />
+                  <feOffset in={`${channel}-only`} result={`${channel}-moved`}>
+                    <animate attributeName="dx" values={dx} dur="0.9s" calcMode="discrete" repeatCount="indefinite" />
+                    <animate attributeName="dy" values={dy} dur="1.3s" calcMode="discrete" repeatCount="indefinite" />
+                  </feOffset>
+                </React.Fragment>
+              ))}
+              <feBlend in="r-moved" in2="g-moved" mode="screen" result="rg" />
+              <feBlend in="rg" in2="b-moved" mode="screen" />
+            </filter>
+          </svg>
+        </>
       )}
 
       {walking && (

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button, GroupBox, Separator, Window, WindowContent, WindowHeader } from "react95";
 import { Joystick } from "@/components/windows/MpkPanel";
+import { markClockedOut } from "@/lib/cubicle";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
 import {
   GamePhase,
@@ -488,6 +489,8 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
         }
         stepRun(run, dx, dy, dt, now, width, height, Math.random);
         if (run.phase !== "playing") {
+          // A day worked to the end on the computer in cubicles.exe earns the way out.
+          if (run.phase === "victory" && window.self !== window.top) markClockedOut();
           setPhase(run.phase);
           setChoices(run.choices);
           setOwned(ownedUpgrades(run));

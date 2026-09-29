@@ -7,8 +7,25 @@ import { getVersions } from "@/lib/versions";
 import issuesRaw from "@/data/issues.json";
 import type { ProgramWindowId, WindowId } from "@/components/windows/windowTypes";
 import { WINDOW_IDS, isProgramWindow, programDef } from "@/components/windows/programs";
-import { LIGHTS_MESSAGE_TYPE } from "@/lib/cubicle";
+import { DOOR_MESSAGE_TYPE, EYES_MESSAGE_TYPE, LIGHTS_MESSAGE_TYPE, MONITOR_MESSAGE_TYPE, hasClockedOut } from "@/lib/cubicle";
 import { probesReport } from "@/lib/probes";
+
+/**
+ * Narrow enough that the terminal's text is shrunk (see CRT_SIZE below) — a
+ * phone, or the computer inside cubicles.exe. At that size the CRT dressing
+ * (the outline stroke, the glow, the heavy scanlines) fills in the letters, so
+ * it is toned right down.
+ */
+const NARROW_QUERY = "(max-width: 620px)";
+const narrowStore = {
+  subscribe: (onChange: () => void) => {
+    const query = window.matchMedia(NARROW_QUERY);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  },
+  get: () => window.matchMedia(NARROW_QUERY).matches,
+  onServer: () => false,
+};
 
 /**
  * A toy filesystem, not a real one — no backend, no real process spawns.
@@ -21,7 +38,7 @@ type FsNode =
   | { type: "dir"; children: Record<string, FsNode> }
   | { type: "file"; content: string; program?: ProgramWindowId; special?: Special };
 
-type Special = "lights" | "denied" | "probes";
+type Special = "lights" | "eyes" | "upgrade" | "unlock";
 
 const HOME = "/home/guest";
 
@@ -106,7 +123,10 @@ function buildIssuesDir(): FsNode {
   return dir(children);
 }
 
-function buildHomeDir(): FsNode {
+/** What the last person at this desk was writing. Only ever found in there. */
+const NOVEL = Array.from({ length: 113 }, () => "all work and no play makes matt a dull boy").join("\n");
+
+function buildHomeDir(nested: boolean): FsNode {
   const children: Record<string, FsNode> = {
     "about.txt": file(
       [
@@ -119,6 +139,7 @@ function buildHomeDir(): FsNode {
     ".bash_history": file(
       ["ls", "cat about.txt", "notepad.exe", "cd /changelog", "cat latest.txt", "whoami", "sudo rm -rf /"].join("\n")
     ),
+    ...(nested ? { "novel.txt": file(NOVEL) } : {}),
   };
   for (const p of PROGRAM_FILES) {
     children[p.file] = file(`${p.file} — ${p.blurb}\ntype "${p.file}" to run it`, p.id);
@@ -129,7 +150,7 @@ function buildHomeDir(): FsNode {
 function buildFs(nested: boolean): FsNode {
   return dir({
     home: dir({
-      guest: buildHomeDir(),
+      guest: buildHomeDir(nested),
     }),
     projects: buildProjectsDir(),
     changelog: buildChangelogDir(),
@@ -142,15 +163,20 @@ function buildFs(nested: boolean): FsNode {
               undefined,
               "lights"
             ),
+            "eyes.exe": file(
+              "eyes.exe — don't stare too long.\ntype \"eyes.exe\" to run it",
+              undefined,
+              "eyes"
+            ),
+            "upgrade.exe": file(
+              "upgrade.exe — file a ticket with IT for a bigger monitor.\ntype \"upgrade.exe\" to run it",
+              undefined,
+              "upgrade"
+            ),
             "unlock.exe": file(
               "unlock.exe — try it and see.\ntype \"unlock.exe\" to run it",
               undefined,
-              "denied"
-            ),
-            "probes.exe": file(
-              "probes.exe — who came knocking.\ntype \"probes.exe\" to run it",
-              undefined,
-              "probes"
+              "unlock"
             ),
           }),
         }
@@ -189,8 +215,8 @@ function buildMotd(): string[] {
   return [new Date().toISOString(), 'type "help" for usage', ""];
 }
 
-/** How wide the terminal reads, in characters, for wrapping `ls` into columns. */
-const LS_TERM_WIDTH = 46;
+/** `ls` always lays out in this many columns, however wide the window is. */
+const LS_COLUMNS = 2;
 
 /** `ls -F` style: "/" for a directory, "*" for a runnable program, nothing otherwise. */
 function classify(name: string, node: FsNode): string {
@@ -199,11 +225,11 @@ function classify(name: string, node: FsNode): string {
   return name;
 }
 
-/** Lays sorted, classified names out column-major, the way a real `ls` wraps a terminal. */
+/** Lays sorted, classified names out column-major in LS_COLUMNS columns, the way a real `ls` does. */
 function formatLsColumns(labels: string[]): string {
   if (!labels.length) return "";
   const colWidth = Math.max(...labels.map((l) => l.length)) + 2;
-  const cols = Math.max(1, Math.floor(LS_TERM_WIDTH / colWidth));
+  const cols = Math.min(LS_COLUMNS, labels.length);
   const rows = Math.ceil(labels.length / cols);
   const lines: string[] = [];
   for (let r = 0; r < rows; r += 1) {
@@ -227,9 +253,12 @@ const MAN_PAGES: Record<string, string> = {
   storage: "storage [key] - list localStorage + sessionStorage keys, or dump one as JSON",
   env: "env - browser and page facts (user agent, language, screen, url, ...)",
   cookies: "cookies - list this page's cookies",
+  bots: "bots - view hack attempts",
 };
 
-type Line = { text: string; kind?: "input" | "output" | "error" };
+/** `nowrap` lines keep to one line and scroll sideways rather than wrap — for
+ *  output laid out in columns (help, man), which wrapping would scramble. */
+type Line = { text: string; kind?: "input" | "output" | "error"; nowrap?: boolean };
 
 function useHistory() {
   const historyRef = useRef<string[]>([]);
@@ -273,14 +302,15 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
   const history = useHistory();
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    // Bottom left: a wide help or man line may have left it scrolled sideways.
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, left: 0 });
   }, [lines]);
 
-  const print = (text: string, kind: Line["kind"] = "output") => {
-    setLines((prev) => [...prev, ...text.split("\n").map((t) => ({ text: t, kind }))]);
+  const print = (text: string, kind: Line["kind"] = "output", nowrap = false) => {
+    setLines((prev) => [...prev, ...text.split("\n").map((t) => ({ text: t, kind, nowrap }))]);
   };
 
-  const prompt = () => `guest@mrwr.dev:${cwd === HOME ? "~" : cwd}$`;
+  const prompt = () => `${cwd === HOME ? "~" : cwd}$`;
 
   /** Runs a program (or special) file if `typed` resolves to one from `cwd` — extension optional. */
   function tryLaunchProgram(typed: string): boolean {
@@ -292,12 +322,24 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
         window.parent?.postMessage({ type: LIGHTS_MESSAGE_TYPE }, window.location.origin);
         return true;
       }
-      if (node.special === "denied") {
-        print("Permission denied.", "error");
+      if (node.special === "eyes") {
+        print("You rub your eyes.");
+        window.parent?.postMessage({ type: EYES_MESSAGE_TYPE }, window.location.origin);
         return true;
       }
-      if (node.special === "probes") {
-        print(probesReport());
+      if (node.special === "upgrade") {
+        print("Ticket filed with IT. Something on your desk just changed.");
+        window.parent?.postMessage({ type: MONITOR_MESSAGE_TYPE }, window.location.origin);
+        return true;
+      }
+      if (node.special === "unlock") {
+        // Not before 5 o'clock: the day has to be worked first (tasks.exe, on this computer).
+        if (!hasClockedOut()) {
+          print("Permission denied.", "error");
+          return true;
+        }
+        print("Somewhere in the office, a lock clicks.");
+        window.parent?.postMessage({ type: DOOR_MESSAGE_TYPE }, window.location.origin);
         return true;
       }
       if (node.program) {
@@ -334,8 +376,11 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
             "storage [key]    inspect local + session storage",
             "env              browser and page facts",
             "cookies          list this page's cookies",
+            "bots             view hack attempts",
             "exit             close this window",
-          ].join("\n")
+          ].join("\n"),
+          "output",
+          true
         );
         return;
       }
@@ -349,6 +394,10 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
       }
       case "echo": {
         print(args.join(" "));
+        return;
+      }
+      case "bots": {
+        print(probesReport(), "output", true);
         return;
       }
       case "whoami": {
@@ -369,7 +418,9 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
           print("What manual page do you want?", "error");
           return;
         }
-        print(MAN_PAGES[target] ?? `No manual entry for ${target}`);
+        const page = MAN_PAGES[target];
+        if (page) print(page, "output", true);
+        else print(`No manual entry for ${target}`);
         return;
       }
       case "ls": {
@@ -571,10 +622,18 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
     }
   };
 
+  const narrow = useSyncExternalStore(narrowStore.subscribe, narrowStore.get, narrowStore.onServer);
   const CRT_FONT = '"VT323", "Courier New", monospace';
   const CRT_GREEN = "#3fff5f";
   const CRT_GREEN_DIM = "#2ecc47";
   const CRT_AMBER_ERROR = "#ff8a3f";
+  // Full size on anything desktop-wide; on a phone — or the computer in
+  // cubicles.exe, whose viewport is phone-narrow — it shrinks with the width
+  // so a line of output still fits a sensible number of characters.
+  const CRT_SIZE = "clamp(18px, 4.5vw, 28px)";
+  const CRT_STROKE = narrow ? undefined : "0.6px currentColor";
+  const crtGlow = (colour: string) => (narrow ? undefined : `0 0 2px ${colour}`);
+  const SCANLINE = narrow ? "rgba(0,0,0,0.18)" : "rgba(0,0,0,0.55)";
 
   return (
     <div
@@ -589,10 +648,10 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
         background: "#020a02",
         color: CRT_GREEN,
         fontFamily: CRT_FONT,
-        fontSize: 28,
+        fontSize: CRT_SIZE,
         lineHeight: 1.15,
-        letterSpacing: "1px",
-        WebkitTextStroke: "0.6px currentColor",
+        letterSpacing: narrow ? "0.5px" : "1px",
+        WebkitTextStroke: CRT_STROKE,
         padding: 8,
         overflow: "hidden",
         cursor: "default",
@@ -608,7 +667,7 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
           inset: 0,
           pointerEvents: "none",
           backgroundImage:
-            "repeating-linear-gradient(rgba(0,0,0,0) 0px, rgba(0,0,0,0) 1px, rgba(0,0,0,0.55) 2px, rgba(0,0,0,0.55) 3px)",
+            `repeating-linear-gradient(rgba(0,0,0,0) 0px, rgba(0,0,0,0) 1px, ${SCANLINE} 2px, ${SCANLINE} 3px)`,
           mixBlendMode: "multiply",
           zIndex: 2,
         }}
@@ -623,13 +682,14 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
           zIndex: 2,
         }}
       />
-      <div ref={scrollRef} style={{ flex: "1 1 auto", overflowY: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+      <div ref={scrollRef} style={{ flex: "1 1 auto", overflowY: "auto", overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
         {lines.map((line, i) => (
           <div
             key={i}
             style={{
+              ...(line.nowrap && { whiteSpace: "pre", wordBreak: "normal", width: "max-content" }),
               color: line.kind === "error" ? CRT_AMBER_ERROR : line.kind === "input" ? CRT_GREEN : CRT_GREEN_DIM,
-              textShadow: `0 0 2px ${line.kind === "error" ? CRT_AMBER_ERROR : CRT_GREEN}`,
+              textShadow: crtGlow(line.kind === "error" ? CRT_AMBER_ERROR : CRT_GREEN),
             }}
           >
             {line.text}
@@ -637,7 +697,7 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 4 }}>
-        <span style={{ color: CRT_GREEN, whiteSpace: "nowrap", textShadow: `0 0 2px ${CRT_GREEN}` }}>{prompt()}</span>
+        <span style={{ color: CRT_GREEN, whiteSpace: "nowrap", textShadow: crtGlow(CRT_GREEN) }}>{prompt()}</span>
         <input
           ref={inputRef}
           value={draft}
@@ -654,10 +714,10 @@ export default function BashWindow({ onOpenWindow, onClose }: BashWindowProps) {
             outline: "none",
             color: CRT_GREEN,
             fontFamily: CRT_FONT,
-            fontSize: 28,
-            letterSpacing: "1px",
-            WebkitTextStroke: "0.6px currentColor",
-            textShadow: `0 0 2px ${CRT_GREEN}`,
+            fontSize: CRT_SIZE,
+            letterSpacing: narrow ? "0.5px" : "1px",
+            WebkitTextStroke: CRT_STROKE,
+            textShadow: crtGlow(CRT_GREEN),
             cursor: "default",
           }}
         />

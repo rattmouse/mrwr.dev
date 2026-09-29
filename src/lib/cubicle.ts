@@ -21,6 +21,36 @@ import { Tint, Vec3, vec } from "@/lib/marbles3d";
  */
 export const LIGHTS_MESSAGE_TYPE = "cubicles:toggle-lights";
 
+/** Same route, for bash.exe's upgrade.exe: IT swaps the monitor for the next size up. */
+export const MONITOR_MESSAGE_TYPE = "cubicles:next-monitor";
+
+/** Same route, for bash.exe's unlock.exe: the door out of the office stops being locked (though it stays shut). */
+export const DOOR_MESSAGE_TYPE = "cubicles:unlock-door";
+
+/**
+ * Set once tasks.exe has been survived to 5 o'clock on the computer on the
+ * desk — the only thing that gets unlock.exe past "Permission denied". Kept in
+ * localStorage, so a finished day stays finished.
+ */
+const CLOCKED_OUT_KEY = "cubicles:clocked-out";
+export function hasClockedOut(): boolean {
+  try {
+    return window.localStorage.getItem(CLOCKED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+export function markClockedOut() {
+  try {
+    window.localStorage.setItem(CLOCKED_OUT_KEY, "1");
+  } catch {
+    // No storage, no record: they'll have to work another day.
+  }
+}
+
+/** Same route, for bash.exe's eyes.exe: the player's eyes go wrong, or come right again. */
+export const EYES_MESSAGE_TYPE = "cubicles:toggle-eyes";
+
 /** One box in the room. Axis-aligned, so a centre and three half-extents. */
 export type Box = {
   centre: Vec3;
@@ -132,6 +162,42 @@ export const SCREEN = {
   height: 512,
 };
 
+/** The glass and the case as issued, before upgrade.exe gets at them. */
+const GLASS_HALF = { w: SCREEN.halfW, h: SCREEN.halfH };
+const CASE_HALF = vec(0.235, 0.2, 0.19);
+/** The case stands on its neck, so it grows up and out from here rather than into the desk. */
+const CASE_BOTTOM = 0.85;
+const CASE_Z = -1.17;
+const MONITOR_CASE: Box = { centre: vec(0, CASE_BOTTOM + CASE_HALF.y, CASE_Z), half: CASE_HALF, tint: BEIGE };
+
+/** The sizes upgrade.exe steps through, as multiples of the one you were issued, before IT takes it back. */
+export const MONITOR_SIZES = [1, 1.6, 2.4, 3.2];
+let monitorScale = 1;
+
+/**
+ * Swaps the monitor on your desk for one this many times the size: the case
+ * and the glass grow up off the neck and out to the sides, never deeper, so
+ * the back of it stays off the partition. Everything that reads SCREEN —
+ * the painter, the hit test, the seated pose — picks the new size up as it
+ * is. The case's corners and colours are cached on it, so those are dropped.
+ */
+export function setMonitorScale(scale: number) {
+  monitorScale = scale;
+  const centreY = CASE_BOTTOM + CASE_HALF.y * scale;
+  SCREEN.halfW = GLASS_HALF.w * scale;
+  SCREEN.halfH = GLASS_HALF.h * scale;
+  SCREEN.centre = vec(SCREEN.centre.x, centreY, SCREEN.centre.z);
+  MONITOR_CASE.centre = vec(0, centreY, CASE_Z);
+  MONITOR_CASE.half = vec(CASE_HALF.x * scale, CASE_HALF.y * scale, CASE_HALF.z);
+  MONITOR_CASE.corners = undefined;
+  MONITOR_CASE.tones = undefined;
+}
+
+export function nextMonitorScale(): number {
+  return MONITOR_SIZES[(MONITOR_SIZES.indexOf(monitorScale) + 1) % MONITOR_SIZES.length];
+}
+
+
 /** A point on the glass. u and v both run −1 … 1, v up. */
 export function screenPoint(u: number, v: number): Vec3 {
   return vec(
@@ -157,6 +223,28 @@ export const STANDING: Pose = { pos: vec(DOOR.x, EYE_STANDING, DOOR.z - 1.15), y
  * windows blank there.
  */
 export const SEATED: Pose = { pos: vec(0, SCREEN.centre.y, -0.5), yaw: 0, pitch: 0, fov: 0.72 };
+
+/** How much of the view's width the glass may fill when you're seated. */
+const SEATED_FIT = 0.94;
+
+/**
+ * SEATED, widened as far as it takes for the whole of the glass to fit across
+ * a view this shape. The field of view is set by the height alone, so on a
+ * tall, narrow view — a phone held upright — the glass comes out about as
+ * wide as the view is tall and hangs off both sides, taking the computer's
+ * edges with it. Anywhere the glass already fits, this is just SEATED.
+ */
+export function seatedPose(width: number, height: number): Pose {
+  // A bigger monitor puts you further back from it, at the middle of its glass,
+  // so it sits in the same part of the view whatever size IT has sent up.
+  const away = (SEATED.pos.z - SCREEN.centre.z) * monitorScale;
+  const fits = 2 * Math.atan((SCREEN.halfW / away) * (height / (width * SEATED_FIT)));
+  return {
+    ...SEATED,
+    pos: vec(SEATED.pos.x, SCREEN.centre.y, SCREEN.centre.z + away),
+    fov: Math.max(SEATED.fov, fits),
+  };
+}
 
 /* ------------------------------------------------------------------ props */
 
@@ -317,12 +405,17 @@ export const ROOM: Box[] = [
   box(vec(MID_X, CEILING + 0.04, MID_Z), vec(SPAN_X / 2, 0.04, SPAN_Z / 2), CEIL),
   ...GRID,
   box(vec(MID_X, CEILING / 2, FLOOR.minZ - 0.06), vec(SPAN_X / 2, CEILING / 2, 0.06), WALL),
-  box(vec(MID_X, CEILING / 2, FLOOR.maxZ + 0.06), vec(SPAN_X / 2, CEILING / 2, 0.06), WALL),
+  // The far wall is three pieces round the doorway, so that there is a hole
+  // behind the door for when it opens (see hallBoxes).
+  box(vec((FLOOR.minX + DOOR.x - DOOR.halfW) / 2, CEILING / 2, FLOOR.maxZ + 0.06), vec((DOOR.x - DOOR.halfW - FLOOR.minX) / 2, CEILING / 2, 0.06), WALL),
+  box(vec((DOOR.x + DOOR.halfW + FLOOR.maxX) / 2, CEILING / 2, FLOOR.maxZ + 0.06), vec((FLOOR.maxX - DOOR.x - DOOR.halfW) / 2, CEILING / 2, 0.06), WALL),
+  box(vec(DOOR.x, (DOOR.top + CEILING) / 2, FLOOR.maxZ + 0.06), vec(DOOR.halfW, (CEILING - DOOR.top) / 2, 0.06), WALL),
   box(vec(FLOOR.minX - 0.06, CEILING / 2, MID_Z), vec(0.06, CEILING / 2, SPAN_Z / 2), WALL),
   box(vec(FLOOR.maxX + 0.06, CEILING / 2, MID_Z), vec(0.06, CEILING / 2, SPAN_Z / 2), WALL),
   // Skirting, which is most of what tells you a bare room is a room.
   box(vec(MID_X, 0.06, FLOOR.minZ + 0.01), vec(SPAN_X / 2, 0.06, 0.012), TRIM, STUCK),
-  box(vec(MID_X, 0.06, FLOOR.maxZ - 0.01), vec(SPAN_X / 2, 0.06, 0.012), TRIM, STUCK),
+  box(vec((FLOOR.minX + DOOR.x - DOOR.halfW) / 2, 0.06, FLOOR.maxZ - 0.01), vec((DOOR.x - DOOR.halfW - FLOOR.minX) / 2, 0.06, 0.012), TRIM, STUCK),
+  box(vec((DOOR.x + DOOR.halfW + FLOOR.maxX) / 2, 0.06, FLOOR.maxZ - 0.01), vec((FLOOR.maxX - DOOR.x - DOOR.halfW) / 2, 0.06, 0.012), TRIM, STUCK),
   box(vec(FLOOR.minX + 0.01, 0.06, MID_Z), vec(0.012, 0.06, SPAN_Z / 2), TRIM, STUCK),
   box(vec(FLOOR.maxX - 0.01, 0.06, MID_Z), vec(0.012, 0.06, SPAN_Z / 2), TRIM, STUCK),
   ...LIGHTS,
@@ -347,7 +440,7 @@ export const ROOM: Box[] = [
   /* --- the computer ----------------------------------------------------- */
   box(vec(0, 0.765, -1.12), vec(0.13, 0.02, 0.1), BEIGE),
   box(vec(0, 0.805, -1.12), vec(0.05, 0.03, 0.05), BEIGE),
-  box(vec(0, 1.05, -1.17), vec(0.235, 0.2, 0.19), BEIGE),
+  MONITOR_CASE,
   // The tower is a tall narrow box and every photograph of a PC front is a
   // wide one, so it is plain plastic with its own fittings rather than a
   // picture of somebody else's machine stretched three ways.
@@ -393,10 +486,151 @@ export const ROOM: Box[] = [
 export function doorBoxes(shove: number): Box[] {
   const x = DOOR.x + shove;
   const mid = (DOOR.bottom + DOOR.top) / 2;
+  const tall = (DOOR.top - DOOR.bottom) / 2;
+  if (doorOpen) {
+    // Swung in against its hinge, on the left of the frame, and left there.
+    const hinge = DOOR.x - DOOR.halfW + 0.03;
+    return [
+      box(vec(hinge, mid, DOOR.z - DOOR.halfW), vec(0.03, tall, DOOR.halfW), DOOR_WOOD),
+      box(vec(hinge + 0.04, 1.02, DOOR.z - 2 * DOOR.halfW + 0.1), vec(0.025, 0.018, 0.055), METAL, { bias: 0.9 }),
+    ];
+  }
   return [
-    box(vec(x, mid, DOOR.z), vec(DOOR.halfW, (DOOR.top - DOOR.bottom) / 2, 0.03), DOOR_WOOD),
+    // Wall where the hole in it would be, so nothing shows round the door's edges.
+    box(vec(DOOR.x, mid, FLOOR.maxZ + 0.06), vec(DOOR.halfW, tall, 0.06), WALL),
+    box(vec(x, mid, DOOR.z), vec(DOOR.halfW, tall, 0.03), DOOR_WOOD),
     box(vec(x + DOOR.halfW - 0.1, 1.02, DOOR.z - 0.04), vec(0.055, 0.018, 0.025), METAL, { bias: 0.9 }),
   ];
+}
+
+/* ---------------------------------------------------------- the way out */
+
+/**
+ * unlock.exe only unlocks the door; opening it is still up to you. Shared
+ * module state, like the monitor — a fresh cubicle shuts and locks it again
+ * (closeDoor).
+ */
+let doorLocked = true;
+let doorOpen = false;
+export const isDoorLocked = () => doorLocked;
+export const isDoorOpen = () => doorOpen;
+export const unlockDoor = () => {
+  doorLocked = false;
+};
+export const openDoor = () => {
+  if (!doorLocked) doorOpen = true;
+};
+/** Swung shut behind you, but not locked: you can open it again. */
+export const shutDoor = () => {
+  doorOpen = false;
+};
+export const closeDoor = () => {
+  doorOpen = false;
+  doorLocked = true;
+};
+
+/**
+ * Where the hallway behind the door ends. It is exactly as wide and as tall as
+ * the doorway and it runs on into the fog, lit every few metres, with doors
+ * down both sides that don't open either. At the far end is the office again
+ * (see OTHER_END), and walking into it walks you back in through the door you
+ * left by (see throughTheEnd).
+ */
+const HALL_END = FLOOR.maxZ + 24;
+const HALL_LIGHT_EVERY = 4;
+const HALL_DOOR_EVERY = 9;
+const HALL_SECTION = 4;
+
+/**
+ * The hallway is a tube seen from inside, and the painter sorts by each face's
+ * furthest corner — so the room behind you, nearer than the hallway's far end,
+ * would be painted straight over its walls. Instead the tube's inward faces go
+ * after everything else (`occludes`), which hides all of the room except what
+ * is framed by the doorway — the only part of it you could see anyway — and
+ * the few things inside the tube are pushed later still.
+ */
+const INSIDE_TUBE = { bias: 1100 } as const;
+
+const HALL: Box[] = (() => {
+  const tall = DOOR.top / 2;
+  const hall: Box[] = [];
+  // In lengths rather than one long box a side: the painter fogs a whole face
+  // by its furthest corner, and a face that long would be all fog.
+  for (let z = FLOOR.maxZ; z < HALL_END - 1e-6; z += HALL_SECTION) {
+    const half = Math.min(HALL_SECTION, HALL_END - z) / 2;
+    const mid = z + half;
+    hall.push(
+      box(vec(DOOR.x, -0.03, mid), vec(DOOR.halfW, 0.03, half), CARPET, { occludes: { axis: 1, side: 1 } }),
+      box(vec(DOOR.x, DOOR.top + 0.04, mid), vec(DOOR.halfW, 0.04, half), CEIL, { occludes: { axis: 1, side: -1 } }),
+      box(vec(DOOR.x - DOOR.halfW - 0.06, tall, mid), vec(0.06, tall, half), WALL, { occludes: { axis: 0, side: 1 } }),
+      box(vec(DOOR.x + DOOR.halfW + 0.06, tall, mid), vec(0.06, tall, half), WALL, { occludes: { axis: 0, side: -1 } }),
+    );
+  }
+  for (let z = FLOOR.maxZ + HALL_LIGHT_EVERY / 2; z < HALL_END - 1; z += HALL_LIGHT_EVERY) {
+    hall.push(box(vec(DOOR.x, DOOR.top - 0.012, z), vec(DOOR.halfW * 0.6, 0.012, 0.3), LIT, { glow: true, ...INSIDE_TUBE }));
+  }
+  let side = -1;
+  for (let z = FLOOR.maxZ + HALL_DOOR_EVERY / 2; z < HALL_END - 3; z += HALL_DOOR_EVERY) {
+    const x = DOOR.x + side * (DOOR.halfW - 0.012);
+    hall.push(box(vec(x, 0.95, z), vec(0.012, 0.95, 0.42), DOOR_WOOD, INSIDE_TUBE));
+    hall.push(box(vec(x - side * 0.03, 1.0, z + 0.3), vec(0.02, 0.018, 0.05), METAL, { bias: INSIDE_TUBE.bias + 1 }));
+    side = -side;
+  }
+  return hall;
+})();
+
+/**
+ * The office as it looks from the far end of the hallway: the same room, turned
+ * half round about the middle of the hallway, so that its door lands exactly on
+ * the end of it. Turning is its own undoing — do it twice and you're back where
+ * you started — which is what makes throughTheEnd seamless: the room you walk
+ * into down there is the one you were already looking at.
+ */
+function otherEnd(b: Box): Box {
+  const o = b.occludes;
+  return {
+    ...b,
+    centre: vec(2 * DOOR.x - b.centre.x, b.centre.y, FLOOR.maxZ + HALL_END - b.centre.z),
+    // Turned round, a box's left face is its right and its front its back.
+    occludes: o && { axis: o.axis, side: o.axis === 1 ? o.side : ((-o.side) as 1 | -1) },
+    corners: undefined,
+    tones: undefined,
+  };
+}
+
+/** The unchanging part of it, turned once and kept. The monitor is left to be turned each frame. */
+let otherRoom: Box[] | null = null;
+
+/** The hallway, and the office again at the end of it — nothing at all while the door is shut. */
+export function hallBoxes(): Box[] {
+  if (!doorOpen) return [];
+  otherRoom ??= ROOM.filter((b) => b !== MONITOR_CASE).map(otherEnd);
+  return [
+    ...HALL,
+    ...otherRoom,
+    otherEnd(MONITOR_CASE),
+    ...doorBoxes(0).map(otherEnd),
+    // Its screen is off. The only browser is the one on your desk, and it
+    // comes on for you once you've walked through and are sitting at it again.
+    otherEnd(box(vec(SCREEN.centre.x, SCREEN.centre.y, SCREEN.centre.z - 0.006), vec(SCREEN.halfW, SCREEN.halfH, 0.006), [11, 15, 22], { glow: true, bias: 0.4 })),
+  ];
+}
+
+/** Far enough through the doorway at the end to be in the room beyond it. */
+const THE_END = HALL_END + PLAYER_RADIUS + 0.05;
+
+/**
+ * Past the end of the hallway you are in the office at the other end of it,
+ * which is this office turned round — so turn yourself back the same way and
+ * you're standing just inside its door, facing in, having seen no join. Null
+ * while you're still in the hallway.
+ */
+export function throughTheEnd(pos: Vec3, yaw: number): { pos: Vec3; yaw: number } | null {
+  if (pos.z < THE_END) return null;
+  return {
+    pos: vec(2 * DOOR.x - pos.x, pos.y, FLOOR.maxZ + HALL_END - pos.z),
+    yaw: yaw + Math.PI,
+  };
 }
 
 /** The footprints you bump into. The room's own walls are handled separately. */
@@ -470,10 +704,17 @@ export function walk(pos: Vec3, yaw: number, dx: number, dz: number, dt: number)
   }
 
   const r = PLAYER_RADIUS;
+  // With the door open, the doorway is a way through the far wall: in it or
+  // past it you're held between its jambs, and only there can you leave the room.
+  const jambs = { minX: DOOR.x - DOOR.halfW + r, maxX: DOOR.x + DOOR.halfW - r };
+  if (doorOpen && pos.z > FLOOR.maxZ - r) {
+    return vec(Math.min(Math.max(x, jambs.minX), jambs.maxX), pos.y, Math.min(z, THE_END + 0.1));
+  }
+  const through = doorOpen && x >= jambs.minX && x <= jambs.maxX;
   return vec(
     Math.min(Math.max(x, FLOOR.minX + r), FLOOR.maxX - r),
     pos.y,
-    Math.min(Math.max(z, FLOOR.minZ + r), FLOOR.maxZ - r),
+    Math.min(Math.max(z, FLOOR.minZ + r), through ? THE_END + 0.1 : FLOOR.maxZ - r),
   );
 }
 
