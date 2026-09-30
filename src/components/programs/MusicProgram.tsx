@@ -6,6 +6,7 @@ import DesktopWindow from "@/components/windows/DesktopWindow";
 import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/StrudelReplWindow";
 import { ProgramProps, submenuTopForRow, windowFrame } from "@/components/programs/programFrame";
 import strudelSongs from "@/data/strudelSongs.json";
+import { loadSettings, saveSettings } from "@/lib/savedSettings";
 
 const SONG_ICON_FILES = [
   "../w98_midi_bl.ico",
@@ -13,6 +14,10 @@ const SONG_ICON_FILES = [
   "../w98_midi_mg.ico",
   "../w98_midi_tl.ico",
 ] as const;
+
+// Whether File → Show → Scope was left on. The code and where the scope sits
+// are kept by the editor itself.
+const STORAGE_KEY = "mrwr:strudel-scope";
 
 export default function MusicProgram(props: ProgramProps) {
   const { layout } = props;
@@ -26,7 +31,12 @@ export default function MusicProgram(props: ProgramProps) {
   const [musicFileOpenSubmenu, setMusicFileOpenSubmenu] = useState(false);
   const [musicFileShowSubmenu, setMusicFileShowSubmenu] = useState(false);
   const [musicFileShowSubmenuTop, setMusicFileShowSubmenuTop] = useState(22);
-  const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(false);
+  const [musicScopePopupOpen, setMusicScopePopupOpen] = useState(
+    () => loadSettings(STORAGE_KEY, { open: false }).open,
+  );
+  useEffect(() => {
+    saveSettings(STORAGE_KEY, { open: musicScopePopupOpen });
+  }, [musicScopePopupOpen]);
   // The whole window shakes along while a song is playing.
   const shouldShakeMusicUi = strudelPlaying && layout === "normal";
 

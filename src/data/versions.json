@@ -3,10 +3,10 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "6.0.4",
+      "version": "6.0.5",
       "era": "claude",
       "name": "Multitasking",
-      "date": "2026-09-28",
+      "date": "2026-09-30",
       "summary": "More than one window at a time, and a taskbar that keeps track of them.",
       "issues": [],
       "changes": [
@@ -19,7 +19,8 @@
         "Collections keeps its tiles where you leave them: they're only dealt out the first time you open a tab, and after that moving one never reshuffles the rest — the whole arrangement is still there after a reload, a resize, maximizing, or a trip to another tab. A new shuffle button in the top corner deals a fresh pile, and every deal flies out from the middle of the window and lands on open desktop rather than on top of your windows. Maximizing no longer pulls the tiles inside the window — they stay right where they were on the desktop, the same size — and the picture in the middle grows and shrinks with the window, keeping its shape, and the Cards tab shows the top 40",
         "The welcome window greets every visit the same way: open the site or refresh and it pops up in the middle of the screen, at its usual size and in front of everything, while the rest of your windows come back where you left them",
         "Sitting down at the computer in cubicles.exe now faces the screen square-on, which keeps its menus and windows from losing their text in Firefox",
-        "cubicles.exe and cmd.exe work on a phone: sitting down at the computer fits its whole screen across even a narrow window instead of cutting off both sides, and cmd.exe's text shrinks to fit and drops the heavy CRT glow that smeared it — help and man keep their columns on one line and scroll sideways instead of wrapping, ls lists in two columns, the prompt is just the folder you're in, and each new command brings you back to the bottom left. Sitting down also turns you the short way round instead of spinning you in circles"
+        "cubicles.exe and cmd.exe work on a phone: sitting down at the computer fits its whole screen across even a narrow window instead of cutting off both sides, and cmd.exe's text shrinks to fit and drops the heavy CRT glow that smeared it — help and man keep their columns on one line and scroll sideways instead of wrapping, ls lists in two columns, the prompt is just the folder you're in, and each new command brings you back to the bottom left. Sitting down also turns you the short way round instead of spinning you in circles",
+        "strudel.cc, party.webp and midi.exe remember how you left them: strudel.cc keeps your code and its scope, party.webp keeps everything its panels were set to, and midi.exe keeps its sound, octave, pad bank and buttons — close one, refresh, or come back another day and it picks up where you stopped"
       ]
     },
     {

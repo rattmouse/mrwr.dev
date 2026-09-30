@@ -2,6 +2,7 @@
 
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import OscilloscopeWindow from "@/components/windows/OscilloscopeWindow";
+import { loadSettings, oneOf, saveSettings } from "@/lib/savedSettings";
 
 export type StrudelReplHandle = {
   play: () => Promise<void>;
@@ -56,6 +57,19 @@ const POPUP_BOTTOM_GAP_PX = 8;
 const POPUP_TOP_GAP_PX = 18;
 
 type PopupCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+const POPUP_CORNERS: PopupCorner[] = ["top-left", "top-right", "bottom-left", "bottom-right"];
+
+// The editor's code and the corner the scope was left snapped to, kept between
+// visits. Whether the scope is showing at all belongs to the File menu, and is
+// kept with it.
+const STORAGE_KEY = "mrwr:strudel";
+
+type Saved = { code: string; scopeCorner: PopupCorner };
+
+function loadSaved(): Saved {
+  const saved = loadSettings<Saved>(STORAGE_KEY, { code: DEFAULT_CODE, scopeCorner: "bottom-left" });
+  return { ...saved, scopeCorner: oneOf(saved.scopeCorner, POPUP_CORNERS, "bottom-left") };
+}
 
 function getScopePopupSize(containerWidth: number, containerHeight: number, compact: boolean) {
   const w = Math.max(1, containerWidth);
@@ -247,12 +261,13 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   { onPlayingChange, onLevelChange, onSyncChange, scopePopupOpen = false, scopePopupCompact = true },
   ref
 ) {
+  const [saved] = useState(loadSaved);
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [scopePopupSize, setScopePopupSize] = useState(DEFAULT_SCOPE_POPUP_SIZE);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  const [scopePopupCorner, setScopePopupCorner] = useState<PopupCorner>("bottom-left");
+  const [scopePopupCorner, setScopePopupCorner] = useState<PopupCorner>(saved.scopeCorner);
   const [scopePopupDragPos, setScopePopupDragPos] = useState<{ x: number; y: number } | null>(null);
   const scopePopupDragPosRef = useRef<{ x: number; y: number } | null>(null);
   const scopePopupDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
@@ -262,7 +277,8 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   const topWavePathRef = useRef<SVGPathElement | null>(null);
   const editorRef = useRef<EditorInstance | null>(null);
   const webRef = useRef<StrudelWebModule | null>(null);
-  const codeRef = useRef(DEFAULT_CODE);
+  const codeRef = useRef(saved.code);
+  const scopeCornerRef = useRef(saved.scopeCorner);
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const outputAnalyserDataRef = useRef<Float32Array | null>(null);
   const outputAnalyserSourceRef = useRef<AudioNode | null>(null);
@@ -270,6 +286,18 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
   const playingRef = useRef(false);
   const levelLastEmitAtRef = useRef(0);
   const levelLastValueRef = useRef(0);
+
+  // Every way the code changes comes through here, typed or handed in, so the
+  // save is never behind what the editor shows.
+  const keepCode = (code: string) => {
+    codeRef.current = code;
+    saveSettings(STORAGE_KEY, { code, scopeCorner: scopeCornerRef.current });
+  };
+
+  useEffect(() => {
+    scopeCornerRef.current = scopePopupCorner;
+    saveSettings(STORAGE_KEY, { code: codeRef.current, scopeCorner: scopePopupCorner });
+  }, [scopePopupCorner]);
 
   const normalizeCode = (code: string): string => code.trim().replace(/;+\s*$/, "");
 
@@ -386,7 +414,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       stop,
       update: run,
       setCode: (code: string) => {
-        codeRef.current = code;
+        keepCode(code);
         const editor = editorRef.current;
         if (!editor) {
           emitSync();
@@ -411,7 +439,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       },
       setTone: (tone: string) => {
         const nextCode = withTone(codeRef.current, tone);
-        codeRef.current = nextCode;
+        keepCode(nextCode);
         const editor = editorRef.current;
         if (!editor) {
           emitSync();
@@ -437,7 +465,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
       appendCode: (code: string) => {
         const prefix = codeRef.current.trimEnd().length ? "\n" : "";
         const nextCode = `${codeRef.current}${prefix}${code}`;
-        codeRef.current = nextCode;
+        keepCode(nextCode);
         const editor = editorRef.current;
         if (!editor) {
           emitSync();
@@ -487,7 +515,7 @@ const StrudelReplWindow = forwardRef<StrudelReplHandle, StrudelReplWindowProps>(
             if (!event.docChanged) return;
             const nextCode = event.state?.doc?.toString();
             if (typeof nextCode === "string") {
-              codeRef.current = nextCode;
+              keepCode(nextCode);
               emitSync();
             }
           },

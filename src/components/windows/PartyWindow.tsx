@@ -77,6 +77,7 @@ import {
   type Hit,
 } from "@/lib/partyExchanges";
 import { useParty } from "@/lib/useParty";
+import { hexOr, loadSettings, oneOf, saveSettings } from "@/lib/savedSettings";
 import { usePartyLog } from "@/lib/usePartyLog";
 
 export type PanelId =
@@ -245,6 +246,48 @@ const showLink = (key: keyof Links, value: Links[keyof Links]) => {
   return `${percent(value as number)}`;
 };
 
+// What party.webp remembers between visits: everything the crowd's panels are
+// set to, the Dice panel's die and luck, and whether the tool windows wear the
+// desktop's frame. Not the Frame panel's melt and lights — those are done to
+// the window around this one, and closing it puts that back together.
+const STORAGE_KEY = "mrwr:party-settings";
+
+type Saved = { settings: Settings; die: DieKind; luck: Luck; dressPanels: boolean };
+
+const SAVED_DEFAULTS: Saved = { settings: DEFAULTS, die: "d20", luck: "normal", dressPanels: false };
+
+function loadSaved(): Saved {
+  const saved = loadSettings(STORAGE_KEY, SAVED_DEFAULTS);
+  const { settings } = saved;
+  return {
+    ...saved,
+    settings: {
+      ...settings,
+      accent: hexOr(settings.accent, DEFAULTS.accent),
+      surface: oneOf(settings.surface, SURFACES.map((s) => s.value), DEFAULTS.surface),
+      shape: oneOf(settings.shape, Object.keys(SHAPE_NAMES) as NodeShape[], DEFAULTS.shape),
+      forces: {
+        ...settings.forces,
+        pointer: oneOf(settings.forces.pointer, ["ignore", "attract", "repel", "orbit"], NO_FORCES.pointer),
+      },
+      formation: {
+        ...settings.formation,
+        shape: oneOf(
+          settings.formation.shape,
+          ["drift", "grid", "square", "circle", "triangle"],
+          NO_FORMATION.shape,
+        ),
+      },
+      links: {
+        ...settings.links,
+        colour: oneOf(settings.links.colour, ["ink", "accent", "nodes"], DEFAULT_LINKS.colour),
+      },
+    },
+    die: oneOf(saved.die, ["d20", "d6", "d100"], "d20"),
+    luck: oneOf(saved.luck, ["normal", "advantage", "disadvantage"], "normal"),
+  };
+}
+
 const nameOf = (character: Character) => character.name.trim() || "someone unnamed";
 
 // How tall a guy stands on the canvas, before his own size roll. A party member
@@ -298,7 +341,9 @@ type PartyWindowProps = {
 };
 
 export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) {
-  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  // Read once, into the first state of everything it covers.
+  const [saved] = useState(loadSaved);
+  const [settings, setSettings] = useState<Settings>(saved.settings);
   // Open panels, back to front: the last one is on top, and clicking any panel
   // moves it to the end.
   const [stack, setStack] = useState<PanelId[]>([]);
@@ -325,8 +370,8 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   // bouncing about on the canvas. The dice themselves live in a ref like the
   // crowd does — they are moved sixty times a second, and nothing in React
   // needs to hear about it.
-  const [die, setDie] = useState<DieKind>("d20");
-  const [luck, setLuck] = useState<Luck>("normal");
+  const [die, setDie] = useState<DieKind>(saved.die);
+  const [luck, setLuck] = useState<Luck>(saved.luck);
   const [rolls, setRolls] = useState<Roll[]>([]);
   const diceRef = useRef<Die[]>([]);
   const nextDieId = useRef(1);
@@ -484,12 +529,16 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   // The tool windows can borrow the desktop's frame — border and title bar, and
   // no more of it than that. party.webp is a modern window in old dressing;
   // this is the same joke told about its panels, and the switch is below.
-  const [dressPanels, setDressPanels] = useState(false);
+  const [dressPanels, setDressPanels] = useState(saved.dressPanels);
+
+  useEffect(() => {
+    saveSettings(STORAGE_KEY, { settings, die, luck, dressPanels });
+  }, [settings, die, luck, dressPanels]);
 
   // Where each tool window was last put down. A panel you close and open again
   // comes back where you left it; the slot below is only ever the opening
-  // position for one that has not been moved yet. Like the rest of this
-  // window's state it lasts as long as the window does.
+  // position for one that has not been moved yet. Unlike the settings above,
+  // this lasts only as long as the window does.
   const [spots, setSpots] = useState<Partial<Record<PanelId, { x: number; y: number }>>>({});
   const rememberSpot = useCallback(
     (id: PanelId, at: { x: number; y: number }) => setSpots((prev) => ({ ...prev, [id]: at })),
@@ -678,7 +727,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     };
 
     fit();
-    spawn(DEFAULTS.density);
+    spawn(settingsRef.current.density);
 
     const observer = new ResizeObserver(() => fit());
     observer.observe(wrap);
