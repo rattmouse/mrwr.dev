@@ -45,13 +45,24 @@ const { DEFAULT_IDLE_GAP_S, MIN_HEADLINE_LEN, isTypingReset, headlineOf } = requ
 // heuristics come from search-sessions.js so the live notifier and this
 // build-time pass carve the log identically.
 const DEFAULT_MAX_SESSIONS = 250; // newest N kept in the shipped file
+// Sessions that started longer ago than this are left out, so old searches
+// drop off the dropdown by themselves. SearchBox.tsx applies the same cutoff
+// in the browser, so they also disappear between deploys.
+const DEFAULT_MAX_AGE_DAYS = 14;
 
 function warn(msg) {
   process.stderr.write(`refresh-search-history: ${msg}\n`);
 }
 
 function parseArgs(argv) {
-  const args = { records: "", hidden: "", since: "", maxSessions: DEFAULT_MAX_SESSIONS, idleGap: DEFAULT_IDLE_GAP_S };
+  const args = {
+    records: "",
+    hidden: "",
+    since: "",
+    maxSessions: DEFAULT_MAX_SESSIONS,
+    maxAgeDays: DEFAULT_MAX_AGE_DAYS,
+    idleGap: DEFAULT_IDLE_GAP_S,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--records" && argv[i + 1]) { args.records = argv[++i]; continue; }
@@ -60,6 +71,12 @@ function parseArgs(argv) {
     if (arg === "--idle-gap" && argv[i + 1]) {
       const n = Number.parseInt(argv[++i], 10);
       if (Number.isFinite(n) && n > 0) args.idleGap = n;
+      continue;
+    }
+    if (arg === "--max-age-days" && argv[i + 1]) {
+      // 0 turns the cutoff off.
+      const n = Number.parseInt(argv[++i], 10);
+      if (Number.isFinite(n) && n >= 0) args.maxAgeDays = n;
       continue;
     }
     if (arg === "--max-sessions" && argv[i + 1]) {
@@ -222,7 +239,14 @@ function main() {
   }
 
   const grouped = group(records, args.idleGap).map(toSession);
-  const visible = grouped.filter((s) => !hiddenIds.has(s.id));
+  const notHidden = grouped.filter((s) => !hiddenIds.has(s.id));
+  // Undated sessions can't prove they're recent, so the cutoff drops them too.
+  const cutoffMs = args.maxAgeDays > 0 ? Date.now() - args.maxAgeDays * 86_400_000 : Number.NEGATIVE_INFINITY;
+  const visible = notHidden.filter((s) => {
+    if (args.maxAgeDays === 0) return true;
+    const t = parseIsoMs(s.startedAt);
+    return Number.isFinite(t) && t >= cutoffMs;
+  });
   const sessions = visible
     .sort((a, b) => {
       const av = parseIsoMs(a.startedAt);
@@ -236,7 +260,8 @@ function main() {
   const flagged = sessions.filter((s) => s.flagged).length;
   process.stderr.write(
     `refresh-search-history: ${records.length} records -> ${sessions.length} sessions ` +
-      `(${flagged} flagged, ${grouped.length - visible.length} hidden) -> ${OUT_PATH}\n`
+      `(${flagged} flagged, ${grouped.length - notHidden.length} hidden, ` +
+      `${notHidden.length - visible.length} older than ${args.maxAgeDays} days) -> ${OUT_PATH}\n`
   );
   return 0;
 }

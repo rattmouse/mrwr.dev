@@ -11,6 +11,15 @@ import type { SearchHistorySession } from "@/lib/searchHistory.types";
 import { formatRelativeCompact } from "@/lib/relativeTime";
 
 const MAX_ROWS = 8;
+// Past searches older than this drop out of the dropdown. The build already
+// leaves them out (refresh-search-history.mjs, same two weeks); this catches the
+// ones that age past it while a build is still live.
+const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+function isRecent(session: SearchHistorySession, nowMs: number): boolean {
+  const startedMs = Date.parse(session.startedAt);
+  return Number.isFinite(startedMs) && nowMs - startedMs <= MAX_AGE_MS;
+}
 
 // Map a stored session onto the parsed-line shape the playback engine wants.
 // Flagged entries play back their defanged text, never the raw payload.
@@ -158,10 +167,17 @@ export default function SearchBox({ history, onOpen }: SearchBoxProps) {
     searchSessionIdRef.current = created;
   }, []);
 
+  // Recomputed each time the dropdown opens, so a tab left open for days still
+  // lets old searches go.
+  const recent = useMemo(() => {
+    const nowMs = Date.now();
+    return open ? history.filter((session) => isRecent(session, nowMs)) : [];
+  }, [history, open]);
+
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return history.filter((session) => matchesQuery(session, needle)).slice(0, MAX_ROWS);
-  }, [history, query]);
+    return recent.filter((session) => matchesQuery(session, needle)).slice(0, MAX_ROWS);
+  }, [recent, query]);
 
   const showDropdown = open && matches.length > 0;
 
@@ -216,9 +232,8 @@ export default function SearchBox({ history, onOpen }: SearchBoxProps) {
       return;
     }
     if (!showDropdown) {
-      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && matches.length > 0) {
-        setOpen(true);
-      }
+      // Nothing to show just leaves it shut (showDropdown needs a match).
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") setOpen(true);
       return;
     }
     if (event.key === "ArrowDown") {
@@ -267,7 +282,7 @@ export default function SearchBox({ history, onOpen }: SearchBoxProps) {
             />
           ))}
           {query.trim() && (
-            <Empty aria-hidden>{`${matches.length} of ${history.length} past searches`}</Empty>
+            <Empty aria-hidden>{`${matches.length} of ${recent.length} past searches`}</Empty>
           )}
         </Dropdown>
       )}
