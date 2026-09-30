@@ -19,6 +19,7 @@ import {
   type Waveform,
 } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
+import { loadSettings, oneOf, saveSettings } from "@/lib/savedSettings";
 import {
   BankPad,
   BrandBar,
@@ -66,6 +67,49 @@ type MidiWindowProps = {
 };
 
 type MidiStatus = "checking" | "unsupported" | "needsGesture" | "denied" | "ready";
+
+// How the panel was left, kept between visits: the sound (program and knobs),
+// where the keys sit, the latching buttons, and which readouts and phone tab
+// were showing. Not the log, or anything held down.
+const STORAGE_KEY = "mrwr:midi";
+
+type Saved = {
+  waveform: Waveform;
+  knobs: number[];
+  octaveShift: number;
+  latch: boolean;
+  padBank: number;
+  fullLevel: boolean;
+  panelTab: PanelTab;
+  metersOpen: boolean;
+  scopeOpen: boolean;
+};
+
+const SAVED_DEFAULTS: Saved = {
+  waveform: "square",
+  knobs: KNOB_DEFAULTS,
+  octaveShift: 0,
+  latch: false,
+  padBank: 0,
+  fullLevel: false,
+  panelTab: "pads",
+  metersOpen: false,
+  scopeOpen: false,
+};
+
+const whole = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
+
+function loadSaved(): Saved {
+  const saved = loadSettings(STORAGE_KEY, SAVED_DEFAULTS);
+  return {
+    ...saved,
+    waveform: oneOf(saved.waveform, ["square", "sawtooth", "triangle", "sine"], "square"),
+    knobs: saved.knobs.map((k) => whole(k, 0, 127)),
+    octaveShift: whole(saved.octaveShift, -3, 3),
+    padBank: whole(saved.padBank, 0, PAD_BANKS.length - 1),
+    panelTab: oneOf(saved.panelTab, ["wheels", "pads", "knobs", "log", "meters", "scope"], "pads"),
+  };
+}
 
 /**
  * When the panel is phone-narrow, everything above the keys takes turns in one
@@ -974,20 +1018,22 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   },
   ref,
 ) {
+  // Read once, into the first state of everything it covers.
+  const [saved] = useState(loadSaved);
   const [status, setStatus] = useState<MidiStatus>("checking");
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [metersOpen, setMetersOpen] = useState(false);
+  const [metersOpen, setMetersOpen] = useState(saved.metersOpen);
   // The scope: waveform + spectrum of whatever the synth is making right now.
-  const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(saved.scopeOpen);
   // Swapped for the scrolling message log once the secret note code is played.
   const [bitsView, setBitsView] = useState(false);
-  const [waveform, setWaveformState] = useState<Waveform>("square");
+  const [waveform, setWaveformState] = useState<Waveform>(saved.waveform);
   const [playing, setPlaying] = useState(false);
   const [playPos, setPlayPos] = useState(0);
   const [playTotal, setPlayTotal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [octaveShift, setOctaveShift] = useState(0);
+  const [octaveShift, setOctaveShift] = useState(saved.octaveShift);
   // The lowest note of the windowed keyboard (only used when the keys the
   // window asks for don't fit).
   const [rangeLow, setRangeLow] = useState(48); // C3
@@ -1002,18 +1048,18 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // Panel state: knob positions, lit pads, and the latching function buttons.
   // K1–K8 rest where KNOB_PARAMS says, not at zero — a knob has a physical
   // position, and cutoff parked at 0 would mean silence.
-  const [knobs, setKnobs] = useState<number[]>(() => [...KNOB_DEFAULTS]);
+  const [knobs, setKnobs] = useState<number[]>(saved.knobs);
   const [padHeld, setPadHeld] = useState<number[]>([]);
   const [bendValue, setBendValue] = useState(8192);
   const [modValue, setModValue] = useState(0);
   // Stick position as the two CC values it sends, 64 at rest.
   const [stick, setStick] = useState({ x: STICK_CENTRE, y: STICK_CENTRE });
-  const [latch, setLatch] = useState(false);
+  const [latch, setLatch] = useState(saved.latch);
   // Which of the two pad banks the grid is showing / playing.
-  const [padBank, setPadBank] = useState(0);
-  const [fullLevel, setFullLevel] = useState(false);
+  const [padBank, setPadBank] = useState(saved.padBank);
+  const [fullLevel, setFullLevel] = useState(saved.fullLevel);
   // Which tab the phone layout's deck is showing.
-  const [panelTab, setPanelTab] = useState<PanelTab>("pads");
+  const [panelTab, setPanelTab] = useState<PanelTab>(saved.panelTab);
   // The faceplate (decides the layout), the keyboard (decides how many keys
   // fit) and the phone layout's deck (sizes the controls to fill it).
   const [panelRef, panelSize] = useElementSize<HTMLDivElement>();
@@ -1039,9 +1085,9 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   // pad rather than the key that shares its note number.
   const heldRef = useRef<Map<number, number>>(new Map());
   const padHeldRef = useRef<Map<number, number>>(new Map());
-  const latchRef = useRef(false);
-  const padBankRef = useRef(0);
-  const fullLevelRef = useRef(false);
+  const latchRef = useRef(saved.latch);
+  const padBankRef = useRef(saved.padBank);
+  const fullLevelRef = useRef(saved.fullLevel);
   // Current bend / mod / stick, so the panel controls and incoming MIDI all agree
   // and a drag only emits when the value actually moves.
   const benderRef = useRef({ bend: 8192, mod: 0 });
@@ -1052,7 +1098,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   const playingRef = useRef(false);
   const playTimeoutsRef = useRef<number[]>([]);
   const playIntervalRef = useRef<number | null>(null);
-  const octaveShiftRef = useRef(0);
+  const octaveShiftRef = useRef(saved.octaveShift);
   const pressedCodesRef = useRef<Map<string, number>>(new Map());
   // Last few note-on pitch classes, for matching the secret Bits-view code.
   const codeBufRef = useRef<number[]>([]);
@@ -1060,6 +1106,24 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
   useEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
+  const knobsRef = useRef(knobs);
+  useEffect(() => {
+    knobsRef.current = knobs;
+  }, [knobs]);
+
+  useEffect(() => {
+    saveSettings(STORAGE_KEY, {
+      waveform,
+      knobs,
+      octaveShift,
+      latch,
+      padBank,
+      fullLevel,
+      panelTab,
+      metersOpen,
+      scopeOpen,
+    } satisfies Saved);
+  }, [waveform, knobs, octaveShift, latch, padBank, fullLevel, panelTab, metersOpen, scopeOpen]);
   useEffect(() => {
     octaveShiftRef.current = octaveShift;
   }, [octaveShift]);
@@ -1137,8 +1201,11 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
   const ensureSynth = useCallback(() => {
     if (!synthRef.current) {
-      synthRef.current = new MidiSynth();
-      synthRef.current.setWaveform(waveform);
+      const synth = new MidiSynth();
+      synth.setWaveform(waveform);
+      // The knobs may have come back from last visit rather than at rest.
+      knobsRef.current.forEach((value, slot) => synth.setKnob(slot, value));
+      synthRef.current = synth;
     }
     return synthRef.current;
   }, [waveform]);
