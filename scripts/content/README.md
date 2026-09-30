@@ -108,7 +108,10 @@ Fetches the durable search-log NDJSON archive from prod
 the records into **search sessions** using the exact same heuristic as
 `search_to_issue.py` (180 s idle gap, "typing reset" detection, minimum headline
 length), tags each entry with `search-guard.js`, and writes the newest ~250
-sessions.
+sessions from the last two weeks (`--max-age-days`, default 14; `0` keeps
+everything). The search box applies the same two-week cutoff in the browser,
+so an old search drops out of the dropdown on time even if nothing has been
+deployed since.
 
 `scripts/deploy/deploy.sh` runs it before every build (best-effort: an
 unreachable prod ships an empty history, never a failed deploy — or pass
@@ -120,6 +123,7 @@ scripts/content/refresh-search-history.sh                       # against prod
 scripts/content/refresh-search-history.sh --file ./search-log.ndjson
 scripts/content/refresh-search-history.sh --since 2026-08-01
 scripts/content/refresh-search-history.sh --max-sessions 100
+scripts/content/refresh-search-history.sh --max-age-days 30
 ```
 
 ### `hide-search-history.sh` — keep a session out of the dropdown

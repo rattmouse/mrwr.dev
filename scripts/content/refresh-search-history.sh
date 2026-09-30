@@ -4,7 +4,8 @@
 # ($PROD_BASE/shared/search-log.ndjson, + one rotated .1), then hands it to
 # refresh-search-history.mjs, which groups it into search sessions. Sessions on
 # the hide list ($PROD_BASE/shared/search-history-hidden.json, managed with
-# hide-search-history.sh) are left out, whichever machine runs this.
+# hide-search-history.sh) are left out, whichever machine runs this, and so are
+# sessions more than two weeks old (--max-age-days).
 #
 # The file is gitignored and read only at build time; the site never calls
 # anything at runtime. scripts/deploy/deploy.sh runs this before every build.
@@ -21,6 +22,7 @@
 #   --hidden-file PATH  With --file: a local hide list to apply (default: none).
 #   --since DATE        Ignore entries before DATE (e.g. 2026-08-01).
 #   --max-sessions N    Keep only the newest N sessions (default 250).
+#   --max-age-days N    Leave out sessions older than N days (default 14; 0 = keep all).
 #   -h, --help          This help.
 #
 # Requirements for the ssh path: scripts/deploy/deploy.config.sh (same as
@@ -37,6 +39,7 @@ LOCAL_FILE=""
 HIDDEN_FILE=""
 SINCE=""
 MAX_SESSIONS=""
+MAX_AGE_DAYS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,7 +47,8 @@ while [[ $# -gt 0 ]]; do
     --hidden-file) HIDDEN_FILE="${2:?--hidden-file needs a path}"; shift 2 ;;
     --since) SINCE="${2:?--since needs a date}"; shift 2 ;;
     --max-sessions) MAX_SESSIONS="${2:?--max-sessions needs a number}"; shift 2 ;;
-    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --max-age-days) MAX_AGE_DAYS="${2:?--max-age-days needs a number}"; shift 2 ;;
+    -h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "Unknown argument: $1 (try --help)" ;;
   esac
 done
@@ -92,5 +96,6 @@ fi
 MJS_ARGS=(--records "$RECORDS" --hidden "$HIDDEN")
 [[ -n "$SINCE" ]] && MJS_ARGS+=(--since "$SINCE")
 [[ -n "$MAX_SESSIONS" ]] && MJS_ARGS+=(--max-sessions "$MAX_SESSIONS")
+[[ -n "$MAX_AGE_DAYS" ]] && MJS_ARGS+=(--max-age-days "$MAX_AGE_DAYS")
 
 node "$SCRIPT_DIR/refresh-search-history.mjs" "${MJS_ARGS[@]}"
