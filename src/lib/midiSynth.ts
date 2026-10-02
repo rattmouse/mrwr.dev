@@ -504,18 +504,14 @@ export class MidiSynth {
   }
 
   /**
-   * Move one knob. Deliberately does not create the AudioContext — a reset can
-   * set all eight before the user has done anything a browser counts as a
-   * gesture; the values are stored and applied when the graph does come up.
+   * Move one knob. Deliberately does not create the AudioContext — restoring
+   * last visit's knobs can set all eight before the user has done anything a
+   * browser counts as a gesture; the values are stored and applied when the
+   * graph does come up.
    */
   setKnob(slot: number, value: number): void {
     if (slot < 0 || slot >= KNOB_COUNT) return;
     this.knobs[slot] = Math.max(0, Math.min(127, value));
-    this.applyKnobs();
-  }
-
-  resetKnobs(): void {
-    this.knobs = [...KNOB_DEFAULTS];
     this.applyKnobs();
   }
 
