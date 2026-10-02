@@ -66,7 +66,7 @@ export const PROGRAMS = {
     kind: "program",
     title: "paint.exe",
     icon: "../w95_paint.ico",
-    size: { width: 410, height: 320 },
+    size: { width: 560, height: 360 },
     menu: { label: "Paint", folder: "tools" },
     shell: { blurb: "a little painting program." },
   },
