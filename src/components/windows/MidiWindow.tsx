@@ -1711,8 +1711,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
         padHeldRef.current.clear();
         setHeld([]);
         setPadHeld([]);
-        setKnobs([...KNOB_DEFAULTS]);
-        synthRef.current?.resetKnobs();
+        // The knobs are the sound, not the file — they stay where they were.
         setEntries([]);
         setLoadError(null);
       },
