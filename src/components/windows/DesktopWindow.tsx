@@ -6,6 +6,7 @@ import { Z } from "@/constants/zIndex";
 import MeltFilter, { MELT_FILTER_ID, meltStyle } from "@/components/windows/MeltFilter";
 import FrameLightsStyle, { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
 import { Layout, WindowBox } from "@/components/windows/windowTypes";
+import { Turn, isUpright, toScreen, turnTransform, unturn } from "@/lib/windowTurn";
 
 type DesktopWindowProps = {
   title: string;
@@ -56,6 +57,11 @@ type DesktopWindowProps = {
    * panel's doing. Undefined, or dark, leaves it as plain Windows 95.
    */
   lights?: FrameLights;
+  /**
+   * Turned or mirrored about its own middle, title bar and all — paint.exe's
+   * rotate and flip buttons. Still dragged and resized the way it looks.
+   */
+  turn?: Turn;
   toolbar?: React.ReactNode;
   children: React.ReactNode;
 };
@@ -87,6 +93,7 @@ export default function DesktopWindow({
   controlsDisabled = false,
   melt,
   lights,
+  turn,
   toolbar,
   children,
 }: DesktopWindowProps) {
@@ -119,6 +126,25 @@ export default function DesktopWindow({
     setGhost(null);
   }, [layout]);
 
+  const turned = !!turn && !isUpright(turn);
+  const turnCss = turnTransform(turn);
+
+  // The frame's own box, as if it weren't turned. A turned frame's on-screen
+  // rect is its outline after the turn, but it turns about its middle, so the
+  // middle is still where the box's middle is.
+  const measureFrame = (frame: HTMLElement): WindowBox => {
+    const rect = frame.getBoundingClientRect();
+    if (!turned) return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    const width = frame.offsetWidth;
+    const height = frame.offsetHeight;
+    return {
+      left: rect.left + rect.width / 2 - width / 2,
+      top: rect.top + rect.height / 2 - height / 2,
+      width,
+      height,
+    };
+  };
+
   // Pin a window that hasn't got a box yet to wherever it has just been laid
   // out. It's measured before paint, so there's no visible jump — the window
   // simply stops being centred by CSS and starts being held where it is.
@@ -126,7 +152,7 @@ export default function DesktopWindow({
     if (box || layout !== "normal") return;
     const frame = headerRef.current?.parentElement;
     if (!frame) return;
-    const rect = frame.getBoundingClientRect();
+    const rect = measureFrame(frame);
     // The music window's shake rides on the same transform; take it back out
     // so the pinned spot is where the window really lives.
     onBoxChange?.({
@@ -153,8 +179,7 @@ export default function DesktopWindow({
   ) => {
     e.preventDefault();
 
-    const rect = frame.getBoundingClientRect();
-    const base = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    const base = measureFrame(frame);
     const startX = e.clientX;
     const startY = e.clientY;
     let latest: Box | null = null;
@@ -215,6 +240,21 @@ export default function DesktopWindow({
     if (!frame) return;
 
     trackOutline(e, frame, "nwse-resize", (base, dx, dy) => {
+      if (turn && turned) {
+        // The grip is wherever the turn put it, so the drag is read the way
+        // the window is facing, and the far corner stays put on screen while
+        // the box grows out from its own top left.
+        const step = unturn(turn, dx, dy);
+        const width = Math.max(MIN_W, base.width + step.x);
+        const height = Math.max(MIN_H, base.height + step.y);
+        const shift = toScreen(turn, (width - base.width) / 2, (height - base.height) / 2);
+        return {
+          left: base.left + base.width / 2 + shift.x - width / 2,
+          top: base.top + base.height / 2 + shift.y - height / 2,
+          width,
+          height,
+        };
+      }
       const maxW = Math.max(MIN_W, window.innerWidth - base.left - GAP);
       const maxH = Math.max(MIN_H, window.innerHeight - base.top - GAP);
       return {
@@ -251,6 +291,7 @@ export default function DesktopWindow({
         left: GAP,
         width: `calc(100vw - ${GAP * 2}px)`,
         height: `calc(100vh - ${TASKBAR_H + GAP * 2}px)`,
+        transform: turnCss,
         zIndex,
         display: "flex",
         flexDirection: "column",
@@ -264,7 +305,9 @@ export default function DesktopWindow({
           // back; it never moves a window that is still in view.
           left: `clamp(${KEEP_ON_SCREEN - box.width}px, ${box.left}px, calc(100% - ${KEEP_ON_SCREEN}px))`,
           top: `clamp(${TASKBAR_H}px, ${box.top}px, calc(100% - ${KEEP_ON_SCREEN}px))`,
-          transform: jitterX || jitterY ? `translate(${jitterX}px, ${jitterY}px)` : undefined,
+          transform:
+            [jitterX || jitterY ? `translate(${jitterX}px, ${jitterY}px)` : "", turnCss ?? ""].join(" ").trim() ||
+            undefined,
           width: box.width,
           height: box.height,
           maxWidth: `calc(100vw - ${GAP * 2}px)`,
@@ -280,7 +323,7 @@ export default function DesktopWindow({
           top: normalTop,
           // The cascade step is a desktop-sized step: on a phone a whole one would
           // walk the third window off the edge, so it shrinks with the screen.
-          transform: `translate(calc(-50% + ${jitterX}px + min(${cascadeX}px, ${cascadeX * 0.1}vw)), calc(-50% + ${jitterY}px + min(${cascadeY}px, ${cascadeY * 0.1}vh)))`,
+          transform: `translate(calc(-50% + ${jitterX}px + min(${cascadeX}px, ${cascadeX * 0.1}vw)), calc(-50% + ${jitterY}px + min(${cascadeY}px, ${cascadeY * 0.1}vh)))${turnCss ? ` ${turnCss}` : ""}`,
           width: NORMAL_W,
           height: normalHeight,
           // A window's natural size is a wish, not a promise: on a phone the
@@ -337,6 +380,7 @@ export default function DesktopWindow({
           top: ghost.top,
           width: ghost.width,
           height: ghost.height,
+          transform: turnCss,
           zIndex: zIndex + 1,
           pointerEvents: "none",
           boxSizing: "border-box",

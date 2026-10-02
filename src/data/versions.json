@@ -3,6 +3,24 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "6.1",
+      "era": "claude",
+      "name": "Paint.exe",
+      "date": "2026-10-01",
+      "summary": "A real tool box, a picture you can zoom around in, and a window that turns.",
+      "issues": [],
+      "changes": [
+        "Paint has a proper tool box now: beside the pencil, a dropper that lifts any color straight off the picture, and three ways to select — a rectangle, a line drawn round something free-hand, or a magic wand that takes everything the same color in one go. Whatever you have picked out can be dragged somewhere else, cut, copied and pasted — a paste lands in the middle of whatever part of the picture you're looking at — a picture copied from anywhere else pastes straight in, and every bit of it undoes twenty steps back. The keyboard reaches most of it: P, M, F, Q and K for the tools, the usual Ctrl+Z, C, V and A, the bracket keys for the pencil's width and the arrow keys to shift a selection a pixel at a time",
+        "Open a picture and the sheet becomes that picture — its own size, one pixel for one pixel, laid on a grey table and shown whole however big it is, and handed back at the size it came in at when you save. The wheel zooms on whatever is under the pointer, from a quarter size up to sixteen times, leaving the pixels square rather than smeared, and space with a drag shoves the sheet about underneath, or hold W, A, S and D to glide about it — Shift to hurry. When there is more picture than window, a small copy of the whole thing sits in the corner with everything you can't currently see shaded back — drag inside it to go somewhere else",
+        "paint.exe has rotate, flip vertical and flip horizontal buttons that turn the whole window with your picture in it, title bar and all. You can keep drawing however it's turned, Save writes the picture the way it looks, and New or Open set it the right way up again",
+        "Paint's magic wand can be loosened or tightened as you use it: hold it down and drag right or down to take in more of the colors nearby, left or up for fewer, watching the selection grow and shrink as you go. The next click remembers where you left it",
+        "Paint's dropper shows a magnifying glass beside the pointer: the pixel under it and the ones around it, blown up square, with the color's code underneath. Hold it down and slide to the exact pixel you want — it picks where you let go, and on a phone the glass sits above your finger",
+        "Paint can recolor whatever you've selected: Adjust colors turns the hue, washes the color out or turns it up, nudges red, green and blue one at a time and lightens or darkens it, all live as you drag the sliders. OK keeps it as one step to undo, and Cancel puts it back",
+        "Hold Shift as you start a selection in Paint — a rectangle, a free-form line or the magic wand — and it adds to what's already selected instead of starting over",
+        "Right-click the picture in Paint for a menu of its own: undo and redo, cut, copy, paste and delete, select all, Adjust colors, picking up the color under the pointer, and the rotate and flip buttons. Paste from there lands right where you clicked"
+      ]
+    },
+    {
       "version": "6.0.7",
       "era": "claude",
       "name": "Multitasking",
