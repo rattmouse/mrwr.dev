@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Button, Window, WindowHeader } from "react95";
 import { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
 import { meltStyle } from "@/components/windows/MeltFilter";
+import { ResetIcon } from "@/components/windows/PartyControls";
 import { Z } from "@/constants/zIndex";
 
 const TASKBAR_H = 50;
@@ -34,6 +35,11 @@ export type FloatingPanelProps = {
    * left rather than back to the slot it started in.
    */
   onMoved?: (at: { x: number; y: number }) => void;
+  /**
+   * Put back to default whatever in the panel has no section of its own to do
+   * it — a ↺ after the title. Left off while there is nothing to put back.
+   */
+  onReset?: () => void;
   children: React.ReactNode;
 };
 
@@ -62,6 +68,7 @@ export default function FloatingPanel({
   lights,
   melt = 0,
   onMoved,
+  onReset,
   children,
 }: FloatingPanelProps) {
   const [pos, setPos] = useState(initial);
@@ -180,16 +187,19 @@ export default function FloatingPanel({
           background: "rgba(255, 255, 255, 0.03)",
         }}
       >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.09em",
-            textTransform: "uppercase",
-            color: "rgba(232, 236, 244, 0.72)",
-          }}
-        >
-          {title}
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.09em",
+              textTransform: "uppercase",
+              color: "rgba(232, 236, 244, 0.72)",
+            }}
+          >
+            {title}
+          </span>
+          {onReset && <ResetIcon label={title} onReset={onReset} />}
         </span>
         <button
           type="button"
@@ -254,7 +264,10 @@ export default function FloatingPanel({
           ...light?.header,
         }}
       >
-        <span>{title}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span>{title}</span>
+          {onReset && <ResetIcon label={title} onReset={onReset} style={{ color: "inherit" }} />}
+        </span>
         <Button square size="sm" onClick={onClose} aria-label={`Close ${title}`}>
           <span className="close-icon" />
         </Button>

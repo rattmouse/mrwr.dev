@@ -1138,6 +1138,12 @@ export default function DocumentWindow({
                     </Anchor>
                   </li>
                   <li>
+                    - fluid from{" "}
+                    <Anchor href="https://github.com/PavelDoGreat/WebGL-Fluid-Simulation" target="_blank">
+                      PavelDoGreat
+                    </Anchor>
+                  </li>
+                  <li>
                     - built with{" "}
                     <Anchor href="https://nextjs.org/" target="_blank">
                       Next.js

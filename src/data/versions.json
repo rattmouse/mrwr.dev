@@ -3,6 +3,17 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "6.2",
+      "era": "claude",
+      "name": "Fluid",
+      "date": "2026-10-01",
+      "summary": "Live ink under the crowd, and a party that spills out across the desktop.",
+      "issues": [],
+      "changes": [
+        "party.webp has a new Surface in its Palette: Fluid, a pool of live colored ink the crowd wanders through, nudging it along as they go. Whoever you pick, and anyone you've dressed differently, stirs it properly and leaves a wake of their own color. Stir it yourself with the mouse or a finger, tap to drop a splash, throw in a handful with Splash, Pause it mid-swirl or wipe it away, switch its Color, Shading, Bloom and Rays, set how fast it fades, how much it swirls and how big a splash is, and pick what it sits on — the desktop's own teal to start with. Frame > Party now lets the whole party out at once, ink and all: it spreads across the desktop behind the windows, and you can pick anyone out there with a click or a tap. The Palette now shows who it's dressing: whoever you've picked, drawn large, or a little group in the crowd's look when nobody is — and lists everyone you've dressed differently, to pick again or put back with the crowd. Any section of party.webp's panels you've changed shows a small ↺ after its name that puts it back to how it started, and the panel's own name has one for everything else in it; clicking a section's name no longer picks its first option"
+      ]
+    },
+    {
       "version": "6.1",
       "era": "claude",
       "name": "Paint.exe",
