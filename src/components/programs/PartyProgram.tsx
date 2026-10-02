@@ -18,7 +18,7 @@ export default function PartyProgram(props: ProgramProps) {
 
   return (
     <DesktopWindow {...windowFrame("party", props)} melt={frame.melt} lights={frame.lights}>
-      <PartyWindow frame={frame} onFrameChange={patchFrame} />
+      <PartyWindow frame={frame} onFrameChange={patchFrame} minimized={props.layout === "minimized"} />
     </DesktopWindow>
   );
 }

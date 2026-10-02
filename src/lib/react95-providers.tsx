@@ -3,6 +3,7 @@
 import { ThemeProvider, createGlobalStyle } from "styled-components";
 import { styleReset } from "react95";
 import original from "react95/dist/themes/original";
+import { DESKTOP_COLOR } from "@/constants/desktop";
 
 // bundled fonts from react95
 import ms_sans_serif from "react95/dist/fonts/ms_sans_serif.woff2";
@@ -82,7 +83,7 @@ const React95GlobalStyle = createGlobalStyle<{ $warped: boolean }>`
     font-size: 12px;              /* big one: keeps spacing/menu right */
     line-height: 1.2;
 
-    background: #008080; /* classic teal */
+    background: ${DESKTOP_COLOR}; /* classic teal */
 
     /* Unsmoothed, aliased glyph edges give the crisp retro look at the size
        this font is meant for — but cubicles.exe shows this same page again,

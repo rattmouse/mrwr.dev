@@ -9,6 +9,7 @@ my website
 ## credits
 - ui created with [react95](https://react95.io/) - https://react95.io/
 - music from [strudel.cc](https://strudel.cc) - https://strudel.cc
+- fluid from [PavelDoGreat](https://github.com/PavelDoGreat/WebGL-Fluid-Simulation) - https://github.com/PavelDoGreat/WebGL-Fluid-Simulation
 - built with [Next.js](https://nextjs.org/) & [React](https://react.dev/) - https://nextjs.org/ and https://react.dev/
 - deployed on [DigitalOcean](https://www.digitalocean.com/) - https://www.digitalocean.com/
 - some help from [Chat GPT](https://chatgpt.com/) - https://chatgpt.com/

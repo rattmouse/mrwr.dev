@@ -23,6 +23,8 @@ export default function PartyDicePanel({
   liningUp,
   onDie,
   onLuck,
+  onResetDie,
+  onResetLuck,
   onRoll,
   onInitiative,
 }: {
@@ -35,6 +37,9 @@ export default function PartyDicePanel({
   liningUp: boolean;
   onDie: (die: DieKind) => void;
   onLuck: (luck: Luck) => void;
+  /** Back to the default die or luck; left off while it already is. */
+  onResetDie?: () => void;
+  onResetLuck?: () => void;
   onRoll: () => void;
   onInitiative: () => void;
 }) {
@@ -48,7 +53,7 @@ export default function PartyDicePanel({
 
   return (
     <>
-      <Field label="Die">
+      <Field label="Die" onReset={onResetDie}>
         <Segmented
           options={[
             { label: "d20", value: "d20" },
@@ -60,7 +65,7 @@ export default function PartyDicePanel({
           onChange={(value) => onDie(value as DieKind)}
         />
       </Field>
-      <Field label="Luck">
+      <Field label="Luck" onReset={onResetLuck}>
         <Segmented
           options={[
             { label: "Disadv.", value: "disadvantage" },

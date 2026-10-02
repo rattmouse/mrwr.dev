@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import DndPortrait, { portraitSprite, portraitWidth } from "@/components/windows/DndPortrait";
 import FloatingPanel from "@/components/windows/FloatingPanel";
@@ -78,6 +78,9 @@ import {
 } from "@/lib/partyExchanges";
 import { useParty } from "@/lib/useParty";
 import { hexOr, loadSettings, oneOf, saveSettings } from "@/lib/savedSettings";
+import FluidSurface, { type FluidSurfaceHandle } from "@/components/windows/FluidSurface";
+import PartyNodePreview, { type PreviewFigure } from "@/components/windows/PartyNodePreview";
+import { FLUID_DEFAULTS, type FluidOptions } from "@/lib/fluidSim";
 import { usePartyLog } from "@/lib/usePartyLog";
 
 export type PanelId =
@@ -126,6 +129,12 @@ const SURFACES = [
   { label: "Mist", value: "#e7ebf2" },
 ] as const;
 
+// The Surface that isn't a color: the crowd walks through live ink instead.
+const FLUID_SURFACE = "fluid";
+
+/** The Fluid surface: whether it's the one laid down, and how it looks. */
+type FluidLook = FluidOptions & { on: boolean };
+
 type NodeShape = "guys" | "rat" | "mouse" | "dots";
 
 // The two emoji the canvas can be populated with instead of the painted crowd.
@@ -145,7 +154,10 @@ type Settings = {
   reach: number;
   /** 0 = the canvas is wiped every frame; up towards 1 the crowd smears. */
   trails: number;
-  /** Let the crowd past the frame to wander the desktop behind the windows. */
+  /**
+   * Let the party out past the frame, onto the desktop behind the windows:
+   * the crowd and everything that happens to them, and the Fluid surface too.
+   */
   loose: boolean;
   shape: NodeShape;
   /** What the Forces panel is pushing the crowd around with. */
@@ -154,6 +166,8 @@ type Settings = {
   formation: Formation;
   /** What the Links panel is doing to the lines strung between them. */
   links: Links;
+  /** The Fluid surface, set in the Palette panel under Surface. */
+  fluid: FluidLook;
 };
 
 // What one node has been told to be, as against what the crowd around it is.
@@ -171,6 +185,7 @@ const DEFAULTS: Settings = {
   forces: NO_FORCES,
   formation: NO_FORMATION,
   links: DEFAULT_LINKS,
+  fluid: { ...FLUID_DEFAULTS, on: false },
 };
 
 // What the Console calls each setting, and how its value reads there — the log
@@ -183,12 +198,35 @@ const SETTING_LABEL: Record<keyof Settings, string> = {
   speed: "speed",
   reach: "reach",
   trails: "trails",
-  loose: "crowd",
+  loose: "party",
   shape: "nodes",
   forces: "forces",
   formation: "formation",
   links: "links",
+  fluid: "fluid",
 };
+
+const FLUID_LABEL: Record<keyof FluidLook, string> = {
+  on: "fluid",
+  background: "fluid background",
+  colorful: "fluid color",
+  shading: "fluid shading",
+  bloom: "fluid bloom",
+  sunrays: "fluid rays",
+  fade: "fluid fade",
+  swirl: "fluid swirl",
+  splashSize: "splash size",
+  paused: "fluid",
+};
+
+// The four looks the Fluid surface can switch on and off, in the order the
+// Palette shows them. Color works on any GPU; the rest need filtered floats.
+const FLUID_EFFECTS: { key: "colorful" | "shading" | "bloom" | "sunrays"; label: string }[] = [
+  { key: "colorful", label: "Color" },
+  { key: "shading", label: "Shading" },
+  { key: "bloom", label: "Bloom" },
+  { key: "sunrays", label: "Rays" },
+];
 
 const FORCE_LABEL: Record<keyof Forces, string> = {
   gravityAngle: "gravity heading",
@@ -213,7 +251,7 @@ const LINK_LABEL: Record<keyof Links, string> = {
   weight: "link weight",
   max: "links per node",
   curve: "curve",
-  colour: "link colour",
+  colour: "link color",
   mesh: "mesh",
 };
 
@@ -237,6 +275,13 @@ const showForce = (key: keyof Forces, value: Forces[keyof Forces]) =>
 const showFormation = (key: keyof Formation, value: Formation[keyof Formation]) => {
   if (key === "shape") return String(value);
   return `${percent(value as number)}`;
+};
+
+const showFluid = (key: keyof FluidLook, value: FluidLook[keyof FluidLook]) => {
+  if (key === "paused") return value ? "paused" : "flowing";
+  if (key === "fade" && value === 0) return "never";
+  if (typeof value === "number") return key === "swirl" ? String(value) : value.toFixed(2);
+  return typeof value === "boolean" ? (value ? "on" : "off") : String(value);
 };
 
 const showLink = (key: keyof Links, value: Links[keyof Links]) => {
@@ -282,6 +327,12 @@ function loadSaved(): Saved {
         ...settings.links,
         colour: oneOf(settings.links.colour, ["ink", "accent", "nodes"], DEFAULT_LINKS.colour),
       },
+      fluid: {
+        ...settings.fluid,
+        background: hexOr(settings.fluid.background, DEFAULTS.fluid.background),
+        // Paused is how you left it this visit; the next one starts flowing.
+        paused: false,
+      },
     },
     die: oneOf(saved.die, ["d20", "d6", "d100"], "d20"),
     luck: oneOf(saved.luck, ["normal", "advantage", "disadvantage"], "normal"),
@@ -289,6 +340,34 @@ function loadSaved(): Saved {
 }
 
 const nameOf = (character: Character) => character.name.trim() || "someone unnamed";
+
+// The little group the Palette shows when nothing is picked: which painted
+// figure each is, which way they face and how tall, fixed so the swatch holds
+// still while you change things.
+// The Palette's little ×, which lets go of whatever is picked — over the
+// swatch's corner, or beside the line for something it can't dress. Solid
+// enough to read on any surface.
+const letGoButton: React.CSSProperties = {
+  cursor: "pointer",
+  width: 20,
+  height: 20,
+  padding: 0,
+  borderRadius: 6,
+  border: "1px solid rgba(255, 255, 255, 0.22)",
+  background: "rgba(11, 14, 20, 0.72)",
+  color: "#e8ecf4",
+  font: "inherit",
+  fontSize: 13,
+  lineHeight: "18px",
+};
+
+const PREVIEW_GROUP = [
+  { pose: 3, flip: false, size: 0.95 },
+  { pose: 17, flip: true, size: 1.1 },
+  { pose: 42, flip: false, size: 0.85 },
+  { pose: 8, flip: true, size: 1.15 },
+  { pose: 29, flip: false, size: 0.9 },
+];
 
 // How tall a guy stands on the canvas, before his own size roll. A party member
 // stands a little taller than the crowd — the loadout tile has more in it.
@@ -338,9 +417,11 @@ type PartyWindowProps = {
    * warp and the lights, say — cannot each write back the other's old value.
    */
   onFrameChange: (patch: Partial<FrameSettings>) => void;
+  /** Minimized, the Fluid surface rests — unless it's out on the desktop. */
+  minimized?: boolean;
 };
 
-export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) {
+export default function PartyWindow({ frame, onFrameChange, minimized = false }: PartyWindowProps) {
   // Read once, into the first state of everything it covers.
   const [saved] = useState(loadSaved);
   const [settings, setSettings] = useState<Settings>(saved.settings);
@@ -414,6 +495,13 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   // goes with the switch.
   const looseRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  // The Fluid surface, when it's the one laid down; the draw loop hands it
+  // where everybody walked each frame.
+  const fluidRef = useRef<FluidSurfaceHandle | null>(null);
+  // Whether this GPU can do the Fluid surface's shading, bloom and rays, and
+  // whether it can run the Fluid surface at all.
+  const [fluidEffects, setFluidEffects] = useState(true);
+  const [fluidFailed, setFluidFailed] = useState(false);
   const nodesRef = useRef<Node[]>([]);
   const pointerRef = useRef<{ x: number; y: number; on: boolean }>({ x: 0, y: 0, on: false });
   // Raised by the Motion panel's Wipe clean; the draw loop lowers it again on
@@ -588,9 +676,70 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     }
     setSettings((prev) => ({ ...prev, links: { ...prev.links, [key]: value } }));
   };
+  const setFluid = <K extends keyof FluidLook>(key: K, value: FluidLook[K]) => {
+    if (settings.fluid[key] !== value) {
+      log.changed(
+        `fluid.${key}`,
+        FLUID_LABEL[key],
+        showFluid(key, settings.fluid[key]),
+        showFluid(key, value),
+      );
+    }
+    setSettings((prev) => ({ ...prev, fluid: { ...prev.fluid, [key]: value } }));
+  };
+
+  // A section's ↺ is only handed out while the section is off its default, so
+  // a panel nobody has touched shows none.
+  const resetTo = <T,>(now: T, fallback: T, apply: (value: T) => void) =>
+    now === fallback ? undefined : () => apply(fallback);
+
+  // The panel's own ↺, after its title: everything in it that isn't in a
+  // section of its own — Motion's sliders, the Forces dial and the sliders
+  // around it, and so on. Sections with a title keep their own ↺.
+  const panelReset = (id: PanelId): (() => void) | undefined => {
+    const { forces: f, formation: fm, links: l } = settings;
+    const off = <T extends object>(now: T, fallback: T, keys: (keyof T)[]) =>
+      keys.filter((key) => now[key] !== fallback[key]);
+    switch (id) {
+      case "motion": {
+        const keys = off(settings, DEFAULTS, ["density", "speed", "reach", "trails"]);
+        return keys.length === 0
+          ? undefined
+          : () => keys.forEach((key) => set(key, DEFAULTS[key]));
+      }
+      case "forces": {
+        const keys = off(f, NO_FORCES, ["gravityAngle", "gravity", "wind", "jitter", "pull"]);
+        return keys.length === 0
+          ? undefined
+          : () => keys.forEach((key) => setForce(key, NO_FORCES[key]));
+      }
+      case "formation": {
+        const keys = off(fm, NO_FORMATION, ["hold", "restless"]);
+        return keys.length === 0
+          ? undefined
+          : () => keys.forEach((key) => setForm(key, NO_FORMATION[key]));
+      }
+      case "links": {
+        const keys = off(l, DEFAULT_LINKS, ["opacity", "weight", "max", "curve", "mesh"]);
+        return keys.length === 0
+          ? undefined
+          : () => keys.forEach((key) => setLink(key, DEFAULT_LINKS[key]));
+      }
+      case "frame": {
+        const lit = off(frame.lights, NO_LIGHTS, ["colour", "cycle", "pulse", "strobe"]);
+        if (frame.melt === NO_FRAME.melt && lit.length === 0) return undefined;
+        return () => {
+          note("frame back to default");
+          onFrameChange({ melt: NO_FRAME.melt, lights: NO_LIGHTS });
+        };
+      }
+      default:
+        return undefined;
+    }
+  };
   const { forces, formation, links } = settings;
 
-  // Turning Colour up from nothing lights the frame and sets it moving, rather
+  // Turning Color up from nothing lights the frame and sets it moving, rather
   // than handing back a frame that is lit but stone still and looks broken.
   const setLights = (patch: Partial<FrameLights>) =>
     onFrameChange({
@@ -613,19 +762,75 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   const selectedOverride = !editable || selectedId === null ? null : (overrides[selectedId] ?? {});
   const activeAccent = selectedOverride?.color ?? settings.accent;
   const activeShape = selectedOverride?.shape ?? settings.shape;
+
+  // What the Palette's swatch shows: the node picked, as the canvas draws
+  // them, or a group in the crowd's own look when nothing is. Something that
+  // wandered in isn't the Palette's to dress, so it shows nothing for that.
+  const previewSurface = settings.fluid.on ? settings.fluid.background : settings.surface;
+  const previewLight = isLight(previewSurface);
+  const pickedPose = picked && picked.id === selectedId ? picked : null;
+  const previewFigures = useMemo<PreviewFigure[] | null>(() => {
+    if (selectedArrival !== null) return null;
+    const toned = (hex: string) => (previewLight ? deepen(hex, 0.45) : hex);
+    const figureOf = (shape: NodeShape, color: string, pose: number, flip: boolean, size: number): PreviewFigure => ({
+      kind: EMOJI[shape] ? "emoji" : shape === "guys" ? "guy" : "dot",
+      emoji: EMOJI[shape],
+      tone: toned(color),
+      pose,
+      flip,
+      size,
+    });
+    // A party member always wears the palette's color; the Party panel
+    // dresses them, not this one.
+    if (selectedCharacter) return [figureOf("guys", settings.accent, 0, false, 1)];
+    if (editable) {
+      return [
+        figureOf(
+          activeShape,
+          activeAccent,
+          pickedPose?.guy ?? 0,
+          pickedPose?.flip ?? false,
+          Math.min(1.1, pickedPose?.size ?? 1),
+        ),
+      ];
+    }
+    return PREVIEW_GROUP.map((g) => figureOf(settings.shape, settings.accent, g.pose, g.flip, g.size));
+  }, [
+    selectedArrival,
+    selectedCharacter,
+    editable,
+    activeShape,
+    activeAccent,
+    pickedPose?.guy,
+    pickedPose?.flip,
+    pickedPose?.size,
+    settings.shape,
+    settings.accent,
+    previewLight,
+  ]);
+  // Take one thing back off the picked node. With nothing left on them they
+  // are back with the crowd, and off the Edited list.
+  const undressSelected = (key: keyof NodeOverride) => {
+    if (selectedId === null) return;
+    setOverrides((prev) => {
+      const own = { ...prev[selectedId] };
+      delete own[key];
+      const next = { ...prev };
+      if (Object.keys(own).length > 0) next[selectedId] = own;
+      else delete next[selectedId];
+      return next;
+    });
+  };
   const editSelected = (patch: NodeOverride) => {
     if (selectedId === null) return;
     setOverrides((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], ...patch } }));
   };
-  const resetSelected = () => {
-    if (selectedId === null) return;
-    setOverrides((prev) => {
-      const next = { ...prev };
-      delete next[selectedId];
-      return next;
-    });
-  };
   const edited = Object.keys(overrides).length;
+  // Everyone dressed differently from the crowd, oldest first, with what they
+  // were told to be filled in from the crowd where they weren't.
+  const editedNodes = Object.entries(overrides)
+    .map(([id, o]) => ({ id: Number(id), shape: o.shape ?? settings.shape, color: o.color ?? settings.accent }))
+    .sort((a, b) => a.id - b.id);
 
   // The sprite sheet is fetched the first time the canvas actually wants guys —
   // whether that is the whole crowd or a single node told to be one.
@@ -743,8 +948,12 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       const dt = Math.min(now - last, 50);
       last = now;
 
-      const { accent, surface, density, speed, reach, trails, loose, shape, forces, formation, links } =
+      const { accent, surface: plain, density, speed, reach, trails, loose, shape, forces, formation, links, fluid } =
         settingsRef.current;
+      // On the Fluid surface the crowd is drawn over live ink rather than a
+      // flat color; everything toned against the surface is toned against
+      // the ink's background instead.
+      const surface = fluid.on ? fluid.background : plain;
       // Both canvases clear on the same Wipe clean, so the flag is read here
       // and lowered at the end of the frame rather than by whichever of them
       // happens to get to it first.
@@ -765,12 +974,18 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
       //
       // A sheer fill has to be laid over something, so the surface goes on
       // solid once first — after a resize, a change of surface, or Wipe clean.
+      //
+      // On the Fluid surface the ink is underneath, so this canvas has to stay
+      // see-through: the surface is erased rather than laid down, the same way
+      // the desktop's canvas does it below.
       ctx.fillStyle = surface;
-      const fresh = !primed || wiping || surface !== lastSurface || trails <= 0;
+      const surfaceKey = fluid.on ? FLUID_SURFACE : surface;
+      const fresh = !primed || wiping || surfaceKey !== lastSurface || trails <= 0;
       if (fresh) {
-        ctx.fillRect(0, 0, width, height);
+        if (fluid.on) ctx.clearRect(0, 0, width, height);
+        else ctx.fillRect(0, 0, width, height);
         primed = true;
-        lastSurface = surface;
+        lastSurface = surfaceKey;
       } else {
         // The fade is raised to dt so a trail is as long on a 144Hz screen as
         // it is on a 60Hz one, and the top-up is on a clock for the same
@@ -785,7 +1000,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         const topUp = now - toppedUpAt > 330;
         if (topUp) toppedUpAt = now;
         ctx.globalAlpha = topUp ? Math.max(fade, 0.12) : fade;
+        if (fluid.on) ctx.globalCompositeOperation = "destination-out";
         ctx.fillRect(0, 0, width, height);
+        ctx.globalCompositeOperation = "source-over";
         ctx.globalAlpha = 1;
       }
 
@@ -857,9 +1074,35 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         if (node.y > bottom) node.y = top;
       }
 
+      // Everybody walking through the ink nudges it along a little. Whoever
+      // is picked, and anyone dressed differently from the crowd, stirs it
+      // properly and leaves a wake of their own color. Let out, the ink is
+      // out on the desktop with them, so where they are is taken on the screen.
+      const pool = fluid.on ? fluidRef.current : null;
+      if (pool) {
+        const ox = at ? at.left : 0;
+        const oy = at ? at.top : 0;
+        const dressed = overridesRef.current;
+        const picked = selectedRef.current;
+        pool.currents(
+          nodes.map((node) => {
+            const own = dressed[node.id];
+            const marked = node.id === picked || !!own?.color || !!own?.shape;
+            return {
+              x: node.x + ox,
+              y: node.y + oy,
+              vx: node.vx * speed,
+              vy: node.vy * speed,
+              marked,
+              color: marked ? (own?.color ?? accent) : undefined,
+            };
+          }),
+        );
+      }
+
       const sheet = guysRef.current;
       const nodeOverrides = overridesRef.current;
-      // Each colour only has to be taken down for a pale surface once a frame,
+      // Each color only has to be taken down for a pale surface once a frame,
       // however many nodes are wearing it.
       const tones = new Map<string, string>();
       const toneOf = (hex: string) => {
@@ -900,7 +1143,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
           // the lines wash out of Mist entirely.
           accent: toneOf(accent),
           pointer,
-          // A party member is painted in the palette's colour whatever the crowd
+          // A party member is painted in the palette's color whatever the crowd
           // around them has been dressed in, so their links are too.
           colourOf: (node) => toneOf(node.charId ? accent : (nodeOverrides[node.id]?.color ?? accent)),
         });
@@ -1010,7 +1253,7 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         drawDice(into, diceRef.current, { now, accent: toneOf(accent), ink, surface });
 
         // Whatever is picked wears a marching-ants ring, in the palette's own
-        // colour rather than its own, so it stands out however it is dressed.
+        // color rather than its own, so it stands out however it is dressed.
         const ring = (x: number, y: number, radius: number) => {
           into.save();
           into.strokeStyle = accent;
@@ -1179,14 +1422,19 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
   // Whoever has wandered in is looked at first: they are drawn over the top of
   // everybody and are the biggest thing on the canvas, so a click that lands on
   // one was meant for them and not for whoever is cowering underneath.
-  const pickNode = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
+  //
+  // `x` and `y` are on the canvas, which is where everybody stands even when
+  // they've been let out past its edges. A click on the desktop only ever
+  // picks: missing everyone there is just a click on the desktop, so it leaves
+  // whatever was picked alone. Clicking whoever is picked lets them go.
+  const pickAt = (x: number, y: number, onDesktop = false) => {
     for (const arrival of arrivalsRef.current) {
       const radius = Math.max(16, arrivalSize(arrival) / 2 + 5);
       if (Math.hypot(arrival.x - x, arrival.y - y) > radius) continue;
+      if (arrival.id === selectedArrival) {
+        letGo();
+        return;
+      }
       setSelectedId(null);
       setSelectedChar(null);
       setSelectedArrival(arrival.id);
@@ -1204,6 +1452,12 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
         best = node;
       }
     }
+    if (!best && onDesktop) return;
+    // Clicking whoever is already picked lets them go again.
+    if (best && best.id === selectedId) {
+      letGo();
+      return;
+    }
     setSelectedId(best ? best.id : null);
     setSelectedChar(best?.charId ?? null);
     setSelectedArrival(null);
@@ -1213,6 +1467,40 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
     else if (best) note(`picked node #${best.id}`);
     else if (selectedId !== null) note("nothing picked");
   };
+  const letGo = () => {
+    clearPick();
+    note("nothing picked");
+  };
+  const pickNode = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    pickAt(e.clientX - rect.left, e.clientY - rect.top);
+  };
+
+  // Let out, the party is on the desktop, and so is anyone you might want to
+  // click — but the canvas they're drawn on there takes no clicks, or the
+  // desktop under it would stop working. So clicks on bare desktop are
+  // listened for here and tried against the crowd. The desktop itself is the
+  // page's <main>; a window, the taskbar or a tile is never bare desktop.
+  const pickAtRef = useRef(pickAt);
+  useEffect(() => {
+    pickAtRef.current = pickAt;
+  });
+  useEffect(() => {
+    if (!settings.loose) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target;
+      const bare =
+        target === document.body ||
+        target === document.documentElement ||
+        (target instanceof Element && target.tagName === "MAIN");
+      const wrap = wrapRef.current;
+      if (!bare || !wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      pickAtRef.current(event.clientX - rect.left, event.clientY - rect.top, true);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [settings.loose]);
 
   // The other way round: a row in the Party panel rings that member on canvas.
   const pickCharacter = useCallback(
@@ -1342,14 +1630,26 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
           position: "relative",
           borderRadius: 10,
           overflow: "hidden",
-          background: settings.surface,
+          background: settings.fluid.on ? settings.fluid.background : settings.surface,
           border: "1px solid rgba(15, 20, 30, 0.25)",
           boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.06)",
           touchAction: "none",
           cursor: "crosshair",
         }}
       >
-        <canvas ref={canvasRef} style={{ display: "block" }} />
+        {settings.fluid.on && (
+          <FluidSurface
+            ref={fluidRef}
+            options={settings.fluid}
+            running={!minimized || settings.loose}
+            wallpaper={settings.loose}
+            area={wrapRef}
+            onEffects={setFluidEffects}
+            onFailed={() => setFluidFailed(true)}
+          />
+        )}
+        {/* Positioned so it stays over the ink, which is laid in behind it. */}
+        <canvas ref={canvasRef} style={{ display: "block", position: "relative" }} />
       </div>
 
       {stack.map((id, index) => {
@@ -1369,21 +1669,139 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
             lights={frame.lights}
             melt={frame.melt}
             onMoved={(at) => rememberSpot(id, at)}
+            onReset={panelReset(id)}
           >
             {id === "palette" && (
               <>
-                <Scope
-                  selected={editable}
-                  character={selectedCharacter}
-                  visitor={
-                    goings.visits.find((visit) => visit.id === selectedArrival)?.who ?? null
+                {/* Only someone the Palette can't dress needs a word about it;
+                    for anyone else the swatch says who is being dressed. */}
+                {(selectedCharacter || selectedArrival !== null) && (
+                  <Scope
+                    character={selectedCharacter}
+                    visitor={
+                      goings.visits.find((visit) => visit.id === selectedArrival)?.who ?? null
+                    }
+                    onClear={letGo}
+                  />
+                )}
+                {previewFigures && (
+                  <PartyNodePreview
+                    figures={previewFigures}
+                    member={selectedCharacter}
+                    surface={previewSurface}
+                  >
+                    {(editable || selectedCharacter) && (
+                      <button
+                        type="button"
+                        aria-label="Let this one go"
+                        title="Let this one go — or click them again"
+                        style={letGoButton}
+                        onClick={letGo}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </PartyNodePreview>
+                )}
+                {editedNodes.length > 0 && (
+                  <Group
+                    label={`Edited · ${editedNodes.length}`}
+                    onReset={() => {
+                      setOverrides({});
+                      note("everyone back with the crowd");
+                    }}
+                  >
+                    <div style={{ display: "grid", gap: 3, maxHeight: 132, overflowY: "auto" }}>
+                      {editedNodes.map(({ id, shape: nodeShape, color }) => {
+                        const on = id === selectedId;
+                        return (
+                          <div key={id} style={{ display: "flex", gap: 3 }}>
+                            <button
+                              type="button"
+                              title={on ? "Let this one go" : "Pick this one"}
+                              aria-pressed={on}
+                              onClick={() => {
+                                if (on) {
+                                  letGo();
+                                  return;
+                                }
+                                setSelectedId(id);
+                                setSelectedChar(null);
+                                setSelectedArrival(null);
+                                note(`picked node #${id}`);
+                              }}
+                              style={{
+                                flex: 1,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                cursor: "pointer",
+                                borderRadius: 7,
+                                border: on ? `1px solid ${settings.accent}` : "1px solid rgba(255, 255, 255, 0.12)",
+                                background: on ? "rgba(255, 255, 255, 0.1)" : "rgba(255, 255, 255, 0.04)",
+                                color: "#e8ecf4",
+                                font: "inherit",
+                                fontSize: 12,
+                                padding: "4px 8px",
+                                textAlign: "left",
+                              }}
+                            >
+                              <span
+                                aria-hidden
+                                style={{
+                                  width: 12,
+                                  height: 12,
+                                  borderRadius: 4,
+                                  flex: "0 0 auto",
+                                  background: color,
+                                }}
+                              />
+                              <span style={{ flex: 1 }}>#{id}</span>
+                              <span style={{ color: "rgba(232, 236, 244, 0.6)" }}>
+                                {EMOJI[nodeShape] ?? SHAPE_NAMES[nodeShape]}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              title="Put this one back with the crowd"
+                              aria-label={`Reset node #${id}`}
+                              onClick={() => {
+                                setOverrides((prev) => {
+                                  const next = { ...prev };
+                                  delete next[id];
+                                  return next;
+                                });
+                                note(`node #${id} back with the crowd`);
+                              }}
+                              style={{
+                                cursor: "pointer",
+                                borderRadius: 7,
+                                border: "1px solid rgba(255, 255, 255, 0.12)",
+                                background: "rgba(255, 255, 255, 0.04)",
+                                color: "rgba(232, 236, 244, 0.7)",
+                                font: "inherit",
+                                fontSize: 12,
+                                padding: "4px 8px",
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Group>
+                )}
+                <Field
+                  label="Accent"
+                  onReset={
+                    editable
+                      ? selectedOverride?.color
+                        ? () => undressSelected("color")
+                        : undefined
+                      : resetTo(settings.accent, DEFAULTS.accent, (v) => set("accent", v))
                   }
-                  edited={edited}
-                  onClear={clearPick}
-                  onReset={resetSelected}
-                  hasOverride={Boolean(selectedOverride && Object.keys(selectedOverride).length > 0)}
-                />
-                <Field label="Accent">
+                >
                   <div style={{ display: "flex", gap: 7 }}>
                     {ACCENTS.map((accent) => (
                       <button
@@ -1409,7 +1827,16 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                     ))}
                   </div>
                 </Field>
-                <Field label="Nodes">
+                <Field
+                  label="Nodes"
+                  onReset={
+                    editable
+                      ? selectedOverride?.shape
+                        ? () => undressSelected("shape")
+                        : undefined
+                      : resetTo(settings.shape, DEFAULTS.shape, (v) => set("shape", v))
+                  }
+                >
                   <Segmented
                     options={[
                       { label: "Guys", value: "guys" },
@@ -1426,14 +1853,201 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                     }
                   />
                 </Field>
-                <Field label="Surface">
+                <Field
+                  label="Surface"
+                  onReset={
+                    settings.fluid.on || settings.surface !== DEFAULTS.surface
+                      ? () => {
+                          setFluid("on", false);
+                          set("surface", DEFAULTS.surface);
+                        }
+                      : undefined
+                  }
+                >
                   <Segmented
-                    options={SURFACES.map((s) => ({ label: s.label, value: s.value }))}
-                    value={settings.surface}
+                    options={[
+                      ...SURFACES.map((s) => ({ label: s.label, value: s.value })),
+                      { label: "Fluid", value: FLUID_SURFACE },
+                    ]}
+                    value={settings.fluid.on ? FLUID_SURFACE : settings.surface}
                     accent={settings.accent}
-                    onChange={(value) => set("surface", value)}
+                    onChange={(value) => {
+                      if (value === FLUID_SURFACE) {
+                        setFluid("on", true);
+                        return;
+                      }
+                      setFluid("on", false);
+                      set("surface", value);
+                    }}
                   />
                 </Field>
+                {/* Only the Fluid surface has anything more to set. */}
+                {settings.fluid.on && (
+                  <Group
+                    label="Fluid"
+                    onReset={
+                      (Object.keys(FLUID_DEFAULTS) as (keyof FluidOptions)[]).some(
+                        (key) => settings.fluid[key] !== FLUID_DEFAULTS[key],
+                      )
+                        ? () => {
+                            note("fluid back to default");
+                            setSettings((prev) => ({ ...prev, fluid: { ...FLUID_DEFAULTS, on: prev.fluid.on } }));
+                          }
+                        : undefined
+                    }
+                  >
+                    {fluidFailed ? (
+                      <span style={{ fontSize: 12, color: "rgba(232, 236, 244, 0.6)" }}>
+                        This computer&apos;s graphics card can&apos;t run the fluid, so it&apos;s just its
+                        background color.
+                      </span>
+                    ) : (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                          <button
+                            type="button"
+                            title="Throw in a handful of color"
+                            onClick={() => {
+                              note("ink splashed");
+                              fluidRef.current?.splash();
+                            }}
+                            style={panelButton}
+                          >
+                            Splash
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={settings.fluid.paused}
+                            title={settings.fluid.paused ? "Let the ink flow again" : "Freeze the ink where it is"}
+                            onClick={() => setFluid("paused", !settings.fluid.paused)}
+                            style={{
+                              ...panelButton,
+                              ...(settings.fluid.paused
+                                ? { background: settings.accent, color: "#0b0e14", borderColor: settings.accent }
+                                : null),
+                            }}
+                          >
+                            Pause
+                          </button>
+                          <button
+                            type="button"
+                            title="Take all the ink away and leave it still"
+                            onClick={() => {
+                              note("ink wiped away");
+                              fluidRef.current?.clear();
+                            }}
+                            style={panelButton}
+                          >
+                            Wipe ink
+                          </button>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            padding: 3,
+                            gap: 3,
+                            borderRadius: 9,
+                            background: "rgba(255, 255, 255, 0.06)",
+                          }}
+                        >
+                          {FLUID_EFFECTS.map(({ key, label }) => {
+                            // Without filtered float textures the GPU can't show
+                            // these three, and the sim keeps them off.
+                            const unavailable = key !== "colorful" && !fluidEffects;
+                            const on = settings.fluid[key] && !unavailable;
+                            return (
+                              <button
+                                key={key}
+                                type="button"
+                                aria-pressed={on}
+                                disabled={unavailable}
+                                title={unavailable ? "This graphics card can't show this" : undefined}
+                                onClick={() => setFluid(key, !settings.fluid[key])}
+                                style={{
+                                  flex: 1,
+                                  cursor: unavailable ? "default" : "pointer",
+                                  borderRadius: 7,
+                                  border: "none",
+                                  padding: "5px 0",
+                                  font: "inherit",
+                                  fontSize: 12,
+                                  background: on ? settings.accent : "transparent",
+                                  color: on ? "#0b0e14" : "rgba(232, 236, 244, 0.72)",
+                                  opacity: unavailable ? 0.4 : 1,
+                                  transition: "background 120ms ease",
+                                }}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <Slider
+                          label="Fade"
+                          value={settings.fluid.fade}
+                          min={0}
+                          max={4}
+                          step={0.05}
+                          accent={settings.accent}
+                          format={(v) => (v === 0 ? "never" : v.toFixed(2))}
+                          onChange={(v) => setFluid("fade", v)}
+                        />
+                        <Slider
+                          label="Swirl"
+                          value={settings.fluid.swirl}
+                          min={0}
+                          max={60}
+                          step={1}
+                          accent={settings.accent}
+                          onChange={(v) => setFluid("swirl", v)}
+                        />
+                        <Slider
+                          label="Splash size"
+                          value={settings.fluid.splashSize}
+                          min={0.05}
+                          max={1}
+                          step={0.01}
+                          accent={settings.accent}
+                          onChange={(v) => setFluid("splashSize", v)}
+                        />
+                      </>
+                    )}
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="color"
+                        aria-label="Fluid background color"
+                        title="What the ink sits on"
+                        value={settings.fluid.background}
+                        onChange={(e) => setFluid("background", e.target.value)}
+                        style={{
+                          width: 34,
+                          height: 28,
+                          padding: 0,
+                          border: "1px solid rgba(255, 255, 255, 0.16)",
+                          borderRadius: 8,
+                          background: "transparent",
+                          cursor: "pointer",
+                          flex: "0 0 auto",
+                        }}
+                      />
+                      <span style={{ flex: 1, fontSize: 12, color: "rgba(232, 236, 244, 0.6)" }}>
+                        background {settings.fluid.background}
+                      </span>
+                      <button
+                        type="button"
+                        title="Back to the desktop's own teal"
+                        onClick={() => setFluid("background", FLUID_DEFAULTS.background)}
+                        style={{
+                          ...panelButton,
+                          padding: "6px 10px",
+                          opacity: settings.fluid.background === FLUID_DEFAULTS.background ? 0.4 : 1,
+                        }}
+                      >
+                        Desktop
+                      </button>
+                    </div>
+                  </Group>
+                )}
               </>
             )}
 
@@ -1536,7 +2150,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   </div>
                 </div>
 
-                <Field label="Pointer">
+                <Field
+                  label="Pointer"
+                  onReset={resetTo(forces.pointer, NO_FORCES.pointer, (v) => setForce("pointer", v))}
+                >
                   <Segmented
                     options={[
                       { label: "Ignore", value: "ignore" },
@@ -1563,7 +2180,20 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   />
                 </Group>
 
-                <Group label="Flocking">
+                <Group
+                  label="Flocking"
+                  onReset={
+                    forces.separation !== NO_FORCES.separation ||
+                    forces.alignment !== NO_FORCES.alignment ||
+                    forces.cohesion !== NO_FORCES.cohesion
+                      ? () => {
+                          setForce("separation", NO_FORCES.separation);
+                          setForce("alignment", NO_FORCES.alignment);
+                          setForce("cohesion", NO_FORCES.cohesion);
+                        }
+                      : undefined
+                  }
+                >
                   <Slider
                     label="Separation"
                     value={percent(forces.separation)}
@@ -1610,7 +2240,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 <p style={{ margin: 0, fontSize: 12, color: "rgba(232, 236, 244, 0.55)" }}>
                   Stop drifting and arrange.
                 </p>
-                <Field label="Shape">
+                <Field
+                  label="Shape"
+                  onReset={resetTo(formation.shape, NO_FORMATION.shape, (v) => setForm("shape", v))}
+                >
                   <Segmented
                     options={[
                       { label: "⛓️‍💥", value: "drift" },
@@ -1701,7 +2334,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   accent={settings.accent}
                   onChange={(v) => setLink("curve", v / 100)}
                 />
-                <Field label="Colour">
+                <Field
+                  label="Color"
+                  onReset={resetTo(links.colour, DEFAULT_LINKS.colour, (v) => setLink("colour", v))}
+                >
                   <Segmented
                     options={[
                       { label: "Ink", value: "ink" },
@@ -1745,6 +2381,8 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                 liningUp={liningUp}
                 onDie={setDie}
                 onLuck={setLuck}
+                onResetDie={resetTo(die, SAVED_DEFAULTS.die, setDie)}
+                onResetLuck={resetTo(luck, SAVED_DEFAULTS.luck, setLuck)}
                 onRoll={roll}
                 onInitiative={rollForInitiative}
               />
@@ -1782,8 +2420,9 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   Edit parent window frame.
                 </p>
                 {/* The frame already bends and lights the window it sits in.
-                    This lets the crowd out through it. */}
-                <Field label="Crowd">
+                    This lets the party out through it — the crowd, whatever
+                    happens to them, and the Fluid surface's ink. */}
+                <Field label="Party" onReset={resetTo(settings.loose, DEFAULTS.loose, (v) => set("loose", v))}>
                   <Segmented
                     options={[
                       { label: "Kept in", value: "in" },
@@ -1794,7 +2433,10 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                     onChange={(value) => set("loose", value === "out")}
                   />
                 </Field>
-                <Field label="Tool windows">
+                <Field
+                  label="Tool windows"
+                  onReset={resetTo(dressPanels, SAVED_DEFAULTS.dressPanels, setDressPanels)}
+                >
                   <Segmented
                     options={[
                       { label: "Modern", value: "modern" },
@@ -1822,11 +2464,11 @@ export default function PartyWindow({ frame, onFrameChange }: PartyWindowProps) 
                   Straighten up
                 </button>
 
-                {/* Colour is the master switch — with it down the other three
+                {/* Color is the master switch — with it down the other three
                     have nothing to work on, so they are dimmed rather than
                     left looking broken. */}
                 <Slider
-                  label="Colour"
+                  label="Color"
                   value={Math.round(frame.lights.colour * 100)}
                   min={0}
                   max={100}
@@ -1989,39 +2631,20 @@ function initialSpot(slot: number, width: number) {
 }
 
 /**
- * What the Palette is pointed at: the whole crowd, or the one node that was
- * clicked. Without saying so, a palette that suddenly only recolours one figure
- * reads as broken.
+ * The Palette's line for a pick it can't dress — a party member, whose sheet
+ * dresses them, or something that wandered in — and why. Something that
+ * wandered in gets no swatch, so the × that lets it go lives here.
  */
 function Scope({
-  selected,
   character,
   visitor,
-  edited,
-  hasOverride,
   onClear,
-  onReset,
 }: {
-  selected: boolean;
   character: Character | null;
   /** What has wandered in, when that is what was clicked — the Palette's one blind spot. */
   visitor: string | null;
-  edited: number;
-  hasOverride: boolean;
   onClear: () => void;
-  onReset: () => void;
 }) {
-  const pill: React.CSSProperties = {
-    cursor: "pointer",
-    borderRadius: 7,
-    border: "1px solid rgba(255, 255, 255, 0.16)",
-    background: "rgba(255, 255, 255, 0.06)",
-    color: "#e8ecf4",
-    font: "inherit",
-    fontSize: 11,
-    padding: "4px 9px",
-  };
-
   return (
     <div
       style={{
@@ -2039,21 +2662,17 @@ function Scope({
       <span style={{ flex: "1 1 auto" }}>
         {visitor
           ? `the ${visitor} is picked — the Palette does not dress what wanders in`
-          : character
-            ? `${character.name} is on the sheet — the Party panel dresses them`
-            : selected
-              ? "Selected node in edit"
-              : "Select a node to edit"}
-        {!selected && !character && !visitor && edited > 0 ? ` · ${edited} edited` : ""}
+          : `${character?.name ?? "they"} is on the sheet — the Party panel dresses them`}
       </span>
-      {selected && hasOverride && (
-        <button type="button" style={pill} onClick={onReset}>
-          Reset
-        </button>
-      )}
-      {(selected || character || visitor) && (
-        <button type="button" style={pill} onClick={onClear}>
-          Done
+      {visitor && (
+        <button
+          type="button"
+          aria-label="Let this one go"
+          title="Let this one go — or click them again"
+          style={letGoButton}
+          onClick={onClear}
+        >
+          ×
         </button>
       )}
     </div>

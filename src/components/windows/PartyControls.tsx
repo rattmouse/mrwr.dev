@@ -22,9 +22,56 @@ export const panelButton: React.CSSProperties = {
   padding: "8px 0",
 };
 
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * The little ↺ that puts a section back to how it started, straight after the
+ * section's title — or the panel's, for whatever in it has no section. Whoever
+ * draws it only hands it an `onReset` while what it covers is off its default,
+ * so a panel left alone shows none of them. It is only ever added next to a
+ * title, never wrapped round a control, so one appearing mid-drag can't
+ * rebuild the slider out from under the pointer.
+ */
+export function ResetIcon({
+  label,
+  onReset,
+  style,
+}: {
+  label: string;
+  onReset: () => void;
+  style?: React.CSSProperties;
+}) {
   return (
-    <label style={{ display: "grid", gap: 7 }}>
+    <button
+      type="button"
+      aria-label={`Reset ${label}`}
+      title={`${label} back to default`}
+      onClick={onReset}
+      style={{
+        width: 16,
+        height: 16,
+        padding: 0,
+        border: "none",
+        borderRadius: 4,
+        background: "transparent",
+        color: "rgba(232, 236, 244, 0.6)",
+        cursor: "pointer",
+        font: "inherit",
+        fontSize: 13,
+        lineHeight: "16px",
+        flex: "0 0 auto",
+        ...style,
+      }}
+    >
+      ↺
+    </button>
+  );
+}
+
+// A section's title, with its ↺ straight after it when it has one. The row is
+// held at the title's own height and the ↺ hangs over it, so one appearing
+// mid-drag doesn't nudge everything below it down the panel.
+function SectionTitle({ label, onReset }: { label: string; onReset?: () => void }) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 4, height: 12 }}>
       <span
         style={{
           fontSize: 10,
@@ -36,8 +83,32 @@ export function Field({ label, children }: { label: string; children: React.Reac
       >
         {label}
       </span>
+      {onReset && <ResetIcon label={label} onReset={onReset} />}
+    </span>
+  );
+}
+
+/**
+ * A titled control. Not a <label>: every control it holds is a row of
+ * buttons, and a label hands a click on its text to the first of them — so a
+ * click on "Surface" would have picked Ink, and a click on a ↺ beside the
+ * title would have been the ↺ every time the title was clicked.
+ */
+export function Field({
+  label,
+  onReset,
+  children,
+}: {
+  label: string;
+  /** Put this section back to its default; left off while it already is. */
+  onReset?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div role="group" aria-label={label} style={{ display: "grid", gap: 7 }}>
+      <SectionTitle label={label} onReset={onReset} />
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -48,29 +119,20 @@ export function Field({ label, children }: { label: string; children: React.Reac
 export function Group({
   label,
   dim,
+  onReset,
   children,
 }: {
   /** Left off where the controls under it need no heading of their own. */
   label?: string;
   /** Dimmed when the switch above it leaves these with nothing to work on. */
   dim?: boolean;
+  /** Put this section back to its default; left off while it already is. Needs a label. */
+  onReset?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <div style={{ display: "grid", gap: 7, opacity: dim ? 0.4 : 1 }}>
-      {label && (
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            letterSpacing: "0.09em",
-            textTransform: "uppercase",
-            color: "rgba(232, 236, 244, 0.5)",
-          }}
-        >
-          {label}
-        </span>
-      )}
+      {label && <SectionTitle label={label} onReset={onReset} />}
       {children}
     </div>
   );
