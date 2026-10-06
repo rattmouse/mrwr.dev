@@ -8,9 +8,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Turn, UPRIGHT, isUpright, pointIn, sizeIn, turnMatrix, unturn } from "@/lib/windowTurn";
+import { Turn, UPRIGHT, isUpright, pointIn, sizeIn, toScreen, turnMatrix, unturn } from "@/lib/windowTurn";
 import { ColorAdjust, adjustColors } from "@/lib/colorAdjust";
 import PaintAdjustPanel from "@/components/windows/PaintAdjustPanel";
+import PaintGrabOverlay from "@/components/windows/PaintGrabOverlay";
+import { GrabRect, freezePage, grabPage } from "@/lib/desktopGrab";
 import ContextMenu, { ContextMenuItem } from "@/components/ContextMenu";
 
 /** The five things the pointer can be: one draws, one picks, three select. */
@@ -32,6 +34,8 @@ export type PaintStatus = {
 export type PaintCommands = {
   setTool: (tool: PaintTool) => void;
   cycleBrush: (delta: number) => void;
+  /** Swap the pencil's color and the background color (X). */
+  swapColors: () => void;
   requestOpen: () => void;
   requestSave: () => void;
   /** The window's own turns, for the right-click menu. */
@@ -51,6 +55,8 @@ export type PaintWindowHandle = {
   cut: () => void;
   copy: () => void;
   paste: () => void;
+  /** Freeze the page and take a box of it — any window, the desktop — as a paste. */
+  grab: () => void;
   deleteSelection: () => void;
   selectAll: () => void;
   /** Open Adjust colors on the selection, if there is one. */
@@ -63,10 +69,17 @@ export type PaintWindowHandle = {
 
 type PaintWindowProps = {
   color: string;
+  /**
+   * The background color: what a selection leaves behind when it's lifted,
+   * cut or deleted, and — with `transparent` on — the color a moving or
+   * pasted selection lets the picture show through.
+   */
+  secondary: string;
+  transparent: boolean;
   brushSize: number;
   tool: PaintTool;
-  /** The dropper hands back whatever color was under it, as #rrggbb. */
-  onPickColor: (hex: string) => void;
+  /** The dropper hands back whatever color was under it, as #rrggbb, for the pencil or the background. */
+  onPickColor: (hex: string, background?: boolean) => void;
   onStatusChange: (status: PaintStatus) => void;
   commands: PaintCommands;
   /** Whether the navigator in the corner is wanted when there's more sheet than window. */
@@ -122,6 +135,22 @@ const MAX_ANTS_THICKNESS = 2;
  * Between those, a frame with nothing else going on is skipped entirely.
  */
 const ANTS_TICK = 66;
+/** The selection's resize handles: drawn this many CSS pixels square... */
+const HANDLE_SIZE = 7;
+/** ...and caught within this many of their middle — further for a finger. */
+const HANDLE_REACH = 6;
+const HANDLE_REACH_TOUCH = 14;
+/** Where the eight handles sit, as fractions of the selection's box. */
+const HANDLES: { fx: number; fy: number }[] = [
+  { fx: 0, fy: 0 },
+  { fx: 0.5, fy: 0 },
+  { fx: 1, fy: 0 },
+  { fx: 1, fy: 0.5 },
+  { fx: 1, fy: 1 },
+  { fx: 0.5, fy: 1 },
+  { fx: 0, fy: 1 },
+  { fx: 0, fy: 0.5 },
+];
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 16;
 /** One press of a zoom key, or one detent of the wheel at its usual size. */
@@ -132,6 +161,15 @@ const ZOOM_STEP = 1.25;
 // but never read without the user pressing Ctrl+V, which avoids a permission
 // prompt nobody asked for.
 let CLIPBOARD: HTMLCanvasElement | null = null;
+// Set when the system clipboard turned down the last copy, so whatever picture
+// it still holds is older than paint.exe's own. Leaving the page clears it:
+// out there, something newer may well have been copied.
+let OWN_IS_NEWER = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("blur", () => {
+    OWN_IS_NEWER = false;
+  });
+}
 
 // The sheet as last left: a PNG data URL plus the CSS size it was drawn at, so
 // it comes back at the same scale whatever the backing store's DPR.
@@ -165,12 +203,28 @@ type Selection = {
   ants: HTMLCanvasElement;
   antsThickness: number;
   lifted: boolean;
+  /**
+   * The pixels and shape as they were before the first resize. Every resize
+   * after that is scaled from these, so stretching a selection back and forth
+   * doesn't wear it down a little more each time.
+   */
+  base?: { pixels: HTMLCanvasElement; mask: HTMLCanvasElement; keyed?: Keyed };
+  /** `pixels` with the background color taken out, kept until either changes. */
+  keyed?: Keyed;
 };
+
+/** A picture with one color made see-through, and which color that was. */
+type Keyed = { color: string; canvas: HTMLCanvasElement };
+
+/** A box on the sheet, in device pixels. */
+type Box = { x: number; y: number; w: number; h: number };
 
 type Drag =
   | { kind: "rect"; x0: number; y0: number; x1: number; y1: number }
   | { kind: "lasso"; pts: { x: number; y: number }[]; path: Path2D }
   | { kind: "move"; startX: number; startY: number; origX: number; origY: number; moved: boolean }
+  /** A handle held: `fx`/`fy` say which, `from` is the box it started as, `box` where it is now. */
+  | { kind: "resize"; fx: number; fy: number; startX: number; startY: number; from: Box; box: Box; moved: boolean }
   | { kind: "pan"; startX: number; startY: number; origX: number; origY: number }
   | WandDrag
   /** The dropper held down: it picks wherever it's let go, not where it landed. */
@@ -272,6 +326,40 @@ function copyOf(source: HTMLCanvasElement) {
   return out;
 }
 
+/**
+ * A copy of `source` with every pixel of exactly `hex` made see-through, the
+ * way Paint's transparent selection drops its background color.
+ */
+function keyOut(source: HTMLCanvasElement, hex: string) {
+  const out = copyOf(source);
+  const ctx = ctxOf(out, true);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const px = new Uint32Array(img.data.buffer);
+  const n = parseInt(hex.slice(1), 16);
+  // One RGBA pixel read as a little-endian word, opaque: 0xAABBGGRR.
+  const want = (0xff000000 | ((n & 0xff) << 16) | (n & 0xff00) | ((n >> 16) & 0xff)) >>> 0;
+  let hit = false;
+  for (let i = 0; i < px.length; i += 1) {
+    if (px[i] === want) {
+      px[i] = 0;
+      hit = true;
+    }
+  }
+  if (hit) ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/**
+ * Floating pixels as they show and land: `source` minus the background color
+ * when transparent selection is on (`background` is null when it's off).
+ * Worked out once per color, and kept on `holder`.
+ */
+function shown(holder: { keyed?: Keyed }, source: HTMLCanvasElement, background: string | null) {
+  if (background === null) return source;
+  if (holder.keyed?.color !== background) holder.keyed = { color: background, canvas: keyOut(source, background) };
+  return holder.keyed.canvas;
+}
+
 const hex2 = (n: number) => n.toString(16).padStart(2, "0");
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -336,7 +424,8 @@ function outlineOf(mask: HTMLCanvasElement, thickness: number) {
 /**
  * A bare-bones MS Paint: one white sheet with a pencil, an eyedropper, three
  * ways to select (rectangle, lasso, magic wand), cut/copy/paste of whatever is
- * selected, and an undo stack behind all of it. Color, size and the current
+ * selected, a Grab that takes any box of the page itself — other windows,
+ * the desktop — as a paste, and an undo stack behind all of it. Color, size and the current
  * tool are driven from the window toolbar, and most of it answers to the
  * keyboard as well. The wheel zooms in on the pixel under the pointer; space
  * and a drag shoves the sheet about underneath it.
@@ -383,7 +472,7 @@ const TOOL_KEYS: Record<string, PaintTool> = {
 const WALK_SPEED = 600;
 
 const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function PaintWindow(
-  { color, brushSize, tool, onPickColor, onStatusChange, commands, map, turn = UPRIGHT },
+  { color, secondary, transparent, brushSize, tool, onPickColor, onStatusChange, commands, map, turn = UPRIGHT },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -397,8 +486,14 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
   /** The display's own DPR, which is what the overlay is drawn in. */
   const viewDprRef = useRef(1);
   // Latest color/size/tool, readable from the pointer handlers without re-binding them.
-  const styleRef = useRef({ color, brushSize, tool });
-  styleRef.current = { color, brushSize, tool };
+  const styleRef = useRef({ color, secondary, transparent, brushSize, tool });
+  styleRef.current = { color, secondary, transparent, brushSize, tool };
+  // The background color a floating selection drops, or null with
+  // transparent selection off. Reads only the ref, so it never changes.
+  const seeThrough = useCallback(
+    () => (styleRef.current.transparent ? styleRef.current.secondary : null),
+    [],
+  );
   const turnRef = useRef(turn);
   turnRef.current = turn;
   const pickRef = useRef(onPickColor);
@@ -799,10 +894,30 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     applyView(clampView(z, wrap.clientWidth / 2 - sx * z, wrap.clientHeight / 2 - sy * z));
   };
 
+  /**
+   * The clock the ants crawl by. It stands still while a selection is being
+   * drawn out — rectangle, lasso or wand — so the shape being made, and the
+   * one Shift is adding it to, hold still under the pointer; letting go picks
+   * up where it stopped rather than jumping ahead.
+   */
+  const antsClockRef = useRef({ stoppedAt: -1, behind: 0 });
+  const antsTime = useCallback((time: number) => {
+    const clock = antsClockRef.current;
+    const drag = dragRef.current;
+    const making = drag !== null && (drag.kind === "rect" || drag.kind === "lasso" || drag.kind === "wand");
+    if (making && clock.stoppedAt < 0) clock.stoppedAt = time;
+    if (!making && clock.stoppedAt >= 0) {
+      clock.behind += time - clock.stoppedAt;
+      clock.stoppedAt = -1;
+    }
+    return (clock.stoppedAt >= 0 ? clock.stoppedAt : time) - clock.behind;
+  }, []);
+
   const paintOverlay = useCallback(
-    (time: number) => {
+    (now: number) => {
       const overlay = overlayRef.current;
       if (!overlay) return;
+      const time = antsTime(now);
       const octx = ctxOf(overlay);
       const dpr = dprRef.current;
       const viewDpr = viewDprRef.current;
@@ -826,12 +941,45 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
           sel.ants = outlineOf(sel.mask, wantThickness);
           sel.antsThickness = wantThickness;
         }
-        if (sel.lifted) {
+        const held = dragRef.current;
+        const resizing = held?.kind === "resize" && held.moved && sel.base ? held : null;
+        if (resizing && sel.base) {
+          // Mid-resize, the pixels are only stretched on screen, under a
+          // plain box; the real thing is built once, on release.
+          const { x, y, w, h } = resizing.box;
           octx.setTransform(k, 0, 0, k, ox, oy);
-          octx.imageSmoothingEnabled = k < 1;
-          octx.drawImage(sel.pixels, sel.x, sel.y);
+          octx.imageSmoothingEnabled = true;
+          octx.drawImage(shown(sel.base, sel.base.pixels, seeThrough()), x, y, w, h);
+          octx.save();
+          octx.strokeStyle = "#000000";
+          octx.lineWidth = Math.max(1, dpr) / z;
+          const dash = (4 * dpr) / z;
+          octx.setLineDash([dash, dash]);
+          octx.strokeRect(x, y, w, h);
+          octx.restore();
+        } else {
+          if (sel.lifted) {
+            octx.setTransform(k, 0, 0, k, ox, oy);
+            octx.imageSmoothingEnabled = k < 1;
+            octx.drawImage(shown(sel, sel.pixels, seeThrough()), sel.x, sel.y);
+          }
+          drawAnts(octx, sel, time, k, ox, oy);
         }
-        drawAnts(octx, sel, time, k, ox, oy);
+        // The handles, while nothing new is being drawn out over them.
+        if (!held || held.kind === "move" || held.kind === "resize") {
+          const box = resizing ? resizing.box : sel;
+          const size = Math.round(HANDLE_SIZE * viewDpr);
+          octx.setTransform(1, 0, 0, 1, 0, 0);
+          octx.fillStyle = "#ffffff";
+          octx.strokeStyle = "#000000";
+          octx.lineWidth = Math.max(1, Math.round(viewDpr));
+          for (const { fx, fy } of HANDLES) {
+            const hx = Math.round((box.x + fx * box.w) * k + ox - size / 2);
+            const hy = Math.round((box.y + fy * box.h) * k + oy - size / 2);
+            octx.fillRect(hx, hy, size, size);
+            octx.strokeRect(hx + 0.5, hy + 0.5, size - 1, size - 1);
+          }
+        }
       }
 
       const drag = dragRef.current;
@@ -867,9 +1015,9 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         octx.restore();
       }
 
-      drawMap(time);
+      drawMap(now);
     },
-    [drawAnts, drawMap],
+    [antsTime, drawAnts, drawMap, seeThrough],
   );
 
   /**
@@ -907,6 +1055,12 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     },
     [],
   );
+
+  // A floating selection shows through in a new background color at once.
+  useEffect(() => {
+    dirtyRef.current = true;
+    ensureLoop();
+  }, [ensureLoop, secondary, transparent]);
 
   // Turning the navigator on has to wake the loop that draws it.
   useEffect(() => {
@@ -955,7 +1109,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     [],
   );
 
-  /** Take the pixels off the sheet, leaving white behind. One undo step. */
+  /** Take the pixels off the sheet, leaving the background color behind. One undo step. */
   const liftSelection = useCallback(() => {
     const sel = selRef.current;
     const ctx = ctxRef.current;
@@ -963,7 +1117,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     pushUndo();
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(tintMask(sel.mask, BG), sel.x, sel.y);
+    ctx.drawImage(tintMask(sel.mask, styleRef.current.secondary), sel.x, sel.y);
     ctx.restore();
     sel.lifted = true;
   }, [pushUndo]);
@@ -977,12 +1131,12 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     if (sel.lifted && ctx) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(sel.pixels, sel.x, sel.y);
+      ctx.drawImage(shown(sel, sel.pixels, seeThrough()), sel.x, sel.y);
       ctx.restore();
       persist();
     }
     emitStatus();
-  }, [emitStatus, persist]);
+  }, [emitStatus, persist, seeThrough]);
 
   const setSelection = useCallback(
     (sel: Selection | null) => {
@@ -999,6 +1153,95 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     const py = Math.floor(y - sel.y);
     if (px < 0 || py < 0 || px >= sel.w || py >= sel.h) return false;
     return sel.maskCtx.getImageData(px, py, 1, 1).data[3] > 127;
+  };
+
+  // ---- resizing a selection ---------------------------------------------
+
+  /** Which of the selection's handles is under a sheet point, if any — the nearest. */
+  const handleAt = (box: Box, p: { x: number; y: number }, touch: boolean) => {
+    const reach = ((touch ? HANDLE_REACH_TOUCH : HANDLE_REACH) * dprRef.current) / viewRef.current.z;
+    let best: { fx: number; fy: number } | null = null;
+    let bestOff = reach;
+    for (const handle of HANDLES) {
+      const off = Math.max(
+        Math.abs(p.x - (box.x + handle.fx * box.w)),
+        Math.abs(p.y - (box.y + handle.fy * box.h)),
+      );
+      if (off <= bestOff) {
+        best = handle;
+        bestOff = off;
+      }
+    }
+    return best;
+  };
+
+  /** The arrow for a handle, the way it pulls on screen however the window is turned. */
+  const resizeCursor = (fx: number, fy: number) => {
+    const way = toScreen(turnRef.current, Math.sign(fx - 0.5), Math.sign(fy - 0.5));
+    const x = Math.round(way.x);
+    const y = Math.round(way.y);
+    if (x === 0) return "ns-resize";
+    if (y === 0) return "ew-resize";
+    return x === y ? "nwse-resize" : "nesw-resize";
+  };
+  const [handleCursor, setHandleCursor] = useState<string | null>(null);
+
+  /**
+   * Where a handle has pulled the box to. The edges it doesn't hold stay put,
+   * and the box never turns itself inside out. Shift on a corner keeps the
+   * shape it started with.
+   */
+  const resizedBox = (
+    drag: { fx: number; fy: number; startX: number; startY: number; from: Box },
+    p: { x: number; y: number },
+    keepShape: boolean,
+  ): Box => {
+    const { fx, fy, from } = drag;
+    const dx = p.x - drag.startX;
+    const dy = p.y - drag.startY;
+    let left = from.x;
+    let top = from.y;
+    let right = from.x + from.w;
+    let bottom = from.y + from.h;
+    if (fx === 0) left = Math.min(left + dx, right - 1);
+    else if (fx === 1) right = Math.max(right + dx, left + 1);
+    if (fy === 0) top = Math.min(top + dy, bottom - 1);
+    else if (fy === 1) bottom = Math.max(bottom + dy, top + 1);
+    if (keepShape && fx !== 0.5 && fy !== 0.5) {
+      const ratio = from.w / from.h;
+      let w = right - left;
+      let h = bottom - top;
+      // Whichever way was pulled further wins, and the other follows it.
+      if (w / h > ratio) h = w / ratio;
+      else w = h * ratio;
+      if (fx === 0) left = right - w;
+      else right = left + w;
+      if (fy === 0) top = bottom - h;
+      else bottom = top + h;
+    }
+    const x = Math.round(left);
+    const y = Math.round(top);
+    return { x, y, w: Math.max(1, Math.round(right) - x), h: Math.max(1, Math.round(bottom) - y) };
+  };
+
+  /** Let go of a handle: the selection becomes its first pixels, scaled to the new box. */
+  const finishResize = (box: Box) => {
+    const sel = selRef.current;
+    const base = sel?.base;
+    if (!sel || !base) return;
+    const scaled = (source: HTMLCanvasElement) => {
+      const out = makeCanvas(box.w, box.h);
+      const octx = ctxOf(out, true);
+      octx.imageSmoothingQuality = "high";
+      octx.drawImage(source, 0, 0, box.w, box.h);
+      return out;
+    };
+    // Scaled with the background already out, so the smoothing fades the
+    // edges into nothing rather than into a fringe of half-background.
+    const next = makeSelection(scaled(base.mask), box.x, box.y, scaled(shown(base, base.pixels, seeThrough())));
+    if (!next) return;
+    next.base = base;
+    setSelection(next);
   };
 
   // ---- how big the sheet is --------------------------------------------
@@ -1158,13 +1401,13 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     last.current = { x, y };
   };
 
-  const pickColorAt = (dx: number, dy: number) => {
+  const pickColorAt = (dx: number, dy: number, background = false) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const x = clamp(Math.floor(dx), 0, canvas.width - 1);
     const y = clamp(Math.floor(dy), 0, canvas.height - 1);
     const px = ctxOf(canvas, true).getImageData(x, y, 1, 1).data;
-    pickRef.current(`#${hex2(px[0])}${hex2(px[1])}${hex2(px[2])}`);
+    pickRef.current(`#${hex2(px[0])}${hex2(px[1])}${hex2(px[2])}`, background);
   };
 
   /**
@@ -1255,7 +1498,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     holder.style.top = `${Math.max(0, top)}px`;
   };
 
-  const showLoupe = (e: React.PointerEvent<HTMLCanvasElement>, x: number, y: number) => {
+  const showLoupe = (e: React.PointerEvent<HTMLElement>, x: number, y: number) => {
     loupeAtRef.current = { clientX: e.clientX, clientY: e.clientY, touch: e.pointerType !== "mouse", x, y };
     if (loupeFrameRef.current === null) loupeFrameRef.current = requestAnimationFrame(drawLoupe);
   };
@@ -1315,6 +1558,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       if (!a.pending) return;
       adjustColors(a.original.data, a.out.data, a.pending);
       ctxOf(a.sel.pixels, true).putImageData(a.out, 0, 0);
+      a.sel.keyed = undefined;
       dirtyRef.current = true;
       ensureLoop();
     });
@@ -1328,6 +1572,10 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     if (a.frame !== null) cancelAnimationFrame(a.frame);
     if (keep && a.pending) adjustColors(a.original.data, a.out.data, a.pending);
     ctxOf(a.sel.pixels, true).putImageData(keep ? a.out : a.original, 0, 0);
+    a.sel.keyed = undefined;
+    // Recolored, the selection's pixels are its own now: a later resize
+    // starts from these rather than from before the adjustment.
+    if (keep) a.sel.base = undefined;
     dirtyRef.current = true;
     ensureLoop();
     setAdjusting(false);
@@ -1515,20 +1763,31 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     const sel = selRef.current;
     if (!sel) return;
     CLIPBOARD = copyOf(sel.pixels);
+    OWN_IS_NEWER = true;
     emitStatus();
     // Best effort: hand the same pixels to the system clipboard so they can be
-    // pasted into something else. Plenty of browsers say no; that's fine.
+    // pasted into something else. Plenty of browsers say no; that's fine —
+    // paint.exe's own clipboard still has it, and Ctrl+V will prefer it.
+    // ClipboardItem takes the PNG as a promise so the write starts inside the
+    // keypress, while the browser still counts it as the user's doing.
     try {
-      sel.pixels.toBlob((blob) => {
-        if (!blob) return;
-        void navigator.clipboard?.write?.([new ClipboardItem({ "image/png": blob })]).catch(() => {});
-      }, "image/png");
+      const png = new Promise<Blob>((resolve, reject) =>
+        sel.pixels.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("no blob"))), "image/png"),
+      );
+      const write = navigator.clipboard?.write?.([new ClipboardItem({ "image/png": png })]);
+      if (!write) return;
+      void write.then(
+        () => {
+          OWN_IS_NEWER = false;
+        },
+        () => {},
+      );
     } catch {
-      // No ClipboardItem here. paint.exe's own clipboard still has it.
+      // No ClipboardItem here.
     }
   }, [emitStatus]);
 
-  /** Wipe whatever the selection covers back to white. */
+  /** Wipe whatever the selection covers to the background color. */
   const eraseSelection = useCallback(() => {
     const sel = selRef.current;
     const ctx = ctxRef.current;
@@ -1537,7 +1796,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       pushUndo();
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(tintMask(sel.mask, BG), sel.x, sel.y);
+      ctx.drawImage(tintMask(sel.mask, styleRef.current.secondary), sel.x, sel.y);
       ctx.restore();
     }
     selRef.current = null;
@@ -1545,11 +1804,26 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     persist();
   }, [emitStatus, persist, pushUndo]);
 
+  /** The part of the sheet on screen right now, in sheet pixels. */
+  const visibleSheet = useCallback(() => {
+    const canvas = canvasRef.current;
+    const wrap = wrapRef.current;
+    if (!canvas || !wrap) return null;
+    const { z, x: panX, y: panY } = viewRef.current;
+    const k = dprRef.current / z;
+    const left = Math.max(0, -panX * k);
+    const top = Math.max(0, -panY * k);
+    const right = Math.min(canvas.width, (wrap.clientWidth - panX) * k);
+    const bottom = Math.min(canvas.height, (wrap.clientHeight - panY) * k);
+    return { left, top, right, bottom, w: right - left, h: bottom - top };
+  }, []);
+
   /**
-   * Pasted pixels land where they can be seen: centred on `at` (a sheet pixel)
-   * or, without one, on the middle of whatever part of the sheet is on screen,
-   * then pulled back inside the view if that would hang them off its edge. A
-   * paste bigger than the view starts at the view's top left.
+   * Pasted pixels always land whole and in view. Too big for the window at
+   * this zoom, the view backs out until they fit; too big for the sheet
+   * itself, they are shrunk to fit what's on screen. Then they're centred on
+   * `at` (a sheet pixel) or, without one, on the middle of the visible sheet,
+   * and pulled back inside it if that would hang them off an edge.
    */
   const pasteCanvas = useCallback(
     (source: HTMLCanvasElement, at?: { x: number; y: number }) => {
@@ -1558,22 +1832,44 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       if (!canvas || !wrap) return;
       commitSelection();
       pushUndo();
+
+      // Back out far enough to take the whole paste in, but no further than
+      // showing the whole sheet: past that, zooming out shows only more mat.
+      const dpr = dprRef.current;
+      const cur = viewRef.current;
+      const fitPaste = Math.min((wrap.clientWidth * dpr) / source.width, (wrap.clientHeight * dpr) / source.height);
+      const fitSheet = Math.min(
+        (wrap.clientWidth * dpr) / canvas.width,
+        (wrap.clientHeight * dpr) / canvas.height,
+      );
+      const z = clamp(Math.max(fitPaste, fitSheet), MIN_ZOOM, cur.z);
+      if (z < cur.z) {
+        // About the middle of the window, so what was being looked at stays put.
+        const mx = wrap.clientWidth / 2;
+        const my = wrap.clientHeight / 2;
+        applyView(clampView(z, mx - ((mx - cur.x) / cur.z) * z, my - ((my - cur.y) / cur.z) * z));
+      }
+
+      const seen = visibleSheet();
+      if (!seen || seen.w < 1 || seen.h < 1) return;
       // The pixels' own alpha is the shape, so a lassoed cut-out keeps its edge.
-      const pixels = copyOf(source);
-      const { z, x: panX, y: panY } = viewRef.current;
-      const k = dprRef.current / z;
-      const left = Math.max(0, -panX * k);
-      const top = Math.max(0, -panY * k);
-      const right = Math.min(canvas.width, (wrap.clientWidth - panX) * k);
-      const bottom = Math.min(canvas.height, (wrap.clientHeight - panY) * k);
-      const cx = at?.x ?? (left + right) / 2;
-      const cy = at?.y ?? (top + bottom) / 2;
-      const x = Math.round(clamp(cx - pixels.width / 2, left, Math.max(left, right - pixels.width)));
-      const y = Math.round(clamp(cy - pixels.height / 2, top, Math.max(top, bottom - pixels.height)));
+      let pixels = copyOf(source);
+      const shrink = Math.min(1, seen.w / pixels.width, seen.h / pixels.height);
+      if (shrink < 1) {
+        const small = makeCanvas(Math.floor(pixels.width * shrink), Math.floor(pixels.height * shrink));
+        const sctx = ctxOf(small);
+        sctx.imageSmoothingQuality = "high";
+        sctx.drawImage(pixels, 0, 0, small.width, small.height);
+        pixels = small;
+      }
+      const cx = at?.x ?? (seen.left + seen.right) / 2;
+      const cy = at?.y ?? (seen.top + seen.bottom) / 2;
+      const x = Math.round(clamp(cx - pixels.width / 2, seen.left, seen.right - pixels.width));
+      const y = Math.round(clamp(cy - pixels.height / 2, seen.top, seen.bottom - pixels.height));
       setSelection(makeSelection(pixels, x, y, pixels));
       wrap.focus({ preventScroll: true });
     },
-    [commitSelection, makeSelection, pushUndo, setSelection],
+    [applyView, clampView, commitSelection, makeSelection, pushUndo, setSelection, visibleSheet],
   );
 
   const paste = useCallback(
@@ -1584,13 +1880,26 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     [pasteCanvas],
   );
 
+  /**
+   * Ctrl+V. A picture on the system clipboard — a screenshot, something copied
+   * in another tab — comes in as it is; with none there, or when paint.exe's
+   * own copy is the newer of the two, its own clipboard is pasted instead.
+   */
   const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("[data-paint-panel]")) return;
     const item = Array.from(event.clipboardData?.items ?? []).find((entry) =>
       entry.type.startsWith("image/"),
     );
-    const file = item?.getAsFile();
-    if (!file) return;
+    const file = OWN_IS_NEWER ? null : item?.getAsFile();
+    if (!file) {
+      if (!CLIPBOARD) return;
+      event.preventDefault();
+      finishAdjustRef.current(true);
+      paste();
+      return;
+    }
     event.preventDefault();
+    finishAdjustRef.current(true);
     const url = URL.createObjectURL(file);
     void loadImage(url)
       .then((img) => {
@@ -1603,16 +1912,85 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       .finally(() => URL.revokeObjectURL(url));
   };
 
+  // ---- grab -------------------------------------------------------------
+
+  /**
+   * Grab stops the whole page moving and puts a pane of glass over it; the box
+   * dragged on that comes back as a paste, kept on paint.exe's clipboard too.
+   * It's taken at the sheet's own scale, so it lands the size it looked.
+   */
+  const [grabbing, setGrabbing] = useState(false);
+  const thawRef = useRef<(() => void) | null>(null);
+
+  const startGrab = () => {
+    if (thawRef.current) return;
+    finishAdjustRef.current(true);
+    thawRef.current = freezePage();
+    setGrabbing(true);
+  };
+  const startGrabRef = useRef(startGrab);
+  startGrabRef.current = startGrab;
+
+  const endGrab = useCallback(() => {
+    thawRef.current?.();
+    thawRef.current = null;
+    setGrabbing(false);
+  }, []);
+
+  // Closing paint.exe mid-grab mustn't leave the page standing still.
+  useEffect(() => endGrab, [endGrab]);
+
+  const finishGrab = async (rect: GrabRect) => {
+    let picture: HTMLCanvasElement | null = null;
+    try {
+      picture = await grabPage(rect, dprRef.current, (el) => el.hasAttribute("data-paint-grab"));
+    } catch (error) {
+      console.warn(error);
+    }
+    endGrab();
+    if (!picture) {
+      window.alert("paint.exe couldn't take a picture of that.");
+      return;
+    }
+    CLIPBOARD = picture;
+    // The system clipboard can't be written to this long after the click, so
+    // whatever it holds is older than this.
+    OWN_IS_NEWER = true;
+    // It arrives selected, ready to drag about.
+    if (styleRef.current.tool === "pencil" || styleRef.current.tool === "dropper") {
+      commandsRef.current.setTool("select");
+    }
+    pasteCanvas(picture);
+  };
+
   // ---- pointer ----------------------------------------------------------
 
-  /** Screen pointer → the sheet's own device pixels, whatever the zoom or turn. */
-  const devicePoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const at = pointIn(turnRef.current, e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
+  /**
+   * Screen pointer → the sheet's own device pixels, whatever the zoom or turn.
+   * Off the sheet, out on the mat, the numbers just run past its edges.
+   */
+  const devicePoint = (e: React.PointerEvent<HTMLElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: -1, y: -1 };
+    const at = pointIn(turnRef.current, canvas.getBoundingClientRect(), e.clientX, e.clientY);
     const scale = dprRef.current / viewRef.current.z;
     return { x: at.x * scale, y: at.y * scale };
   };
 
-  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const onSheet = (p: { x: number; y: number }) => {
+    const canvas = canvasRef.current;
+    return !!canvas && p.x >= 0 && p.y >= 0 && p.x < canvas.width && p.y < canvas.height;
+  };
+
+  /**
+   * The pointer is heard over the whole window, mat and all, not just the
+   * sheet: a selection can be started off the edge of the picture and dragged
+   * across it, the way it can on a real desk. Anything on top of the picture
+   * with controls of its own — the navigator, the menu, Adjust colors — keeps
+   * its presses to itself.
+   */
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget && e.target !== canvasRef.current) return;
     e.preventDefault();
     wrapRef.current?.focus({ preventScroll: true });
     // The right button is for the menu, which opens on its own event.
@@ -1632,6 +2010,8 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     const p = devicePoint(e);
     const dpr = dprRef.current;
     const active = styleRef.current.tool;
+    // Drawing and picking need something under them; selecting doesn't.
+    if ((active === "dropper" || active === "pencil") && !onSheet(p)) return;
 
     if (active === "dropper") {
       dragRef.current = { kind: "dropper", x: p.x, y: p.y };
@@ -1649,6 +2029,21 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     }
 
     const sel = selRef.current;
+    const handle = sel ? handleAt(sel, p, e.pointerType !== "mouse") : null;
+    if (sel && handle) {
+      const from = { x: sel.x, y: sel.y, w: sel.w, h: sel.h };
+      dragRef.current = {
+        kind: "resize",
+        ...handle,
+        startX: p.x,
+        startY: p.y,
+        from,
+        box: { ...from },
+        moved: false,
+      };
+      ensureLoop();
+      return;
+    }
     if (sel && !e.shiftKey && hitSelection(sel, p.x, p.y)) {
       dragRef.current = {
         kind: "move",
@@ -1671,6 +2066,11 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       addToRef.current = kept;
     }
     if (active === "wand") {
+      // Off the sheet there's no color to flood from: the click only deselects.
+      if (!onSheet(p)) {
+        addToRef.current = null;
+        return;
+      }
       const canvas = canvasRef.current;
       const wrap = wrapRef.current;
       const previewCanvas = wandPreviewRef.current;
@@ -1723,14 +2123,22 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     ensureLoop();
   };
 
-  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drawing.current && !drag) {
       // A mouse gets the dropper's magnifier just hovering, before it clicks.
       if (styleRef.current.tool === "dropper" && !spaceRef.current) {
         const p = devicePoint(e);
-        showLoupe(e, p.x, p.y);
+        if (onSheet(p) && (e.target === e.currentTarget || e.target === canvasRef.current)) showLoupe(e, p.x, p.y);
+        else hideLoupe();
       }
+      // Over a handle, the pointer turns into the arrow for the way it pulls.
+      const sel = selRef.current;
+      const over =
+        sel && !spaceRef.current && (e.target === e.currentTarget || e.target === canvasRef.current)
+          ? handleAt(sel, devicePoint(e), e.pointerType !== "mouse")
+          : null;
+      setHandleCursor(over ? resizeCursor(over.fx, over.fy) : null);
       return;
     }
     e.preventDefault();
@@ -1786,6 +2194,16 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         drag.pts.push(p);
         drag.path.lineTo(p.x, p.y);
       }
+    } else if (drag.kind === "resize") {
+      const sel = selRef.current;
+      if (!sel) return;
+      if (!drag.moved) {
+        drag.moved = true;
+        liftSelection();
+        if (!sel.base) sel.base = { pixels: sel.pixels, mask: sel.mask };
+      }
+      drag.box = resizedBox(drag, p, e.shiftKey);
+      dirtyRef.current = true;
     } else {
       const sel = selRef.current;
       if (!sel) return;
@@ -1799,7 +2217,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     }
   };
 
-  const endStroke = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const endStroke = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
@@ -1835,7 +2253,9 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       setWandReadout(null);
     } else if (drag.kind === "rect") selectRect(drag.x0, drag.y0, drag.x1, drag.y1);
     else if (drag.kind === "lasso") selectLasso(drag.pts);
-    else if (drag.moved) persist();
+    else if (drag.kind === "resize") {
+      if (drag.moved) finishResize(drag.box);
+    } else if (drag.moved) persist();
     // A Shift-add whose new shape came to nothing leaves the old one selected.
     addToRef.current = null;
   };
@@ -2060,6 +2480,18 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       return;
     }
 
+    if (key === "g") {
+      e.preventDefault();
+      startGrab();
+      return;
+    }
+
+    if (key === "x") {
+      e.preventDefault();
+      commandsRef.current.swapColors();
+      return;
+    }
+
     const picked = TOOL_KEYS[key];
     if (picked) {
       e.preventDefault();
@@ -2163,6 +2595,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         cut,
         copy,
         paste,
+        grab: () => startGrabRef.current(),
         deleteSelection: eraseSelection,
         selectAll,
         deselect: commitSelection,
@@ -2247,6 +2680,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       onClick: () => paste(m.onSheet ? { x: m.sheetX, y: m.sheetY } : undefined),
     },
     { label: "Delete", shortcut: "Del", disabled: !m.hasSelection, onClick: eraseSelection },
+    { label: <>Grab from the page&hellip;</>, shortcut: "G", onClick: startGrab },
     "separator",
     {
       label: "Select all",
@@ -2261,19 +2695,25 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     { label: "Deselect", shortcut: "Esc", disabled: !m.hasSelection, onClick: commitSelection },
     { label: <>Adjust colors&hellip;</>, disabled: !m.hasSelection, onClick: startAdjust },
     { label: "Pick this color", disabled: !m.onSheet, onClick: () => pickColorAt(m.sheetX, m.sheetY) },
+    {
+      label: "Pick as background color",
+      disabled: !m.onSheet,
+      onClick: () => pickColorAt(m.sheetX, m.sheetY, true),
+    },
     "separator",
     { label: "Rotate", onClick: () => commandsRef.current.rotate() },
     { label: "Flip vertical", onClick: () => commandsRef.current.flipVertical() },
     { label: "Flip horizontal", onClick: () => commandsRef.current.flipHorizontal() },
   ];
 
-  const cursor = panning
+  const sheetCursor = panning
     ? "grab"
     : tool === "dropper"
       ? "copy"
       : tool === "pencil"
         ? "crosshair"
         : "cell";
+  const cursor = (!panning && handleCursor) || sheetCursor;
 
   return (
     <div
@@ -2285,6 +2725,13 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       onBlur={stopWalking}
       onPaste={onPaste}
       onContextMenu={onContextMenu}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endStroke}
+      onPointerCancel={endStroke}
+      onPointerLeave={() => {
+        if (dragRef.current?.kind !== "dropper") hideLoupe();
+      }}
       style={{
         flex: "1 1 auto",
         minHeight: 0,
@@ -2295,23 +2742,19 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         background: MAT,
         overflow: "hidden",
         outline: "none",
+        touchAction: "none",
+        // The pencil and the dropper only work on the sheet; the rest work on
+        // the mat round it as well.
+        cursor: panning || (tool !== "pencil" && tool !== "dropper") ? cursor : "default",
       }}
     >
       <canvas
         ref={canvasRef}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endStroke}
-        onPointerCancel={endStroke}
-        onPointerLeave={() => {
-          if (dragRef.current?.kind !== "dropper") hideLoupe();
-        }}
         style={{
           position: "absolute",
           left: 0,
           top: 0,
           display: "block",
-          touchAction: "none",
           cursor,
           transformOrigin: "0 0",
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`,
@@ -2372,6 +2815,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
             border: "2px solid",
             borderColor: "#ffffff #808080 #808080 #ffffff",
             boxShadow: "1px 1px 0 rgba(0, 0, 0, 0.35)",
+            cursor: "default",
           }}
         >
           <canvas
@@ -2404,6 +2848,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} label="paint.exe" items={menuItems(menu)} onDismiss={closeMenu} />
       )}
+      {grabbing && <PaintGrabOverlay onGrab={finishGrab} onCancel={endGrab} />}
       {adjusting && <PaintAdjustPanel onChange={previewAdjust} onDone={(keep) => finishAdjustRef.current(keep)} />}
       <div
         ref={loupeRef}

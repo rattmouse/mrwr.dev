@@ -13,6 +13,7 @@ import { Turn, UPRIGHT, flipHorizontal, flipVertical, normalizeTurn, rotateRight
 const PAINT_COLORS = [
   "#000000",
   "#7f7f7f",
+  "#ffffff",
   "#a80000",
   "#ff7f00",
   "#ffd400",
@@ -121,10 +122,27 @@ const PAINT_TOOLS: { id: PaintTool; name: string; title: string; icon: React.Rea
   },
 ];
 
+// Grab sits in the tool box but isn't a tool the sheet keeps: it takes one
+// box of the page, anywhere on it, and hands back to the select tool.
+const GrabIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" role="presentation">
+    <path d="M.5 3.5v-3h3M8.5.5h3v3M11.5 8.5v3h-3M3.5 11.5h-3v-3" fill="none" stroke="currentColor" />
+    <path d="M6 3.5v5M3.5 6h5" stroke="currentColor" />
+  </svg>
+);
+
 export default function PaintProgram(props: ProgramProps) {
   const paintRef = useRef<PaintWindowHandle>(null);
   const paintFileInputRef = useRef<HTMLInputElement | null>(null);
   const [paintColor, setPaintColor] = useState<string>(PAINT_COLORS[0]);
+  // The background color: what a lifted or deleted selection leaves behind,
+  // and what a moving one lets the picture show through.
+  const [paintSecondary, setPaintSecondary] = useState<string>("#ffffff");
+  const [paintTransparent, setPaintTransparent] = useState(true);
+  const swapColors = () => {
+    setPaintColor(paintSecondary);
+    setPaintSecondary(paintColor);
+  };
   const [paintBrush, setPaintBrush] = useState<number>(6);
   const [paintTool, setPaintTool] = useState<PaintTool>("pencil");
   const [paintMap, setPaintMap] = useState(true);
@@ -177,6 +195,7 @@ export default function PaintProgram(props: ProgramProps) {
     rotate: () => setTurn(rotateRight),
     flipVertical: () => setTurn(flipVertical),
     flipHorizontal: () => setTurn(flipHorizontal),
+    swapColors,
   };
 
   const toolbar = (
@@ -232,9 +251,14 @@ export default function PaintProgram(props: ProgramProps) {
           },
           {
             label: "Paste",
-            title: "Drop the copied pixels in the middle of the view (Ctrl+V)",
+            title: "Drop the copied pixels in the middle of the view, all of them in sight (Ctrl+V)",
             disabled: !paintStatus.canPaste,
             onClick: () => paintRef.current?.paste(),
+          },
+          {
+            label: <>Grab from the page&hellip;</>,
+            title: "Freeze everything and drag a box round anything on the page — another window, the desktop — to paste it in (G)",
+            onClick: () => paintRef.current?.grab(),
           },
           {
             label: "Delete",
@@ -295,6 +319,15 @@ export default function PaintProgram(props: ProgramProps) {
           {item.icon}
         </Button>
       ))}
+      <Button
+        variant="menu"
+        size="sm"
+        aria-label="Grab from the page"
+        title="Grab — freeze everything and drag a box round anything on the page, or click a window, to paste it in (G)"
+        onClick={() => paintRef.current?.grab()}
+      >
+        <GrabIcon />
+      </Button>
       <span aria-hidden style={{ display: "inline-block", width: 6, flex: "0 0 auto" }} />
       <Button
         variant="menu"
@@ -343,8 +376,12 @@ export default function PaintProgram(props: ProgramProps) {
           type="button"
           aria-label={`Color ${swatch}`}
           aria-pressed={paintColor === swatch}
-          title={swatch}
+          title={`${swatch} — click to draw with it, right-click for the background color`}
           onClick={() => setPaintColor(swatch)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setPaintSecondary(swatch);
+          }}
           style={{
             width: 18,
             height: 18,
@@ -361,20 +398,61 @@ export default function PaintProgram(props: ProgramProps) {
         />
       ))}
       {/* Whatever the pencil is drawing with right now — which the dropper can
-          make any color at all, not just one off the palette. */}
-      <span
-        aria-label={`Current color ${paintColor}`}
-        title={`Current color: ${paintColor}`}
+          make any color at all, not just one off the palette — over the
+          background color, Paint's way. Clicking swaps them. */}
+      <button
+        type="button"
+        aria-label={`Pencil color ${paintColor}, background color ${paintSecondary}: swap them`}
+        title={`Pencil ${paintColor}, background ${paintSecondary} — click, or press X, to swap them`}
+        onClick={swapColors}
         style={{
-          width: 26,
-          height: 18,
+          position: "relative",
+          width: 30,
+          height: 22,
           marginLeft: 4,
+          padding: 0,
           flex: "0 0 auto",
-          background: paintColor,
-          border: "2px solid",
-          borderColor: "#808080 #ffffff #ffffff #808080",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
         }}
-      />
+      >
+        {[
+          { fill: paintSecondary, left: 10, top: 7 },
+          { fill: paintColor, left: 0, top: 0 },
+        ].map((chip, i) => (
+          <span
+            key={i}
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: chip.left,
+              top: chip.top,
+              width: 20,
+              height: 15,
+              boxSizing: "border-box",
+              background: chip.fill,
+              border: "2px solid",
+              borderColor: "#808080 #ffffff #ffffff #808080",
+            }}
+          />
+        ))}
+      </button>
+      <Button
+        variant="menu"
+        size="sm"
+        active={paintTransparent}
+        aria-pressed={paintTransparent}
+        aria-label="Transparent selection"
+        title="Transparent selection — leave the background color out of anything you move or paste, so the picture shows through it"
+        onClick={() => setPaintTransparent((prev) => !prev)}
+      >
+        {/* A selection's box with a checkerboard showing through it. */}
+        <svg width="12" height="12" viewBox="0 0 12 12" role="presentation">
+          <path d="M2 2h4v4H2zM6 6h4v4H6z" fill="currentColor" opacity="0.5" />
+          <rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="currentColor" strokeDasharray="2 1.5" />
+        </svg>
+      </Button>
       <span aria-hidden style={{ display: "inline-block", width: 6, flex: "0 0 auto" }} />
       {PAINT_SIZES.map((size) => (
         <Button
@@ -478,9 +556,15 @@ export default function PaintProgram(props: ProgramProps) {
       <PaintWindow
         ref={paintRef}
         color={paintColor}
+        secondary={paintSecondary}
+        transparent={paintTransparent}
         brushSize={paintBrush}
         tool={paintTool}
-        onPickColor={(hex) => {
+        onPickColor={(hex, background) => {
+          if (background) {
+            setPaintSecondary(hex);
+            return;
+          }
           setPaintColor(hex);
           setPaintTool("pencil");
         }}
