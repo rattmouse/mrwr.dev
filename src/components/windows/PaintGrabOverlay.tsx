@@ -14,8 +14,8 @@ type Props = {
   onCancel: () => void;
 };
 
-/** The window under a point, if any — or the whole page, out on the desktop. */
-function boxAt(x: number, y: number): GrabRect {
+/** The window under a point, if there is one. */
+function boxAt(x: number, y: number): GrabRect | null {
   for (const el of document.elementsFromPoint(x, y)) {
     if (el.closest("[data-paint-grab]")) continue;
     const win = el.closest("[data-desktop-window='true']");
@@ -23,7 +23,7 @@ function boxAt(x: number, y: number): GrabRect {
     const r = win.getBoundingClientRect();
     return { left: r.left, top: r.top, width: r.width, height: r.height };
   }
-  return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  return null;
 }
 
 const clampRect = (r: GrabRect): GrabRect => {
@@ -40,8 +40,9 @@ const clampRect = (r: GrabRect): GrabRect => {
 /**
  * paint.exe's Grab, while it's waiting for a box: a pane of glass over the
  * whole page. Drag a box round anything to take it; a plain click takes the
- * window under the pointer, outlined as the pointer goes over it, or the whole
- * page out on the desktop. Esc, or the right button, gives up.
+ * window under the pointer, outlined as the pointer goes over it. A click out
+ * on the bare desktop does nothing — taking the whole page by accident is too
+ * easy and too slow. Esc, or the right button, gives up.
  */
 export default function PaintGrabOverlay({ onGrab, onCancel }: Props) {
   const [hover, setHover] = useState<GrabRect | null>(null);
@@ -106,7 +107,12 @@ export default function PaintGrabOverlay({ onGrab, onCancel }: Props) {
         e.stopPropagation();
         if (busy || !drag) return;
         const far = Math.abs(e.clientX - drag.x0) >= CLICK_SLOP || Math.abs(e.clientY - drag.y0) >= CLICK_SLOP;
-        if (!far) return take(boxAt(e.clientX, e.clientY));
+        if (!far) {
+          const win = boxAt(e.clientX, e.clientY);
+          if (win) take(win);
+          else setDrag(null);
+          return;
+        }
         take({
           left: Math.min(drag.x0, e.clientX),
           top: Math.min(drag.y0, e.clientY),
