@@ -79,6 +79,7 @@ const QUERY = `
     p.id            AS print_id,
     p.name          AS name,
     p.set_name      AS set_name,
+    s.released      AS released,
     p.collector_number,
     p.printed_total,
     p.rarity,
@@ -93,6 +94,7 @@ const QUERY = `
     )) AS market
   FROM inventory_item i
   JOIN card_print p ON p.id = i.print_id
+  LEFT JOIN card_set s ON s.id = p.set_id
   WHERE i.status = 'owned' AND p.game = 'pokemon'
   GROUP BY p.id
   ORDER BY market IS NULL ASC, market DESC, p.name ASC
@@ -164,6 +166,15 @@ async function main() {
         image,
         // Every scan is a card, and a card is 63×88mm.
         aspect: 0.7162,
+        // The same facts again, unclipped and apart, for the window's sort and
+        // filter menus and the tile tooltips. Still no price — the order of the
+        // file is the only trace of value it carries.
+        name: row.name,
+        number,
+        set: row.set_name ?? "",
+        released: row.released ?? "",
+        rarity: row.rarity ?? "",
+        quantity: row.quantity ?? 1,
       });
       console.log(`  ${row.print_id}: ${row.name} ok`);
     } catch (err) {
