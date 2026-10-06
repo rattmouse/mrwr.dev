@@ -76,7 +76,16 @@ export default function ContextMenu({
       role="menu"
       aria-label={label}
       onContextMenu={(e) => e.preventDefault()}
-      style={{ position: "fixed", left: at.left, top: at.top, zIndex: Z.START_MENU, minWidth: 160 }}
+      // A long menu scrolls rather than running off the bottom of the screen.
+      style={{
+        position: "fixed",
+        left: at.left,
+        top: at.top,
+        zIndex: Z.START_MENU,
+        minWidth: 160,
+        maxHeight: "calc(100vh - 8px)",
+        overflowY: "auto",
+      }}
     >
       {items.map((item, index) =>
         item === "separator" ? (

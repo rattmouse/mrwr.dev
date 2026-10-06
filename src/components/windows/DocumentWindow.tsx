@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Anchor, Button, GroupBox, Hourglass, ScrollView } from "react95";
+import { Anchor, Button, GroupBox, Hourglass, ScrollView, TextInput } from "react95";
+import ContextMenu, { ContextMenuItem } from "@/components/ContextMenu";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import MockupList from "@/components/projects/MockupList";
 import ProjectList from "@/components/projects/ProjectList";
@@ -33,6 +34,22 @@ type AlbumCover = {
   // width / height of the source image, when known (Bluesky reports it). Album
   // covers are square, so this is left undefined for them.
   aspect?: number;
+  // Where it sat in the list it came from: the album shelf's order, the
+  // picklist's, or — for cards — most valuable first.
+  rank?: number;
+  card?: CardInfo;
+};
+
+// What a card tile knows about itself beyond its caption, for sorting,
+// filtering and the tooltip.
+type CardInfo = {
+  name: string;
+  number: string;
+  set: string;
+  // The set's release date, "YYYY/MM/DD", when the binder knows it.
+  released: string;
+  rarity: string;
+  quantity: number;
 };
 
 type AlbumTilePosition = {
@@ -105,7 +122,32 @@ function normalizeAlbumsPayload(payload: unknown): AlbumCover[] {
       artist: typeof entry.artist === "string" ? entry.artist.trim() : "",
       image: typeof entry.image === "string" && entry.image.trim() ? entry.image.trim() : null,
     }))
-    .filter((entry) => entry.title.length > 0 && entry.artist.length > 0);
+    .filter((entry) => entry.title.length > 0 && entry.artist.length > 0)
+    .map((entry, rank) => ({ ...entry, rank }));
+}
+
+function readString(entry: Record<string, unknown>, key: string): string {
+  const value = entry[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+// Newer cards.json files spell out each card's name, number, set and rarity;
+// older ones only have the caption, "Name · 001/100" over "Set · Rarity · ×2",
+// so pull it back apart from that.
+function readCardInfo(entry: Record<string, unknown>, title: string, artist: string): CardInfo {
+  const [captionName = "", captionNumber = ""] = title.split(" · ");
+  const credit = artist.split(" · ");
+  const qtyPart = credit.find((part) => /^×\d+$/.test(part));
+  const [captionSet = "", captionRarity = ""] = credit.filter((part) => part !== qtyPart);
+  const quantity = typeof entry.quantity === "number" && entry.quantity > 0 ? entry.quantity : Number(qtyPart?.slice(1) ?? 1);
+  return {
+    name: readString(entry, "name") || captionName,
+    number: readString(entry, "number") || captionNumber,
+    set: readString(entry, "set") || captionSet.replace(/…$/, ""),
+    released: readString(entry, "released"),
+    rarity: readString(entry, "rarity") || captionRarity.replace(/…$/, ""),
+    quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+  };
 }
 
 // Card tiles are written by scripts/content/refresh-pokemon-cards.mjs: a title,
@@ -120,8 +162,10 @@ function normalizeCardsPayload(payload: unknown): AlbumCover[] {
       artist: typeof entry.artist === "string" ? entry.artist.trim() : "",
       image: typeof entry.image === "string" && entry.image.trim() ? entry.image.trim() : null,
       aspect: typeof entry.aspect === "number" && entry.aspect > 0 ? entry.aspect : undefined,
+      card: entry,
     }))
-    .filter((entry) => entry.title.length > 0 && entry.image !== null);
+    .filter((entry) => entry.title.length > 0 && entry.image !== null)
+    .map(({ card, ...entry }, rank) => ({ ...entry, rank, card: readCardInfo(card, entry.title, entry.artist) }));
 }
 
 type BlueskyImage = { thumb?: unknown; thumbnail?: unknown; fullsize?: unknown; alt?: unknown; aspectRatio?: unknown };
@@ -361,6 +405,241 @@ function fitWithin(room: { w: number; h: number }, aspect: number | undefined): 
   return { w: Math.round(w), h: Math.round(w / a) };
 }
 
+// Sorting. Picking a sort is Windows' "Arrange Icons by": the tiles slide into
+// rows across the desktop in that order, and the window's ◀ ▶ step through
+// them the same way. They can still be dragged anywhere afterwards; Shuffle
+// throws them back into a heap.
+type SortKey = "value" | "name" | "set" | "rarity" | "shelf" | "artist" | "title" | "newest" | "oldest";
+
+const SORTS: Record<CollectionCategory, { key: SortKey; label: string }[]> = {
+  cards: [
+    { key: "value", label: "Value" },
+    { key: "name", label: "Name" },
+    { key: "set", label: "Set" },
+    { key: "rarity", label: "Rarity" },
+  ],
+  albums: [
+    { key: "shelf", label: "Shelf order" },
+    { key: "artist", label: "Artist" },
+    { key: "title", label: "Title" },
+  ],
+  paintings: [
+    { key: "newest", label: "Newest" },
+    { key: "oldest", label: "Oldest" },
+    { key: "title", label: "Title" },
+  ],
+  songs: [
+    { key: "newest", label: "Newest" },
+    { key: "oldest", label: "Oldest" },
+    { key: "title", label: "Title" },
+  ],
+};
+
+// Rarest at the top. The binder's rarity names change from era to era, so
+// match on the words that mean the same thing in every one of them; the first
+// pattern that matches wins.
+const RARITY_LADDER: [RegExp, number][] = [
+  [/mega hyper/i, 11],
+  [/hyper|secret|rainbow|gold/i, 10],
+  [/special illustration/i, 9],
+  [/illustration|pikachu/i, 8],
+  [/ultra|shiny|full art|trainer gallery/i, 7],
+  [/amazing|ace spec|radiant|prism/i, 6],
+  [/double/i, 5],
+  [/holo\s+\S+|\bex\b|\bgx\b|\bv(max|star)?\b/i, 4],
+  [/holo|promo/i, 3],
+  [/uncommon/i, 1],
+  [/common/i, 0],
+  [/rare/i, 2],
+];
+
+function rarityRank(rarity: string): number {
+  for (const [pattern, rank] of RARITY_LADDER) if (pattern.test(rarity)) return rank;
+  return 4;
+}
+
+// "094/088" and "TG05" alike: by the digits first, then as written.
+function compareCardNumbers(a: string, b: string): number {
+  const na = parseInt(a.replace(/^\D+/, ""), 10);
+  const nb = parseInt(b.replace(/^\D+/, ""), 10);
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+  return a.localeCompare(b, undefined, { numeric: true });
+}
+
+// Paintings and songs carry the day they were posted as their second line.
+function postedOn(entry: AlbumCover): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(entry.artist) ? entry.artist : "";
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// "2026-08-10" → "August 2026".
+function postedMonth(entry: AlbumCover): string {
+  const date = postedOn(entry);
+  return date ? `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}` : "";
+}
+
+const byText = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+
+function compareTiles(a: AlbumCover, b: AlbumCover, key: SortKey): number {
+  const byRank = (a.rank ?? 0) - (b.rank ?? 0);
+  switch (key) {
+    case "name":
+      return (
+        byText(a.card?.name ?? a.title, b.card?.name ?? b.title) ||
+        compareCardNumbers(a.card?.number ?? "", b.card?.number ?? "") ||
+        byRank
+      );
+    case "set": {
+      // Newest set first; a set with no release date on record goes last.
+      const ra = a.card?.released ?? "";
+      const rb = b.card?.released ?? "";
+      if (ra !== rb) return !ra ? 1 : !rb ? -1 : rb.localeCompare(ra);
+      return (
+        byText(a.card?.set ?? "", b.card?.set ?? "") ||
+        compareCardNumbers(a.card?.number ?? "", b.card?.number ?? "") ||
+        byRank
+      );
+    }
+    case "rarity":
+      return rarityRank(b.card?.rarity ?? "") - rarityRank(a.card?.rarity ?? "") || byRank;
+    case "artist":
+      return byText(a.artist, b.artist) || byText(a.title, b.title);
+    case "title":
+      return byText(a.title, b.title) || byRank;
+    case "newest":
+    case "oldest": {
+      const da = postedOn(a);
+      const db = postedOn(b);
+      if (da === db) return byRank;
+      if (!da || !db) return !da ? 1 : -1;
+      return key === "newest" ? db.localeCompare(da) : da.localeCompare(db);
+    }
+    default:
+      return byRank;
+  }
+}
+
+// Filtering: words typed into the box (every one has to turn up somewhere in
+// the tile's caption), and one pick from the Filter menu, which offers
+// whatever the tab's tiles can be grouped by.
+type Facet = { kind: string; value: string };
+
+const FACETS: Record<CollectionCategory, { kind: string; label: string; of: (entry: AlbumCover) => string }[]> = {
+  cards: [
+    { kind: "rarity", label: "Rarity", of: (entry) => entry.card?.rarity ?? "" },
+    { kind: "set", label: "Set", of: (entry) => entry.card?.set ?? "" },
+  ],
+  albums: [{ kind: "artist", label: "Artist", of: (entry) => entry.artist }],
+  paintings: [{ kind: "month", label: "Month", of: (entry) => postedMonth(entry) }],
+  songs: [{ kind: "month", label: "Month", of: (entry) => postedMonth(entry) }],
+};
+
+type CollectionView = { sort?: SortKey; query?: string; facet?: Facet };
+
+function matchesView(entry: AlbumCover, category: CollectionCategory, view: CollectionView): boolean {
+  if (view.facet) {
+    const facet = FACETS[category].find((f) => f.kind === view.facet!.kind);
+    if (facet && facet.of(entry) !== view.facet.value) return false;
+  }
+  const words = (view.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const card = entry.card;
+  const haystack = [entry.title, entry.artist, card?.set, card?.rarity, card?.released?.slice(0, 4)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+// The sort and filter each tab was left with, kept apart from the tile layout.
+const VIEW_KEY = "mrwr:collections:view";
+
+function readSavedViews(): Partial<Record<CollectionCategory, CollectionView>> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(VIEW_KEY) ?? "null") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const views: Partial<Record<CollectionCategory, CollectionView>> = {};
+    for (const category of Object.keys(SORTS) as CollectionCategory[]) {
+      const raw = (parsed as Record<string, unknown>)[category] as Record<string, unknown> | undefined;
+      if (!raw || typeof raw !== "object") continue;
+      const sort = SORTS[category].find((s) => s.key === raw.sort)?.key;
+      const query = typeof raw.query === "string" ? raw.query : undefined;
+      const f = raw.facet as Partial<Facet> | undefined;
+      const facet =
+        f && typeof f.kind === "string" && typeof f.value === "string" ? { kind: f.kind, value: f.value } : undefined;
+      views[category] = { sort, query, facet };
+    }
+    return views;
+  } catch {
+    return {};
+  }
+}
+
+function writeSavedViews(views: Partial<Record<CollectionCategory, CollectionView>>) {
+  try {
+    window.localStorage.setItem(VIEW_KEY, JSON.stringify(views));
+  } catch {
+    // Full or blocked — the view still holds for this visit.
+  }
+}
+
+// Rows of tiles from the top left, in reading order, the way the desktop lines
+// up its own icons — stepping around any window in the way while there is bare
+// desktop left, and only then laying tiles over windows.
+function gridTiles(
+  boxes: { w: number; h: number }[],
+  field: { width: number; height: number; insetTop: number },
+  avoid: Rect[]
+): AlbumTilePosition[] {
+  if (boxes.length === 0) return [];
+  const gap = 10;
+  const pitch = Math.max(...boxes.map((b) => Math.max(b.w, b.h))) + gap;
+  const left = 12;
+  const top = field.insetTop + 12;
+  const cols = Math.max(1, Math.floor((field.width - left * 2 + gap) / pitch));
+  const rows = Math.max(1, Math.floor((field.height - top - 12 + gap) / pitch));
+  const cells: { x: number; y: number; free: boolean; order: number }[] = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const cell = { x: left + c * pitch, y: top + r * pitch, w: pitch - gap, h: pitch - gap };
+      cells.push({ x: cell.x, y: cell.y, free: !avoid.some((a) => overlapArea(cell, a) > 0), order: cells.length });
+    }
+  }
+  const free = cells.filter((cell) => cell.free);
+  const chosen =
+    free.length >= boxes.length
+      ? free.slice(0, boxes.length)
+      : [...free, ...cells.filter((cell) => !cell.free).slice(0, boxes.length - free.length)].sort(
+          (a, b) => a.order - b.order
+        );
+  const span = pitch - gap;
+  return boxes.map((box, i) => {
+    // More tiles than the screen has room for: deal the rest onto the grid
+    // again, nudged so the second layer still shows the first.
+    const cell = chosen[i % chosen.length];
+    const layer = Math.floor(i / chosen.length);
+    return {
+      x: cell.x + (span - box.w) / 2 + layer * 6,
+      y: cell.y + (span - box.h) / 2 + layer * 6,
+      rot: 0,
+    };
+  });
+}
+
+// The tooltip a desktop tile shows when the mouse rests on it: the caption,
+// and for a card everything the binder says about it.
+function tileDetails(entry: AlbumCover): string[] {
+  const card = entry.card;
+  if (!card) return [entry.title, entry.artist].filter(Boolean);
+  const year = card.released.slice(0, 4);
+  return [
+    card.name,
+    [card.number && `No. ${card.number}`, card.set, year && `(${year})`].filter(Boolean).join(" "),
+    [card.rarity, card.quantity > 1 ? `×${card.quantity}` : ""].filter(Boolean).join(" · "),
+  ].filter(Boolean);
+}
+
 // Two crossed arrows, drawn on a 16px grid in the same flat black as the
 // title-bar glyphs.
 function ShuffleIcon() {
@@ -368,6 +647,84 @@ function ShuffleIcon() {
     <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
       <path d="M1 4.5h3l6 7h2M1 11.5h3l6-7h2" fill="none" stroke="currentColor" strokeWidth={1.5} />
       <path d="M12 1.5l3 3-3 3zM12 8.5l3 3-3 3z" fill="currentColor" />
+    </svg>
+  );
+}
+
+// Three rows of little tiles, short to long: icons arranged in order.
+function SortIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
+      <path d="M1 2h3v3H1zM1 7h3v3H1zM6 7h3v3H6zM1 12h3v3H1zM6 12h3v3H6zM11 12h3v3h-3z" fill="currentColor" />
+    </svg>
+  );
+}
+
+// The pale yellow balloon Windows hangs under a desktop icon: below the tile,
+// or above it near the bottom of the screen, and nudged back on screen at the
+// sides.
+function TileTooltip({ anchor, lines }: { anchor: { x: number; y: number; w: number; h: number }; lines: string[] }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const margin = 4;
+    const below = anchor.y + anchor.h + 6;
+    setAt({
+      left: Math.max(margin, Math.min(anchor.x + anchor.w / 2 - width / 2, window.innerWidth - width - margin)),
+      top: below + height > window.innerHeight - margin ? Math.max(margin, anchor.y - height - 6) : below,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor.x, anchor.y, anchor.w, anchor.h, lines.join("\n")]);
+
+  return (
+    <div
+      ref={ref}
+      role="tooltip"
+      style={{
+        position: "absolute",
+        left: at?.left ?? anchor.x,
+        top: at?.top ?? anchor.y + anchor.h + 6,
+        visibility: at ? "visible" : "hidden",
+        zIndex: 100000,
+        maxWidth: 260,
+        padding: "2px 5px",
+        background: "#ffffe1",
+        color: "#000",
+        border: "1px solid #000",
+        boxShadow: "1px 1px 0 #00000055",
+        fontSize: 12,
+        lineHeight: 1.35,
+        pointerEvents: "none",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {lines.map((line, index) => (
+        <div key={index} style={{ fontWeight: index === 0 ? 700 : undefined, overflow: "hidden", textOverflow: "ellipsis" }}>
+          {line}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// A small solid arrowhead, pointing right — or left, flipped.
+function StepIcon({ flip = false }: { flip?: boolean }) {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
+      <path d={flip ? "M10 4v8L6 8z" : "M6 4v8l4-4z"} fill="currentColor" />
+    </svg>
+  );
+}
+
+// A funnel.
+function FilterIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
+      <path d="M1 2h14v2l-5 5v5l-4 1V9L1 4z" fill="currentColor" />
     </svg>
   );
 }
@@ -404,7 +761,40 @@ export default function DocumentWindow({
         : category === "cards"
           ? EMPTY_CARD
           : EMPTY_ALBUM;
-  const album = albums[activeAlbum] ?? emptyEntry;
+  const dealTimerRef = useRef<number | null>(null);
+  // Each tab's sort and filter. The tiles on screen are filtered by the view
+  // of the tab they belong to, which for a moment after switching is not the
+  // tab whose button is pressed.
+  const [views, setViews] = useState<Partial<Record<CollectionCategory, CollectionView>>>({});
+  const view = views[category] ?? {};
+  const tilesCategory = albumsCategory ?? category;
+  const tilesView = views[tilesCategory];
+  const visible = useMemo(
+    () => albums.map((entry) => matchesView(entry, tilesCategory, tilesView ?? {})),
+    [albums, tilesCategory, tilesView]
+  );
+  const orderFor = (key: SortKey | undefined) =>
+    albums
+      .map((_, index) => index)
+      .filter((index) => visible[index])
+      .sort((a, b) => compareTiles(albums[a], albums[b], key ?? "shelf"));
+  // The order ◀ ▶ step through: the tab's sort, or the list's own order.
+  const listOrder = useMemo(
+    () => orderFor(tilesView?.sort),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [albums, visible, tilesView?.sort]
+  );
+  const filtered = !!(tilesView?.query?.trim() || tilesView?.facet);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[]; label: string } | null>(null);
+  // The tile the mouse is resting on, once it has rested long enough.
+  const [hoverTile, setHoverTile] = useState<number | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+  // The frame keeps to what the filter lets through; with nothing let through
+  // it says so rather than showing a tile that isn't on the desktop.
+  const album: AlbumCover =
+    albums.length > 0 && !visible.some(Boolean)
+      ? { title: "nothing matches", artist: "clear the filter to see them all", image: null }
+      : albums[activeAlbum] ?? emptyEntry;
   const iconSize = 42;
   // The tiles are flung across the whole desktop via a portal that floats above
   // the window chrome — maximized or not, they are the same tiles in the same
@@ -448,6 +838,21 @@ export default function DocumentWindow({
   // whether they are still gathered in the middle or on their way out.
   const [deal, setDeal] = useState<{ order: Map<number, number>; phase: "gather" | "spread" } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setViews(readSavedViews());
+    return () => {
+      if (dealTimerRef.current !== null) window.clearTimeout(dealTimerRef.current);
+      if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+    };
+  }, []);
+
+  const updateView = (patch: Partial<CollectionView>) =>
+    setViews((prev) => {
+      const next = { ...prev, [category]: { ...prev[category], ...patch } };
+      writeSavedViews(next);
+      return next;
+    });
 
   useEffect(() => {
     setPortalHost(document.body);
@@ -574,7 +979,7 @@ export default function DocumentWindow({
           const images = imagesByRkey.get(rkey);
           if (images) tiles.push(...images);
         }
-        return tiles.slice(0, MAX_PICKED);
+        return tiles.slice(0, MAX_PICKED).map((tile, rank) => ({ ...tile, rank }));
       } catch {
         return [];
       }
@@ -804,18 +1209,95 @@ export default function DocumentWindow({
     }
   };
 
-  const onAlbumTilePointerDown = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const pos = albumTilePositions[index];
-    if (!pos) return;
-    const field = getScatterField();
-
+  // Show a tile in the frame and lift it to the top of the pile.
+  const selectTile = (index: number) => {
     setActiveAlbum(index);
     albumTileStackTopRef.current += 1;
     const stack = albumTileStack.length === albums.length ? albumTileStack.slice() : albums.map(() => 0);
     stack[index] = albumTileStackTopRef.current;
     setAlbumTileStack(stack);
     saveLayout(albumTilePositions, stack, index);
+  };
+
+  const stepTile = (by: 1 | -1) => {
+    if (listOrder.length === 0) return;
+    const at = listOrder.indexOf(activeAlbum);
+    const next = at < 0 ? 0 : (at + by + listOrder.length) % listOrder.length;
+    selectTile(listOrder[next]);
+  };
+
+  // Slide the given tiles, in order, into rows across the desktop.
+  const arrangeTiles = (order: number[]) => {
+    if (albumTilePositions.length !== albums.length || order.length === 0) return;
+    const boxes = order.map((index) => fitBox(iconSize, albums[index].aspect));
+    const spots = gridTiles(boxes, getScatterField(), getAvoidRects());
+    const next = albumTilePositions.slice();
+    order.forEach((index, i) => {
+      next[index] = spots[i];
+    });
+    setDeal({ order: new Map(order.map((index, i) => [index, i])), phase: "spread" });
+    setAlbumTilePositions(next);
+    if (dealTimerRef.current !== null) window.clearTimeout(dealTimerRef.current);
+    dealTimerRef.current = window.setTimeout(() => setDeal(null), DEAL_MS + order.length * DEAL_STAGGER_MS + 100);
+    const active = order.includes(activeAlbum) ? activeAlbum : order[0];
+    setActiveAlbum(active);
+    saveLayout(next, albumTileStack, active);
+  };
+
+  const sortBy = (key: SortKey) => {
+    updateView({ sort: key });
+    arrangeTiles(orderFor(key));
+  };
+
+  const shuffle = () => {
+    updateView({ sort: undefined });
+    setShuffleCount((n) => n + 1);
+  };
+
+  // Whatever the filter hides goes from the frame too: if the tile it was
+  // showing is filtered out, it moves on to the first one still shown.
+  useEffect(() => {
+    if (albumsCategory !== category || listOrder.length === 0 || visible[activeAlbum]) return;
+    setActiveAlbum(listOrder[0]);
+  }, [albumsCategory, category, listOrder, visible, activeAlbum]);
+
+  // A sorted tab stays sorted as the filter changes: once the typing stops,
+  // whatever is still showing closes up into rows again. Only a change of
+  // filter does this — not a tab switch, nor the saved view arriving on load.
+  const filterSignature = `${albumsCategory}|${tilesView?.query?.trim() ?? ""}|${tilesView?.facet?.kind ?? ""}:${tilesView?.facet?.value ?? ""}`;
+  const filterSignatureRef = useRef(filterSignature);
+  useEffect(() => {
+    const previous = filterSignatureRef.current;
+    filterSignatureRef.current = filterSignature;
+    if (previous === filterSignature || previous.split("|")[0] !== String(albumsCategory)) return;
+    if (!tilesView?.sort) return;
+    const timer = window.setTimeout(() => arrangeTiles(listOrder), 250);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterSignature]);
+
+  const clearHover = () => {
+    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = null;
+    setHoverTile(null);
+  };
+
+  const onAlbumTilePointerEnter = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
+    // A mouse resting on a tile, the way a desktop icon shows its tooltip; a
+    // finger has no hover, and a tile being dragged is already in hand.
+    if (event.pointerType !== "mouse" || draggingAlbumIndexRef.current !== null) return;
+    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = window.setTimeout(() => setHoverTile(index), 450);
+  };
+
+  const onAlbumTilePointerDown = (index: number, event: React.PointerEvent<HTMLDivElement>) => {
+    clearHover();
+    if (event.button !== 0) return;
+    const pos = albumTilePositions[index];
+    if (!pos) return;
+    const field = getScatterField();
+
+    selectTile(index);
 
     draggingAlbumIndexRef.current = index;
     draggedRef.current = false;
@@ -886,6 +1368,8 @@ export default function DocumentWindow({
         onPointerMove={onAlbumTilePointerMove}
         onPointerUp={(event) => onAlbumTilePointerUp(index, event)}
         onPointerCancel={(event) => onAlbumTilePointerCancel(index, event)}
+        onPointerEnter={(event) => onAlbumTilePointerEnter(index, event)}
+        onPointerLeave={clearHover}
         style={{
           position: "absolute",
           left: pos.x,
@@ -941,6 +1425,85 @@ export default function DocumentWindow({
     );
   };
 
+  const closeMenu = () => setMenu(null);
+
+  // Menus drop down from under the button that opened them.
+  const openMenu = (
+    event: React.MouseEvent<HTMLElement>,
+    label: string,
+    items: (at: { x: number; y: number }) => ContextMenuItem[]
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const at = { x: rect.left, y: rect.bottom + 2 };
+    setMenu({ ...at, label, items: items(at) });
+  };
+
+  const checked = (on: boolean, label: React.ReactNode) => (
+    <>
+      <span style={{ display: "inline-block", width: 16 }}>{on ? "\u2713" : ""}</span>
+      {label}
+    </>
+  );
+
+  const sortItems = (): ContextMenuItem[] => [
+    ...SORTS[category].map(({ key, label }) => ({
+      label: checked(view.sort === key, label),
+      onClick: () => sortBy(key),
+    })),
+    "separator",
+    { label: checked(false, "Shuffle"), onClick: shuffle },
+  ];
+
+  // Every value a facet takes across this tab's tiles, with how many have it.
+  // Artists only make the list when there's more than one of theirs, or it
+  // would just be the whole shelf over again.
+  const facetValues = (facet: (typeof FACETS)[CollectionCategory][number]) => {
+    const counts = new Map<string, { count: number; sample: AlbumCover }>();
+    for (const entry of albums) {
+      const value = facet.of(entry);
+      if (!value) continue;
+      const seen = counts.get(value);
+      counts.set(value, { count: (seen?.count ?? 0) + 1, sample: seen?.sample ?? entry });
+    }
+    const values = [...counts.entries()].filter(([, { count }]) => facet.kind !== "artist" || count > 1);
+    const order: SortKey =
+      facet.kind === "rarity" ? "rarity" : facet.kind === "set" ? "set" : facet.kind === "month" ? "newest" : "artist";
+    return values.sort(([, a], [, b]) => compareTiles(a.sample, b.sample, order));
+  };
+
+  const facetItems = (facet: (typeof FACETS)[CollectionCategory][number]): ContextMenuItem[] =>
+    facetValues(facet).map(([value, { count }]) => ({
+      label: checked(view.facet?.kind === facet.kind && view.facet.value === value, value),
+      shortcut: String(count),
+      onClick: () => updateView({ facet: { kind: facet.kind, value } }),
+    }));
+
+  // A way of grouping is only worth offering if it splits the tiles: one
+  // value across the whole tab would just be Show all again.
+  const groupings =
+    albumsCategory === category ? FACETS[category].filter((facet) => facetValues(facet).length > 1) : [];
+
+  const filterItems = (at: { x: number; y: number }): ContextMenuItem[] => {
+    const facets = groupings;
+    const showAll: ContextMenuItem = {
+      label: checked(!view.facet && !view.query?.trim(), "Show all"),
+      shortcut: String(albums.length),
+      onClick: () => updateView({ facet: undefined, query: "" }),
+    };
+    // One way to group: its values straight away. More than one: pick which
+    // first, then its values, so no one list runs off the screen.
+    if (facets.length === 1) return [showAll, "separator", ...facetItems(facets[0])];
+    return [
+      showAll,
+      "separator",
+      ...facets.map((facet) => ({
+        label: checked(view.facet?.kind === facet.kind, `${facet.label} \u25b8`),
+        // Picking an item closes the menu first, so this one opens in its place.
+        onClick: () => setMenu({ ...at, label: facet.label, items: facetItems(facet) }),
+      })),
+    ];
+  };
+
   return (
     <DesktopWindow
       title={title}
@@ -992,21 +1555,65 @@ export default function DocumentWindow({
                 {label}
               </Button>
             ))}
+          </div>
+
+          <div style={{ alignSelf: "stretch", display: "flex", gap: 4 }}>
+            <TextInput
+              value={view.query ?? ""}
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) => updateView({ query: event.target.value })}
+              onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+                if (event.key === "Escape") updateView({ query: "" });
+              }}
+              placeholder="Filter…"
+              aria-label="Filter"
+              spellCheck={false}
+              fullWidth
+              style={{ flex: "1 1 0", minWidth: 60, height: 28, minHeight: 28 }}
+            />
+            {(groupings.length > 0 || view.facet) && (
+              <Button
+                size="sm"
+                style={{ flex: "0 0 auto", minWidth: 28, maxWidth: 130, padding: "0 5px", gap: 4 }}
+                disabled={albumsLoading || albums.length === 0}
+                onClick={(event: React.MouseEvent<HTMLButtonElement>) => openMenu(event, "Filter", filterItems)}
+                aria-label={view.facet ? `Filter: ${view.facet.value}` : "Filter by"}
+                title={view.facet ? `Showing only ${view.facet.value}` : "Filter by"}
+                active={!!view.facet}
+              >
+                <FilterIcon />
+                {view.facet && (
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{view.facet.value}</span>
+                )}
+              </Button>
+            )}
             <Button
               size="sm"
               square
-              style={{ marginLeft: "auto", flex: "0 0 auto" }}
+              style={{ flex: "0 0 auto" }}
               disabled={albumsLoading || albums.length === 0}
-              onClick={() => setShuffleCount((n) => n + 1)}
+              onClick={(event: React.MouseEvent<HTMLButtonElement>) => openMenu(event, "Sort by", sortItems)}
+              aria-label="Sort"
+              title="Sort"
+              active={!!menu && menu.label === "Sort by"}
+            >
+              <SortIcon />
+            </Button>
+            <Button
+              size="sm"
+              square
+              style={{ flex: "0 0 auto" }}
+              disabled={albumsLoading || albums.length === 0}
+              onClick={shuffle}
               aria-label="Shuffle"
               title="Shuffle"
             >
               <ShuffleIcon />
             </Button>
           </div>
+          {menu && <ContextMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onDismiss={closeMenu} />}
 
           <GroupBox
-            label={
+            label={`${
               category === "paintings"
                 ? "paints.gif"
                 : category === "songs"
@@ -1014,7 +1621,7 @@ export default function DocumentWindow({
                   : category === "cards"
                     ? "cards.gif"
                     : "albums.gif"
-            }
+            }${filtered && albumsCategory === category && !albumsLoading ? ` · ${listOrder.length} of ${albums.length}` : ""}`}
             style={{ width: "100%", flex: "1 1 auto", minHeight: 0, padding: 4 }}
           >
             <div
@@ -1090,14 +1697,31 @@ export default function DocumentWindow({
                   pointerEvents: "none",
                 }}
               >
-                {albums.map(renderAlbumTile)}
+                {albums.map((entry, index) => (visible[index] ? renderAlbumTile(entry, index) : null))}
+                {hoverTile !== null && visible[hoverTile] && albums[hoverTile] && albumTilePositions[hoverTile] && (
+                  <TileTooltip
+                    anchor={{ ...albumTilePositions[hoverTile], ...fitBox(iconSize, albums[hoverTile].aspect) }}
+                    lines={tileDetails(albums[hoverTile])}
+                  />
+                )}
               </div>,
               portalHost
             )}
           {/* One line each, whatever the title: a caption that wrapped would
               change the size of the scene above it every time you picked a
               different tile. */}
-          <div style={{ alignSelf: "stretch", display: "flex", flex: "0 0 auto" }}>
+          <div style={{ alignSelf: "stretch", display: "flex", flex: "0 0 auto", alignItems: "center", gap: 4 }}>
+            <Button
+              size="sm"
+              square
+              style={{ flex: "0 0 auto" }}
+              disabled={albumsLoading || listOrder.length < 2}
+              onClick={() => stepTile(-1)}
+              aria-label="Previous"
+              title="Previous"
+            >
+              <StepIcon flip />
+            </Button>
             <div style={{ textAlign: "center", flex: "1 1 auto", minWidth: 0 }}>
               {[album.title, album.artist].map((line, index) => (
                 <div
@@ -1114,6 +1738,17 @@ export default function DocumentWindow({
                 </div>
               ))}
             </div>
+            <Button
+              size="sm"
+              square
+              style={{ flex: "0 0 auto" }}
+              disabled={albumsLoading || listOrder.length < 2}
+              onClick={() => stepTile(1)}
+              aria-label="Next"
+              title="Next"
+            >
+              <StepIcon />
+            </Button>
           </div>
         </div>
       )}
