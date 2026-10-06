@@ -12,4 +12,7 @@ export const Z = {
   TASKBAR: 1000,
   START_MENU: 2000,
   START_SUBMENU: 3000,
+  // paint.exe's Grab: a sheet of glass over the whole page, menus and all,
+  // for as long as it takes to drag a box round something.
+  GRAB: 4000,
 } as const;

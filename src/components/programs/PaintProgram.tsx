@@ -121,6 +121,15 @@ const PAINT_TOOLS: { id: PaintTool; name: string; title: string; icon: React.Rea
   },
 ];
 
+// Grab sits in the tool box but isn't a tool the sheet keeps: it takes one
+// box of the page, anywhere on it, and hands back to the select tool.
+const GrabIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" role="presentation">
+    <path d="M.5 3.5v-3h3M8.5.5h3v3M11.5 8.5v3h-3M3.5 11.5h-3v-3" fill="none" stroke="currentColor" />
+    <path d="M6 3.5v5M3.5 6h5" stroke="currentColor" />
+  </svg>
+);
+
 export default function PaintProgram(props: ProgramProps) {
   const paintRef = useRef<PaintWindowHandle>(null);
   const paintFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -232,9 +241,14 @@ export default function PaintProgram(props: ProgramProps) {
           },
           {
             label: "Paste",
-            title: "Drop the copied pixels in the middle of the view (Ctrl+V)",
+            title: "Drop the copied pixels in the middle of the view, all of them in sight (Ctrl+V)",
             disabled: !paintStatus.canPaste,
             onClick: () => paintRef.current?.paste(),
+          },
+          {
+            label: <>Grab from the page&hellip;</>,
+            title: "Freeze everything and drag a box round anything on the page — another window, the desktop — to paste it in (G)",
+            onClick: () => paintRef.current?.grab(),
           },
           {
             label: "Delete",
@@ -295,6 +309,15 @@ export default function PaintProgram(props: ProgramProps) {
           {item.icon}
         </Button>
       ))}
+      <Button
+        variant="menu"
+        size="sm"
+        aria-label="Grab from the page"
+        title="Grab — freeze everything and drag a box round anything on the page, or click a window, to paste it in (G)"
+        onClick={() => paintRef.current?.grab()}
+      >
+        <GrabIcon />
+      </Button>
       <span aria-hidden style={{ display: "inline-block", width: 6, flex: "0 0 auto" }} />
       <Button
         variant="menu"
