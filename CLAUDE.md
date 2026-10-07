@@ -105,9 +105,15 @@ Do this on your feature branch before the PR merges:
    opens a new empty card at the top for you to name. `containers/ci.sh ci`
    fails on a branch that isn't ahead of `origin/main`, and every build
    (`prebuild`) fails if the three files disagree — so don't hand-edit one.
-2. **Add one bullet** to `versions[0].changes[]` — the newest card. Describe
-   the **user-facing effect**, not the mechanics, and match the voice of the
-   bullets already there (short, plain, no hashes or file paths).
+2. **Add bullets** to `versions[0].changes[]` — the newest card, one per
+   user-facing change. Claude-written bullets use a flat, robotic template so
+   they read apart from the owner's own (`handmade` era) writing:
+   `Type: subject (program). Detail` — Type is `Added`, `Changed`, `Fixed` or
+   `Removed`; the program tag and the detail fragment are optional. Keep each
+   under ~100 characters, no friendly phrasing, no "you", no trailing period,
+   no hashes or file paths. e.g. `Added: Grab tool, G (paint.exe). Captures
+   any page region into canvas`. Never rewrite `handmade`, `codex` or
+   `chatgpt` era bullets.
 3. **Record closed issues.** If the PR closes any issues, add their numbers to
    `versions[0].issues[]` (deduped, keep it sorted). Their titles and the "closed
    by PR #NN" link are resolved automatically from `issues.json` at build time —
@@ -132,7 +138,10 @@ PR link is resolved from the closing keyword at build time. So there is no
 after-merge step.
 
 Start a **new** `versions[0]` card (`npm run version:bump -- minor`, then set
-`era` / `name` / `summary`) only when the work opens a genuinely new milestone —
+`era` / `name` / `summary`; a Claude-written summary is the same robotic
+register — semicolon-separated fragments, no trailing period, e.g. `Multiple
+windows; taskbar buttons; desktop state persistence`) only when the work opens
+a genuinely new milestone —
 most PRs are a patch bump plus a new bullet on the current card.
 
 ### How the issue ↔ PR links work
