@@ -560,8 +560,9 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
         }
         stepRun(run, dx, dy, dt, now, width, height, Math.random);
         if (run.phase !== "playing") {
-          // A day worked to the end on the computer in cubicles.exe earns the way out.
-          if (run.phase === "victory" && window.self !== window.top) markClockedOut();
+          // A day worked to the end on the computer in cubicles.exe earns the
+          // way out, and how hard the day was decides where it goes.
+          if (run.phase === "victory" && window.self !== window.top) markClockedOut(run.difficulty);
           setPhase(run.phase);
           setChoices(run.choices);
           setOwned(ownedUpgrades(run));
