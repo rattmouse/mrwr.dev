@@ -27,7 +27,13 @@
         "Added: Season view (trees.exe). Bloom, leaf and fall color by day of year, playable",
         "Added: Planted view (trees.exe). Trees standing by year, newest highlighted, playable",
         "Added: Species view (trees.exe). Commonest genera by color, click one to isolate",
-        "Added: tree details on click (trees.exe). Species, address, trunk, planted year, care"
+        "Added: tree details on click (trees.exe). Species, address, trunk, planted year, care",
+        "Added: Tilt view (trees.exe). City diorama on USGS elevation, tilt angle slider, 8 headings",
+        "Added: Canopy toggle (trees.exe). 850k park and yard trees from the 2021 LiDAR survey",
+        "Added: removed street trees on the Planted timeline (trees.exe). Red in their removal year",
+        "Changed: Play and Stop drawn as icons (strudel.cc). Same set as player.exe",
+        "Fixed: player and arrow icons rendering as color emoji on phones (player.exe, midi.exe)",
+        "Changed: Terminal listed first in the Tools menu"
       ]
     },
     {

@@ -206,18 +206,23 @@ with them.
 
 ## The Trees window
 
-trees.exe draws every street tree in Seattle from `public/trees/trees.bin.gz`,
-a gitignored static file the window fetches from this site when it opens — the
-site never calls ArcGIS itself.
+trees.exe draws every street tree in Seattle from `public/trees/`: gitignored
+static files the window fetches from this site — the map (`trees.bin.gz`) when
+it opens, then the addresses (`addresses.bin.gz`) and the ground
+(`terrain.bin.gz`) behind it. The site never calls ArcGIS or USGS itself.
 
 ### `refresh-trees.sh` — pull Seattle's street trees from ArcGIS
 
 Runs `refresh-trees.mjs`, which pages through the City of Seattle's public
 **SDOT Trees (Active)** layer on ArcGIS Online (about 215k points, 2,000 per
-request, no credentials) and packs position, species, address, planted year,
-trunk diameter and a few flags into one binary — about 1.5MB gzipped. The
-format is written up at the top of the script and read back by
-`src/lib/trees.ts`.
+request, no credentials) and packs position, species, planted year, trunk
+diameter and a few flags into the map file — about 0.85MB gzipped, with
+positions stored as the step from the tree before along each street and every
+column split into byte planes, which is what lets gzip shrink it — and the
+addresses into their own ~0.2MB file, since only the hover line and the tree
+card need them. The formats are written up at the top of the script and read
+back by `src/lib/trees.ts` and `src/lib/terrain.ts`. A file from an older
+format is always refetched, however new it is.
 
 `scripts/deploy/deploy.sh` runs it before every build (best-effort, or pass
 `--skip-trees`), but the inventory moves slowly, so it leaves a file under a
@@ -226,6 +231,32 @@ week old alone. `--force` refetches regardless:
 ```bash
 scripts/content/refresh-trees.sh --force
 ```
+
+It also writes two more files from the city:
+
+- `removed.bin.gz` (~0.35MB): the street trees the city has taken down, from
+  the full **SDOT Trees (CDL)** layer, for the Planted timeline. About a fifth
+  have no removal date, so their year is the record's last edit ("removed by").
+- `crowns.bin.gz` (~2.8MB): every tree crown the city's 2021 LiDAR survey found
+  (**Seattle Tree Canopy 2021 Tree Crowns**, ~968k), as centre, height, spread
+  and conifer/broadleaf. Paged by OBJECTID range — deep offsets take the
+  service seconds a page. Heights over 80 m (towers, cranes) are dropped, and a
+  crown within a few metres of a street tree gives that tree its measured
+  height instead of being drawn twice; about 850k remain. trees.exe draws them
+  under the street trees when its Canopy toggle is on.
+
+Both are best-effort: a failure keeps the old file, or none.
+
+The same run writes `public/trees/terrain.bin.gz` (about 0.3MB: half-metre
+heights, each stored as the change from its neighbour) for the
+window's Tilt view: USGS 3DEP elevation over the trees' bbox, pulled as raw
+floats from the public 3DEP image service, on square-degree cells of about
+16 × 24 m. 3DEP keeps its pixels square in degrees and stretches a bbox that
+doesn't fit, so the script asks for whole square cells and checks where the
+service will put the grid before taking it. Open water is marked by flooding
+out from a few seed points: lakes at their seed's exact (hydro-flattened)
+height, the Sound at or below sea level. A terrain failure is a warning only;
+Tilt then stands the trees on a flat slab.
 
 Planted dates before 1993 are mostly the city's first inventory (1990–92)
 rather than real planting years; trees.exe says so on its timeline. The city

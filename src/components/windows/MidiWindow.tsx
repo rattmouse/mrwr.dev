@@ -1969,7 +1969,8 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
     ? `${last.channel == null ? "--" : `CH${String(last.channel).padStart(2, "0")}`} ${last.type}`
     : "MPK mini PLUS";
   const lastDetail = last ? (knobReadout(last) ?? (last.detail || last.bytes)) : "ready";
-  const transport = `▶ ${formatTransport(playPos)} / ${formatTransport(playTotal)}`;
+  // \uFE0E keeps ▶ a plain character on the LCD; phones otherwise draw it as emoji.
+  const transport = `▶\uFE0E ${formatTransport(playPos)} / ${formatTransport(playTotal)}`;
 
   // ---- Panel parts, shared by both layouts --------------------------------
 
@@ -2393,7 +2394,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             held or latched, and which program. */}
         <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 3 }}>
           <PanelButton
-            label="◀"
+            label={"◀\uFE0E"}
             ariaLabel="Keys down an octave"
             weight={0.6}
             disabled={!canShiftKeys(-1)}
@@ -2411,7 +2412,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             {rangeLabel}
           </span>
           <PanelButton
-            label="▶"
+            label={"▶\uFE0E"}
             ariaLabel="Keys up an octave"
             weight={0.6}
             disabled={!canShiftKeys(1)}
@@ -2621,7 +2622,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
           >
             <div style={{ flex: "0 0 64px", display: "flex" }}>
               <PanelButton
-                label="◀ oct"
+                label={"◀\uFE0E oct"}
                 disabled={!canShiftKeys(-1)}
                 onClick={() => shiftOctave(-1)}
               />
@@ -2631,7 +2632,7 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
             </span>
             <div style={{ flex: "0 0 64px", display: "flex" }}>
               <PanelButton
-                label="oct ▶"
+                label={"oct ▶\uFE0E"}
                 disabled={!canShiftKeys(1)}
                 onClick={() => shiftOctave(1)}
               />

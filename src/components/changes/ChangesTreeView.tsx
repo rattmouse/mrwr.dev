@@ -155,7 +155,7 @@ const ChangesTreeView = forwardRef<ChangesTreeViewHandle, Props>(function Change
               }}
             >
               <span aria-hidden style={{ flex: "0 0 8px", fontSize: 9, lineHeight: "16px" }}>
-                {isOpen ? "▼" : "▶"}
+                {isOpen ? "▼" : "▶\uFE0E"}
               </span>
               <span style={{ flex: "1 1 auto", minWidth: 0 }}>
                 <span style={{ display: "block", fontSize: 12, lineHeight: "16px" }}>

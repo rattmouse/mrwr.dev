@@ -116,8 +116,8 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
 
   if [[ "$SKIP_TREES" -ne 1 ]]; then
     log "Refreshing street trees..."
-    # public/trees/trees.bin.gz is gitignored — Seattle's street trees for
-    # trees.exe, a static file the window fetches from this site. Best-effort
+    # public/trees/ is gitignored — Seattle's street trees for trees.exe and
+    # the ground under them, static files the window fetches from this site. Best-effort
     # (trees.exe says so when the file is missing), and it skips the download
     # while the file is under a week old.
     "$REPO_ROOT/scripts/content/refresh-trees.sh" \

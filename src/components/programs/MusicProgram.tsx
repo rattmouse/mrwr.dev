@@ -7,6 +7,7 @@ import StrudelReplWindow, { StrudelReplHandle } from "@/components/windows/Strud
 import { ProgramProps, submenuTopForRow, windowFrame } from "@/components/programs/programFrame";
 import strudelSongs from "@/data/strudelSongs.json";
 import { loadSettings, saveSettings } from "@/lib/savedSettings";
+import { PlayIcon, StopIcon } from "@/components/common/MediaGlyphs";
 
 const SONG_ICON_FILES = [
   "../w98_midi_bl.ico",
@@ -268,31 +269,28 @@ export default function MusicProgram(props: ProgramProps) {
           </div>
         )}
       </div>
+      {/* The same transport glyphs as player.exe and every other player here. */}
       <Button
         size="sm"
-        style={{
-          transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)`,
-          fontWeight: "bold",
-        }}
+        square
+        style={{ transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)` }}
         active={strudelPlaying}
         aria-label="Play"
         title="Play"
         onClick={() => void strudelRef.current?.play()}
       >
-        Play
+        <PlayIcon />
       </Button>
       <Button
         size="sm"
-        style={{
-          transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)`,
-          fontWeight: "bold",
-        }}
+        square
+        style={{ transform: `translate(${musicTextJitter.x}px, ${musicTextJitter.y}px)` }}
         active={!strudelPlaying}
         aria-label="Stop"
         title="Stop"
         onClick={() => void strudelRef.current?.stop()}
       >
-        Stop
+        <StopIcon />
       </Button>
       <Button
         size="sm"
