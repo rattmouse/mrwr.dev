@@ -61,7 +61,7 @@ export type Ground = {
   by: number;
 };
 
-const WATER = pack(26, 50, 84);
+export const WATER = pack(26, 50, 84);
 const SIDE = pack(46, 37, 30);
 const SIDE_WATER = pack(18, 32, 52);
 const FLAT_LAND = pack(60, 68, 52);

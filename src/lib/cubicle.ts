@@ -13,6 +13,7 @@
  */
 
 import { Tint, Vec3, vec } from "@/lib/marbles3d";
+import type { Difficulty } from "@/lib/tasksGame";
 
 /**
  * postMessage type for flipping the room's lights from outside the frame —
@@ -29,20 +30,26 @@ export const DOOR_MESSAGE_TYPE = "cubicles:unlock-door";
 
 /**
  * Set once tasks.exe has been survived to 5 o'clock on the computer on the
- * desk — the only thing that gets unlock.exe past "Permission denied". Kept in
- * localStorage, so a finished day stays finished.
+ * desk — the only thing that gets unlock.exe past "Permission denied" — and
+ * holding which difficulty the day was worked on, which decides whether the
+ * doors down the hallway open (hallDoorsOpen). The latest day counts. Kept in localStorage,
+ * so a finished day stays finished; a bare "1" is from before the
+ * difficulty was kept, and counts as Easy.
  */
 const CLOCKED_OUT_KEY = "cubicles:clocked-out";
-export function hasClockedOut(): boolean {
+export function clockedOutAs(): Difficulty | null {
   try {
-    return window.localStorage.getItem(CLOCKED_OUT_KEY) === "1";
+    const kept = window.localStorage.getItem(CLOCKED_OUT_KEY);
+    if (kept === "medium" || kept === "hard") return kept;
+    return kept ? "easy" : null;
   } catch {
-    return false;
+    return null;
   }
 }
-export function markClockedOut() {
+export const hasClockedOut = () => clockedOutAs() !== null;
+export function markClockedOut(difficulty: Difficulty) {
   try {
-    window.localStorage.setItem(CLOCKED_OUT_KEY, "1");
+    window.localStorage.setItem(CLOCKED_OUT_KEY, difficulty);
   } catch {
     // No storage, no record: they'll have to work another day.
   }
@@ -530,16 +537,53 @@ export const closeDoor = () => {
 };
 
 /**
- * Where the hallway behind the door ends. It is exactly as wide and as tall as
- * the doorway and it runs on into the fog, lit every few metres, with doors
- * down both sides that don't open either. At the far end is the office again
- * (see OTHER_END), and walking into it walks you back in through the door you
- * left by (see throughTheEnd).
+ * The doors down the hallway, and the places in the city behind them —
+ * trees.exe's city, stood in (TreesWalk). Which way to face is radians
+ * clockwise from north, and above level.
  */
-const HALL_END = FLOOR.maxZ + 24;
+export type DropIn = { name: string; lat: number; lon: number; yaw: number; pitch: number };
+const deg = (d: number) => (d * Math.PI) / 180;
+export const DROP_INS: DropIn[] = [
+  { name: "Green Lake", lat: 47.678879, lon: -122.344809, yaw: deg(33), pitch: 0.057 },
+  { name: "Gas Works Park", lat: 47.644588, lon: -122.336976, yaw: deg(215), pitch: 0.03 },
+  { name: "Alki Beach", lat: 47.580927, lon: -122.407961, yaw: deg(70), pitch: 0.03 },
+  { name: "Golden Gardens", lat: 47.69021, lon: -122.403885, yaw: deg(340), pitch: 0.03 },
+  { name: "Seward Park", lat: 47.553597, lon: -122.254523, yaw: deg(300), pitch: 0.03 },
+  { name: "Washington Park Arboretum", lat: 47.644938, lon: -122.2955, yaw: deg(0), pitch: 0.03 },
+];
+
+/**
+ * Whether the doors down the hallway open: only for a day worked on Medium or
+ * Hard. Easy's way out is the hallway itself, and the office again at the end
+ * of it. Hard's city weighs next to nothing (outsideIsLight).
+ */
+export const hallDoorsOpen = () => {
+  const day = clockedOutAs();
+  return day === "medium" || day === "hard";
+};
+export const outsideIsLight = () => clockedOutAs() === "hard";
+
+/**
+ * Where the hallway behind the door ends. It is exactly as wide and as tall as
+ * the doorway and it runs on into the fog, lit every few metres, with a door
+ * every few metres down alternate sides, one for each of DROP_INS. At the far
+ * end is the office again (see OTHER_END), and walking into it walks you back
+ * in through the door you left by (see throughTheEnd).
+ */
+const HALL_DOOR_FIRST = 4;
+const HALL_DOOR_EVERY = 6;
+const HALL_END = FLOOR.maxZ + HALL_DOOR_FIRST + HALL_DOOR_EVERY * DROP_INS.length;
 const HALL_LIGHT_EVERY = 4;
-const HALL_DOOR_EVERY = 9;
 const HALL_SECTION = 4;
+/** Half a hallway door's width, along the wall. */
+const HALL_DOOR_HALF = 0.42;
+const HALL_DOOR_TOP = 1.9;
+
+/** Each hallway door: where along the hallway it is, and which wall it's in (−1 the wall towards −x, 1 towards +x). */
+const HALL_DOORS = DROP_INS.map((_, k) => ({
+  z: FLOOR.maxZ + HALL_DOOR_FIRST + k * HALL_DOOR_EVERY,
+  side: k % 2 ? 1 : -1,
+}));
 
 /**
  * The hallway is a tube seen from inside, and the painter sorts by each face's
@@ -569,12 +613,10 @@ const HALL: Box[] = (() => {
   for (let z = FLOOR.maxZ + HALL_LIGHT_EVERY / 2; z < HALL_END - 1; z += HALL_LIGHT_EVERY) {
     hall.push(box(vec(DOOR.x, DOOR.top - 0.012, z), vec(DOOR.halfW * 0.6, 0.012, 0.3), LIT, { glow: true, ...INSIDE_TUBE }));
   }
-  let side = -1;
-  for (let z = FLOOR.maxZ + HALL_DOOR_EVERY / 2; z < HALL_END - 3; z += HALL_DOOR_EVERY) {
+  for (const { z, side } of HALL_DOORS) {
     const x = DOOR.x + side * (DOOR.halfW - 0.012);
-    hall.push(box(vec(x, 0.95, z), vec(0.012, 0.95, 0.42), DOOR_WOOD, INSIDE_TUBE));
+    hall.push(box(vec(x, HALL_DOOR_TOP / 2, z), vec(0.012, HALL_DOOR_TOP / 2, HALL_DOOR_HALF), DOOR_WOOD, INSIDE_TUBE));
     hall.push(box(vec(x - side * 0.03, 1.0, z + 0.3), vec(0.02, 0.018, 0.05), METAL, { bias: INSIDE_TUBE.bias + 1 }));
-    side = -side;
   }
   return hall;
 })();
@@ -600,6 +642,29 @@ function otherEnd(b: Box): Box {
 
 /** The unchanging part of it, turned once and kept. The monitor is left to be turned each frame. */
 let otherRoom: Box[] | null = null;
+
+/**
+ * Which hallway door a ray meets within reach, by its index in DROP_INS, or
+ * null. Only from in the hallway.
+ */
+export function aimAtHallDoor(from: Vec3, dir: Vec3, range = USE_RANGE): number | null {
+  if (!doorOpen || from.z < FLOOR.maxZ) return null;
+  for (let k = 0; k < HALL_DOORS.length; k++) {
+    const { z, side } = HALL_DOORS[k];
+    if (dir.x * side <= 1e-6) continue;
+    const t = (DOOR.x + side * (DOOR.halfW - 0.024) - from.x) / dir.x;
+    if (t <= 0 || t > range) continue;
+    const hitZ = from.z + dir.z * t;
+    const hitY = from.y + dir.y * t;
+    if (Math.abs(hitZ - z) <= HALL_DOOR_HALF && hitY >= 0 && hitY <= HALL_DOOR_TOP) return k;
+  }
+  return null;
+}
+
+/** Back in from a hallway door: stood in front of it, facing on down the hallway. */
+export function besideHallDoor(k: number): Pose {
+  return { pos: vec(DOOR.x, EYE_STANDING, HALL_DOORS[k].z), yaw: Math.PI, pitch: 0, fov: STANDING.fov };
+}
 
 /** The hallway, and the office again at the end of it — nothing at all while the door is shut. */
 export function hallBoxes(): Box[] {

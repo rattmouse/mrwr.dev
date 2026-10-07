@@ -26,7 +26,12 @@ import {
   unlockDoor,
   throughTheEnd,
   MONITOR_MESSAGE_TYPE,
+  DROP_INS,
+  aimAtHallDoor,
+  besideHallDoor,
+  hallDoorsOpen,
   nextMonitorScale,
+  outsideIsLight,
   setMonitorScale,
   aimAtDoor,
   aimAtScreen,
@@ -36,8 +41,10 @@ import {
   walk,
 } from "@/lib/cubicle";
 import { Face, Skin, VOID, collectGlass, collectRoom, glassQuad, paintFaces, quadTransform } from "@/lib/cubicleDraw";
+import TreesWalk from "@/components/windows/TreesWalk";
 
 type Phase = "intro" | "standing" | "seated";
+
 
 /** As close to the far wall as the room lets you stand. */
 const ROOM_EDGE = FLOOR.maxZ - PLAYER_RADIUS + 1e-3;
@@ -203,6 +210,11 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
   // eyes.exe, same deal: the whole view goes the way a dying graphics card
   // draws it — see TRIP_CSS — until it's run again.
   const [tripping, setTripping] = useState(false);
+  // Out through one of the hallway's doors (hallDoorsOpen): the office gives
+  // way to trees.exe's city, with you stood in it (TreesWalk) at the door's
+  // place in DROP_INS, until you come back.
+  const [outside, setOutside] = useState<{ door: number; light: boolean } | null>(null);
+  const outsideRef = useRef(false);
   /** Re-measures the glass after upgrade.exe has swapped the monitor. */
   const refitRef = useRef<() => void>(() => {});
   // The monitor is shared module state; a fresh cubicle starts with the one it was issued.
@@ -251,13 +263,39 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     phaseRef.current = into;
   }, []);
 
+  /**
+   * Trying one of the hallway's doors: locked after an Easy day, it rattles;
+   * otherwise it's the way out to its place in the city. Coming back puts you
+   * in the hallway in front of it, facing on down it.
+   */
+  const tryHallDoor = useCallback((door: number) => {
+    if (!hallDoorsOpen()) {
+      rattledRef.current = performance.now();
+      return;
+    }
+    if (outsideRef.current) return;
+    outsideRef.current = true;
+    keysRef.current.clear();
+    stickRef.current = { x: 0, y: 0 };
+    setStick({ x: 0, y: 0 });
+    setPrompt(null);
+    setOutside({ door, light: outsideIsLight() });
+  }, []);
+  const comeBack = useCallback(() => {
+    const door = outside?.door ?? 0;
+    poseRef.current = besideHallDoor(door);
+    standPoseRef.current = besideHallDoor(door);
+    outsideRef.current = false;
+    setOutside(null);
+  }, [outside]);
+
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
       target instanceof HTMLElement &&
       (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
 
     const down = (event: KeyboardEvent) => {
-      if (!focusedRef.current) return;
+      if (!focusedRef.current || outsideRef.current) return;
       if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.code === "Escape") {
         if (phaseRef.current === "seated") {
@@ -270,7 +308,9 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       if (event.code === "KeyE") {
         const pose = poseRef.current;
         const look = gaze(pose.yaw, pose.pitch);
-        if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
+        const hall = aimAtHallDoor(pose.pos, look);
+        if (hall !== null) tryHallDoor(hall);
+        else if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
         else if (atTheDoor(pose.pos, look)) tryDoor();
         event.preventDefault();
         return;
@@ -293,7 +333,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [sit]);
+  }, [sit, tryHallDoor]);
 
   /* --------------------------------------------------------- the pointer */
 
@@ -344,7 +384,9 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     const at = canvasPoint(event);
     const pose = poseRef.current;
     const look = rayThrough(at.x, at.y, at.width, at.height);
-    if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
+    const hall = aimAtHallDoor(pose.pos, look);
+    if (hall !== null) tryHallDoor(hall);
+    else if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
     else if (atTheDoor(pose.pos, look)) tryDoor();
   };
 
@@ -432,6 +474,11 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     const loop = (now: number) => {
       const dt = Math.min(now - last, 50) / 1000;
       last = now;
+      // Nobody in the office to draw it for.
+      if (outsideRef.current) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
       const { width, height } = sizeRef.current;
 
       const sitting = sitRef.current;
@@ -477,7 +524,11 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       const rattling = now - rattledRef.current < RATTLE_MS;
       if (phaseRef.current === "standing" && !sitRef.current) {
         const look = gaze(pose.yaw, pose.pitch);
-        if (aimAtScreen(pose.pos, look, USE_RANGE)) {
+        const hall = aimAtHallDoor(pose.pos, look);
+        if (hall !== null) {
+          if (hallDoorsOpen()) hint = `${DROP_INS[hall].name} — click, or E`;
+          else hint = rattling ? "It doesn't budge." : "Locked — click, or E";
+        } else if (aimAtScreen(pose.pos, look, USE_RANGE)) {
           hint = "Use the computer — click, or E";
         } else if (atTheDoor(pose.pos, look, DOOR_RANGE)) {
           if (isDoorOpen()) hint = "Close the door — click, or E";
@@ -551,7 +602,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     };
   }, [nested, rayThrough]);
 
-  const walking = phase === "standing";
+  const walking = phase === "standing" && !outside;
 
   return (
     <div
@@ -733,7 +784,11 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         </div>
       )}
 
-      {phase === "seated" && (
+      {outside && (
+        <TreesWalk key={outside.door} active={active} onLeave={comeBack} light={outside.light} landing={DROP_INS[outside.door]} />
+      )}
+
+      {phase === "seated" && !outside && (
         <Button
           onClick={() => sit("standing")}
           size="sm"
