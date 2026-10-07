@@ -478,15 +478,19 @@ function scheduleProbeDigest() {
 // Caddy, on this same box, is the only thing that should talk to us — trust
 // its X-Forwarded-For so req.ip is the visitor, not 127.0.0.1.
 app.set("trust proxy", "loopback");
-app.use(tripwire);
 
-app.use(express.json());
+// Real files win over the tripwire: trees.exe's /trees/*.bin.gz would trip
+// the "backup" trap otherwise. Misses (and dotfiles, which static ignores)
+// fall through to it.
 app.use(express.static(OUT_DIR, {
   extensions: ["html"],
   etag: true,
   maxAge: "1h",
 })
 );
+app.use(tripwire);
+
+app.use(express.json());
 
 // Fallback to index.html for “routes” (not real files)
 app.get(/^(?!.*\.).*$/, (req, res) => {
