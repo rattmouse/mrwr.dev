@@ -52,6 +52,8 @@ src/data/probes.json
 src/data/projects.json
 /public/projects/remote/
 /public/collections
+# build-time Seattle street trees for trees.exe (see scripts/content/refresh-trees.sh)
+/public/trees/
 
 # durable search-log archive written by server.js at runtime (issue #55)
 /search-log.ndjson*

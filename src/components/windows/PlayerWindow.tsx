@@ -9,6 +9,17 @@ import React, {
   useState,
 } from "react";
 import { Button, MenuList, MenuListItem, ScrollView, Slider } from "react95";
+import {
+  FilmIcon,
+  Glyph,
+  NextIcon,
+  NoteIcon,
+  PauseIcon,
+  PlayIcon,
+  PrevIcon,
+  StopIcon,
+  WarningIcon,
+} from "@/components/common/MediaGlyphs";
 import { auToWav, isAuName } from "@/lib/sunAu";
 
 export type PlayerWindowHandle = {
@@ -111,60 +122,9 @@ const SEEK_STEPS = 10;
 // end of the track by half that — pad for it, and measure positions inside it.
 const THUMB_INSET = 9;
 
-/* Toolbar glyphs, drawn on a 12px grid in flat black, square-edged so they
-   stay crisp like Windows 95's. Every button in the window uses one — the
-   transport included, rather than the ⏮ ⏹ ⏭ characters, which a font draws
-   in its own weight and shape and so never quite matched the rest. */
-function Glyph({ children }: { children: React.ReactNode }) {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      aria-hidden
-      shapeRendering="crispEdges"
-      style={{ display: "block" }}
-    >
-      {children}
-    </svg>
-  );
-}
-
-/* Transport trio. All three sit on the same 8×8 footprint as PauseIcon — a
-   bar and a stepped triangle either side of centre, mirrored between prev and
-   next — so the four buttons read as one row. */
-const PrevIcon = () => (
-  <Glyph>
-    <path d="M2 2h2v8H2z" fill="currentColor" />
-    <path d="M6 5h1v2H6zM7 4h1v4H7zM8 3h1v6H8zM9 2h1v8H9z" fill="currentColor" />
-  </Glyph>
-);
-
-const StopIcon = () => (
-  <Glyph>
-    <path d="M2 2h8v8H2z" fill="currentColor" />
-  </Glyph>
-);
-
-const NextIcon = () => (
-  <Glyph>
-    <path d="M2 2h1v8H2zM3 3h1v6H3zM4 4h1v4H4zM5 5h1v2H5z" fill="currentColor" />
-    <path d="M8 2h2v8H8z" fill="currentColor" />
-  </Glyph>
-);
-
-const PlayIcon = () => (
-  <Glyph>
-    <path d="M3 1h1v10H3zM4 2h1v8H4zM5 3h1v6H5zM6 4h1v4H6zM7 5h1v2H7z" fill="currentColor" />
-  </Glyph>
-);
-
-const PauseIcon = () => (
-  <Glyph>
-    <path d="M2 2h3v8H2zM7 2h3v8H7z" fill="currentColor" />
-  </Glyph>
-);
-
+/* Toolbar glyphs: the transport comes from MediaGlyphs, shared with every
+   other play and stop button on the desktop; the rest are player.exe's own,
+   on the same 12px grid. */
 const SpeakerIcon = ({ muted }: { muted: boolean }) => (
   <Glyph>
     <path d="M0 4h2v4H0zM2 4h1v4H2zM3 3h1v6H3zM4 2h1v8H4zM5 1h1v10H5z" fill="currentColor" />
@@ -892,8 +852,8 @@ const PlayerWindow = forwardRef<PlayerWindowHandle, { viz?: VizMode }>(function 
           >
             {track?.failed ? (
               <>
-                <span style={{ fontSize: 28 }} aria-hidden>
-                  ⚠️
+                <span style={{ color: "#ffd700" }} aria-hidden>
+                  <WarningIcon scale={3} />
                 </span>
                 <span>This browser can&rsquo;t play {track.name}</span>
               </>
@@ -902,12 +862,12 @@ const PlayerWindow = forwardRef<PlayerWindowHandle, { viz?: VizMode }>(function 
                 <span
                   aria-hidden
                   style={{
-                    fontSize: 32,
+                    color: "#c0c0c0",
                     display: "inline-block",
                     animation: playing ? "player-bob 1s ease-in-out infinite" : undefined,
                   }}
                 >
-                  {shown.kind === "video" ? "🎞️" : "🎵"}
+                  {shown.kind === "video" ? <FilmIcon scale={3} /> : <NoteIcon scale={3} />}
                 </span>
                 <span style={{ color: "#fff", fontWeight: "bold", wordBreak: "break-word" }}>
                   {stripExt(shown.name)}
@@ -1148,8 +1108,8 @@ const PlayerWindow = forwardRef<PlayerWindowHandle, { viz?: VizMode }>(function 
                       outline: "none",
                     }}
                   >
-                    <span aria-hidden style={{ width: 14, flex: "0 0 14px" }}>
-                      {isCurrent && playing ? "▶" : t.kind === "video" ? "🎞" : "♪"}
+                    <span aria-hidden style={{ width: 14, flex: "0 0 14px", display: "flex", justifyContent: "center" }}>
+                      {isCurrent && playing ? <PlayIcon /> : t.kind === "video" ? <FilmIcon /> : <NoteIcon />}
                     </span>
                     <span style={{ flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {stripExt(t.name)}

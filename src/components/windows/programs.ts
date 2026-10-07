@@ -54,6 +54,13 @@ export const PROGRAMS = {
     menu: { label: "Changes", folder: "app" },
     shell: { blurb: "the version history." },
   },
+  bash: {
+    kind: "program",
+    title: "cmd.exe",
+    icon: "../w98_console_prompt.ico",
+    size: { width: 560, height: 360 },
+    menu: { label: "Terminal", folder: "tools" },
+  },
   notepad: {
     kind: "program",
     title: "notepad.exe",
@@ -77,13 +84,6 @@ export const PROGRAMS = {
     size: { width: 440, height: 420 },
     menu: { label: "Media", folder: "tools" },
     shell: { blurb: "plays whatever you give it." },
-  },
-  bash: {
-    kind: "program",
-    title: "cmd.exe",
-    icon: "../w98_console_prompt.ico",
-    size: { width: 560, height: 360 },
-    menu: { label: "Terminal", folder: "tools" },
   },
   collections: {
     kind: "document",
@@ -131,6 +131,14 @@ export const PROGRAMS = {
     size: { width: 620, height: 480 },
     menu: { label: "Tasks", folder: "toys" },
     shell: { blurb: "survive the workday." },
+  },
+  trees: {
+    kind: "program",
+    title: "trees.exe",
+    icon: "../w95_tree.ico",
+    size: { width: 460, height: 560 },
+    menu: { label: "Map", folder: "tools" },
+    shell: { blurb: "every street tree in Seattle, through the year." },
   },
   cubicles: {
     kind: "program",
