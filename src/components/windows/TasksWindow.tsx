@@ -12,15 +12,21 @@ import {
   PLAYER_RADIUS,
   REPLY_TEXT_MS,
   RunState,
+  SHIELD_TINT,
   SWING_MS,
   StatLine,
   Upgrade,
   applyUpgrade,
+  DIFFICULTIES,
+  DIFFICULTY_ORDER,
+  Difficulty,
   createRun,
   enemyKind,
+  lineAlpha,
   ownedUpgrades,
   pauseRun,
   resumeRun,
+  shieldCharge,
   statLines,
   stepRun,
   workdayClock,
@@ -142,6 +148,63 @@ function drawSwing(ctx: CanvasRenderingContext2D, run: RunState, now: number) {
   ctx.restore();
 }
 
+/** PTO: a full ring round the player while it's charged, filling back in while it recharges. */
+function drawShield(ctx: CanvasRenderingContext2D, run: RunState, now: number) {
+  const charge = shieldCharge(run);
+  if (charge === null) return;
+  const r = PLAYER_RADIUS + 9;
+  ctx.save();
+  ctx.translate(run.player.x, run.player.y);
+  ctx.lineWidth = 2;
+  if (charge >= 1) {
+    ctx.strokeStyle = SHIELD_TINT;
+    ctx.globalAlpha = 0.55 + 0.25 * Math.sin(now / 260);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = SHIELD_TINT;
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, -Math.PI / 2 + charge * Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * What the reply said rides out with the swing: launched from the player the
+ * way the wedge is aimed, out to the edge of its reach, then fading there.
+ */
+function drawReply(ctx: CanvasRenderingContext2D, run: RunState, now: number) {
+  const t = (now - run.swingAt) / REPLY_TEXT_MS;
+  if (!run.replyLine || t < 0 || t > 1) return;
+  const px = 11;
+  ctx.font = `600 ${px}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+  const halfW = ctx.measureText(run.replyLine).width / 2 + 5;
+  const halfH = (px + 5) / 2;
+  const ax = Math.cos(run.swingAngle);
+  const ay = Math.sin(run.swingAngle);
+  // Out over the swing's first stretch, easing to a stop; the pill's near
+  // edge travels from the player to the reach, so a sideways swing doesn't
+  // leave the text sitting on top of whoever sent it.
+  const travel = 1 - Math.pow(1 - Math.min(1, (now - run.swingAt) / (SWING_MS * 1.5)), 3);
+  const from = PLAYER_RADIUS + 4;
+  const to = Math.max(from, run.stats.attackRange - (Math.abs(ax) * halfW + Math.abs(ay) * halfH) * 2);
+  const edge = from + (to - from) * travel;
+  const centre = edge + Math.abs(ax) * halfW + Math.abs(ay) * halfH;
+  const x = run.player.x + ax * centre;
+  const y = run.player.y + ay * centre;
+  const fade = Math.max(0, (t - 0.45) / 0.55);
+  ctx.globalAlpha = 1 - fade * fade;
+  drawSpeech(ctx, x, y + halfH, run.replyLine, "#dff1ff", px);
+  ctx.globalAlpha = 1;
+}
+
 function draw(ctx: CanvasRenderingContext2D, run: RunState, width: number, height: number, now: number, sheet: GuySheet | null) {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#0a0c16";
@@ -202,7 +265,12 @@ function draw(ctx: CanvasRenderingContext2D, run: RunState, width: number, heigh
       ctx.fillStyle = "#ef4444";
       ctx.fillRect(enemy.x - w / 2, top, w * Math.max(0, enemy.hp / enemy.maxHp), 4);
     }
-    drawSpeech(ctx, enemy.x, enemy.y - kind.size / 2 - 14, enemy.line, kind.tint);
+    const alpha = lineAlpha(run, enemy);
+    if (alpha > 0) {
+      ctx.globalAlpha = alpha;
+      drawSpeech(ctx, enemy.x, enemy.y - kind.size / 2 - 14, enemy.line, kind.tint);
+      ctx.globalAlpha = 1;
+    }
   }
 
   drawSwing(ctx, run, now);
@@ -212,13 +280,9 @@ function draw(ctx: CanvasRenderingContext2D, run: RunState, width: number, heigh
   if (flashing) ctx.globalAlpha = 0.4;
   drawFigure(ctx, sheet, run.player.x, run.player.y, PLAYER_TINT, 0, run.player.facing, now, 30);
   ctx.restore();
+  drawShield(ctx, run, now);
 
-  const replyT = (now - run.swingAt) / REPLY_TEXT_MS;
-  if (run.replyLine && replyT >= 0 && replyT <= 1) {
-    ctx.globalAlpha = 1 - replyT * replyT;
-    drawSpeech(ctx, run.player.x, run.player.y - 22 - replyT * 18, run.replyLine, "#dff1ff", 11);
-    ctx.globalAlpha = 1;
-  }
+  drawReply(ctx, run, now);
 
   ctx.textAlign = "center";
   ctx.font = "700 12px ui-sans-serif, system-ui, -apple-system, sans-serif";
@@ -246,7 +310,7 @@ function RunReport({
   owned,
   emptyNote = "Nothing yet \u2014 level up and pick something.",
 }: {
-  summary: { kills: number; level: number; elapsedMs: number };
+  summary: { kills: number; level: number; elapsedMs: number; difficulty: Difficulty };
   stats: StatLine[];
   owned: OwnedUpgrade[];
   emptyNote?: string;
@@ -255,7 +319,8 @@ function RunReport({
     <>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
         <span>
-          <strong>{workdayClock(summary.elapsedMs)}</strong> &middot; level {summary.level}
+          <strong>{workdayClock(summary.elapsedMs)}</strong> &middot; level {summary.level} &middot;{" "}
+          {DIFFICULTIES[summary.difficulty].label}
         </span>
         <span>
           {summary.kills} task{summary.kills === 1 ? "" : "s"} closed
@@ -329,7 +394,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
   const [owned, setOwned] = useState<OwnedUpgrade[]>([]);
   const [stats, setStats] = useState<StatLine[]>([]);
   const [stick, setStick] = useState({ x: 0, y: 0 });
-  const [summary, setSummary] = useState({ kills: 0, level: 1, elapsedMs: 0 });
+  const [summary, setSummary] = useState({ kills: 0, level: 1, elapsedMs: 0, difficulty: "medium" as Difficulty });
 
   useEffect(() => {
     let cancelled = false;
@@ -358,7 +423,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
           setStick({ x: 0, y: 0 });
           setOwned(ownedUpgrades(run));
           setStats(statLines(run));
-          setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs });
+          setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs, difficulty: run.difficulty });
           setPhase("paused");
         } else if (run.phase === "paused") {
           resumeRun(run, performance.now());
@@ -389,8 +454,8 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
     };
   }, []);
 
-  const start = useCallback(() => {
-    const run = createRun();
+  const start = useCallback((difficulty: Difficulty) => {
+    const run = createRun(difficulty);
     run.phase = "playing";
     runRef.current = run;
     // The stick unmounts with the run that ended, so its last push has to be
@@ -403,6 +468,12 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
     setOwned([]);
     setStats([]);
     setPhase("playing");
+  }, []);
+
+  /** Back to the clock-in card, to pick a different difficulty. */
+  const chooseDifficulty = useCallback(() => {
+    runRef.current = createRun(runRef.current.difficulty);
+    setPhase("ready");
   }, []);
 
   const counts: Record<string, number> = {};
@@ -428,7 +499,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
     setStick({ x: 0, y: 0 });
     setOwned(ownedUpgrades(run));
     setStats(statLines(run));
-    setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs });
+    setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs, difficulty: run.difficulty });
     setPhase("paused");
   }, []);
 
@@ -495,7 +566,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
           setChoices(run.choices);
           setOwned(ownedUpgrades(run));
           setStats(statLines(run));
-          setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs });
+          setSummary({ kills: run.kills, level: run.level, elapsedMs: run.elapsedMs, difficulty: run.difficulty });
         }
       }
 
@@ -582,8 +653,14 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
                   <br></br>
                   Survive to 5 PM.
                 </p>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <Button onClick={start}>Clock in</Button>
+                <p style={{ fontSize: 12, margin: "0 0 6px" }}>Clock in on:</p>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {DIFFICULTY_ORDER.map((id) => (
+                    <Button key={id} onClick={() => start(id)} style={{ flex: "1 1 0", height: "auto", padding: "5px 4px", flexDirection: "column" }}>
+                      <span style={{ fontWeight: "bold", fontSize: 12 }}>{DIFFICULTIES[id].label}</span>
+                      <span style={{ fontSize: 10, opacity: 0.75 }}>{DIFFICULTIES[id].blurb}</span>
+                    </Button>
+                  ))}
                 </div>
               </WindowContent>
             </Window>
@@ -603,7 +680,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
                         </span>
                         <div style={{ flex: "1 1 auto", minWidth: 0 }}>
                           <div style={{ fontWeight: "bold", fontSize: 12 }}>{upgrade.label}</div>
-                          <div style={{ fontSize: 11 }}>{upgrade.description}</div>
+                          <div style={{ fontSize: 11 }}>{upgrade.describe?.(runRef.current.stats) ?? upgrade.description}</div>
                         </div>
                         {counts[upgrade.id] > 0 && (
                           <span style={{ fontSize: 11, opacity: 0.7, whiteSpace: "nowrap" }}>
@@ -652,8 +729,9 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
                   <RunReport summary={summary} stats={stats} owned={owned} emptyNote="You never got to pick anything." />
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, flex: "0 0 auto" }}>
-                  <Button onClick={start}>Try again</Button>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 10, flex: "0 0 auto" }}>
+                  <Button onClick={chooseDifficulty}>Difficulty&hellip;</Button>
+                  <Button onClick={() => start(runRef.current.difficulty)}>Try again</Button>
                 </div>
               </WindowContent>
             </Window>
@@ -671,8 +749,9 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
                   <RunReport summary={summary} stats={stats} owned={owned} emptyNote="You took nothing all day." />
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, flex: "0 0 auto" }}>
-                  <Button onClick={start}>Go again</Button>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 10, flex: "0 0 auto" }}>
+                  <Button onClick={chooseDifficulty}>Difficulty&hellip;</Button>
+                  <Button onClick={() => start(runRef.current.difficulty)}>Go again</Button>
                 </div>
               </WindowContent>
             </Window>

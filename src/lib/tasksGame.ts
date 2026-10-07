@@ -30,35 +30,35 @@ export const ENEMY_KINDS: EnemyKind[] = [
     label: "Email",
     lines: ["Re: Re: Re:", "Quick question", "Just following up", "Per my last email", "Any update?", "Thoughts?", "Circling back", "Adding a few people"],
     tint: "#4fa3ff",
-    hp: 6, speed: 58, damage: 3, size: 26, xp: 3, unlockAt: 0, weight: 6,
+    hp: 6, speed: 37, damage: 8, size: 26, xp: 3, unlockAt: 0, weight: 6,
   },
   {
     id: "slack",
     label: "Slack ping",
     lines: ["got a sec?", "u around?", "@here", "quick q", "sorry to bother!", "did you see my DM?", "hey", "hey :)"],
     tint: "#34d399",
-    hp: 8, speed: 70, damage: 3, size: 26, xp: 3, unlockAt: 0, weight: 6,
+    hp: 8, speed: 45, damage: 8, size: 26, xp: 3, unlockAt: 0, weight: 6,
   },
   {
     id: "meeting",
     label: "Meeting invite",
     lines: ["Sync (30m)", "No agenda", "Recurring — weekly", "Anonymous Survey", "Quick chat?", "Standup", "Calendar hold"],
     tint: "#f59e0b",
-    hp: 22, speed: 34, damage: 6, size: 32, xp: 8, unlockAt: 0.15, weight: 4,
+    hp: 22, speed: 22, damage: 14, size: 32, xp: 8, unlockAt: 0.15, weight: 4,
   },
   {
     id: "bug",
     label: "Urgent bug",
     lines: ["segfault", "prod is down", "URGENT", "repro attached", "works on my machine", "needs a hotfix", "customer-facing!"],
     tint: "#ef4444",
-    hp: 15, speed: 83, damage: 7, size: 28, xp: 7, unlockAt: 0.32, weight: 3,
+    hp: 15, speed: 53, damage: 17, size: 28, xp: 7, unlockAt: 0.32, weight: 3,
   },
   {
     id: "review",
     label: "Performance review",
     lines: ["Self-assessment", "Growth areas", "Let's align on impact", "Mandatory trainings", "Boss knows you're playing at work", "Where do you see yourself?"],
     tint: "#a855f7",
-    hp: 50, speed: 27, damage: 10, size: 42, xp: 22, unlockAt: 0.65, weight: 1.5,
+    hp: 50, speed: 18, damage: 23, size: 42, xp: 22, unlockAt: 0.65, weight: 1.5,
   },
 ];
 
@@ -82,6 +82,21 @@ export const REPLY_LINES = [
   "Following up",
 ];
 
+export type Difficulty = "easy" | "medium" | "hard";
+
+/**
+ * Chosen when clocking in. Everything else about the day is the same at
+ * every level: easy pays out more XP per orb, hard sends more of the day at
+ * you (spawns come spawnScale times as often).
+ */
+export const DIFFICULTIES: Record<Difficulty, { label: string; blurb: string; xpScale: number; spawnScale: number }> = {
+  easy: { label: "Easy", blurb: "1.5x XP", xpScale: 1.5, spawnScale: 1 },
+  medium: { label: "Medium", blurb: "Standard day", xpScale: 1, spawnScale: 1 },
+  hard: { label: "Hard", blurb: "1.5x enemies", xpScale: 1, spawnScale: 1.5 },
+};
+
+export const DIFFICULTY_ORDER: Difficulty[] = ["easy", "medium", "hard"];
+
 export function enemyKind(id: EnemyKindId): EnemyKind {
   return ENEMY_KINDS.find((k) => k.id === id) ?? ENEMY_KINDS[0];
 }
@@ -96,20 +111,33 @@ export type PlayerStats = {
   attackInterval: number;
   /** Half-width of the cubicle: orbs inside that square drift to you. */
   cubicleSize: number;
+  /** Share of a hit the PTO shield soaks up, 0–1. Zero until PTO is picked. */
+  shieldBlock: number;
+  /** How long the PTO shield takes to recharge after blocking, in ms. */
+  shieldCooldown: number;
 };
 
 export const BASE_PLAYER_STATS: PlayerStats = {
-  moveSpeed: 160,
-  maxHp: 130,
+  moveSpeed: 128,
+  maxHp: 100,
   attackDamage: 9,
-  attackRange: 110,
-  attackArc: Math.PI * 0.75,
-  attackInterval: 700,
+  attackRange: 70,
+  attackArc: Math.PI * 0.6,
+  attackInterval: 875,
   cubicleSize: 52,
+  shieldBlock: 0,
+  shieldCooldown: 12000,
 };
 
 /** A full circle is as wide as the swing ever gets. */
 export const MAX_ATTACK_ARC = Math.PI * 2;
+
+/** PTO: the first pick blocks this much of a hit; each repeat adds the step. */
+const SHIELD_START_BLOCK = 0.5;
+const SHIELD_BLOCK_STEP = 0.15;
+/** Each repeat pick multiplies the cooldown by this, down to the floor. */
+const SHIELD_COOLDOWN_STEP = 0.8;
+const SHIELD_MIN_COOLDOWN = 3000;
 
 export type Upgrade = {
   id: string;
@@ -119,6 +147,8 @@ export type Upgrade = {
   apply: (stats: PlayerStats) => PlayerStats;
   /** A one-off heal, as a fraction of max HP, applied on pick. */
   healFraction?: number;
+  /** What picking it would do from here, when that depends on what you have. */
+  describe?: (stats: PlayerStats) => string;
 };
 
 export const UPGRADES: Upgrade[] = [
@@ -130,6 +160,24 @@ export const UPGRADES: Upgrade[] = [
   { id: "reach", label: "Wider Reach", emoji: "\ud83d\udccf", description: "+20% reply range", apply: (s) => ({ ...s, attackRange: s.attackRange * 1.2 }) },
   { id: "balance", label: "Work-Life Balance", emoji: "\u2696\ufe0f", description: "+20 max HP", apply: (s) => ({ ...s, maxHp: s.maxHp + 20 }) },
   { id: "lunch", label: "Lunch Break", emoji: "\ud83e\udd6a", description: "Heal 30% of your HP", apply: (s) => s, healFraction: 0.3 },
+  {
+    id: "pto",
+    label: "PTO Shield",
+    emoji: "\ud83c\udfd6\ufe0f",
+    description: "protects from some damage, then recharges",
+    describe: (s) =>
+      s.shieldBlock > 0
+        ? `-${Math.round((1 - SHIELD_COOLDOWN_STEP) * 100)}% cooldown, +${Math.round(SHIELD_BLOCK_STEP * 100)}% blocked`
+        : `Blocks ${Math.round(SHIELD_START_BLOCK * 100)}% damage, recharges in ${s.shieldCooldown / 1000}s`,
+    apply: (s) =>
+      s.shieldBlock > 0
+        ? {
+            ...s,
+            shieldBlock: Math.min(1, s.shieldBlock + SHIELD_BLOCK_STEP),
+            shieldCooldown: Math.max(SHIELD_MIN_COOLDOWN, s.shieldCooldown * SHIELD_COOLDOWN_STEP),
+          }
+        : { ...s, shieldBlock: SHIELD_START_BLOCK },
+  },
 ];
 
 export function upgradeById(id: string): Upgrade | undefined {
@@ -148,6 +196,10 @@ export const COLLECT_RADIUS = 12;
 export const SWING_MS = 220;
 export const REPLY_TEXT_MS = 900;
 export const HIT_TEXT_MS = 650;
+export const SHIELD_TINT = "#34d399";
+/** An enemy's line holds this long after it comes into view, then fades out over LINE_FADE_MS. */
+export const LINE_HOLD_MS = 1500;
+export const LINE_FADE_MS = 2500;
 
 export type Vec = { x: number; y: number };
 
@@ -164,6 +216,8 @@ export type Enemy = Vec & {
   kind: EnemyKindId;
   /** The one thing it wants, drawn over its head. */
   line: string;
+  /** Run time it first walked into view, which starts its line fading; null until then. */
+  seenAt: number | null;
   hp: number;
   maxHp: number;
   facing: 1 | -1;
@@ -188,6 +242,7 @@ export type OwnedUpgrade = { upgrade: Upgrade; count: number };
 
 export type RunState = {
   phase: GamePhase;
+  difficulty: Difficulty;
   player: Player;
   stats: PlayerStats;
   enemies: Enemy[];
@@ -208,6 +263,8 @@ export type RunState = {
   replyLine: string;
   /** Wall-clock time the run was paused, so wall-clock timers can be shifted back. */
   pausedAt: number;
+  /** Run time (elapsedMs) the PTO shield is charged again. */
+  shieldReadyAt: number;
   /** Upgrade ids in the order they were first picked, with pick counts. */
   owned: string[];
   ownedCounts: Record<string, number>;
@@ -215,9 +272,10 @@ export type RunState = {
   nextId: number;
 };
 
-export function createRun(): RunState {
+export function createRun(difficulty: Difficulty = "medium"): RunState {
   return {
     phase: "ready",
+    difficulty,
     player: { x: 0, y: 0, hp: BASE_PLAYER_STATS.maxHp, facing: 1, invulnUntil: 0, aim: { x: 1, y: 0 } },
     stats: { ...BASE_PLAYER_STATS },
     enemies: [],
@@ -234,6 +292,7 @@ export function createRun(): RunState {
     swingAngle: 0,
     replyLine: "",
     pausedAt: 0,
+    shieldReadyAt: 0,
     owned: [],
     ownedCounts: {},
     choices: [],
@@ -249,6 +308,16 @@ export function ownedUpgrades(run: RunState): OwnedUpgrade[] {
     if (upgrade) list.push({ upgrade, count: run.ownedCounts[id] ?? 1 });
   }
   return list;
+}
+
+/**
+ * How charged the PTO shield is, 0–1 (1 is ready to block), or null without
+ * PTO. Measured in run time, so a pause doesn't recharge it.
+ */
+export function shieldCharge(run: RunState): number | null {
+  if (run.stats.shieldBlock <= 0) return null;
+  const left = run.shieldReadyAt - run.elapsedMs;
+  return left <= 0 ? 1 : 1 - left / run.stats.shieldCooldown;
 }
 
 /** 9:00 to 5:00, mapped over the run's length, for the desk clock in the HUD. */
@@ -290,6 +359,7 @@ export function spawnEnemy(run: RunState, width: number, height: number, rand: (
     id: run.nextId++,
     kind: kind.id,
     line: kind.lines[Math.floor(rand() * kind.lines.length)] ?? kind.lines[0],
+    seenAt: null,
     x: run.player.x + dx,
     y: run.player.y + dy,
     hp: kind.hp,
@@ -326,13 +396,39 @@ export function updateEnemies(run: RunState, dt: number, now: number): void {
       enemy.y += (dy / dist) * kind.speed * dt;
       enemy.facing = dx < 0 ? -1 : 1;
     } else if (now >= run.player.invulnUntil) {
-      run.player.hp -= kind.damage;
+      let damage = kind.damage;
+      if (run.stats.shieldBlock > 0 && run.elapsedMs >= run.shieldReadyAt) {
+        damage -= Math.round(damage * run.stats.shieldBlock);
+        run.shieldReadyAt = run.elapsedMs + run.stats.shieldCooldown;
+        run.texts.push({ id: run.nextId++, x: run.player.x, y: run.player.y - PLAYER_RADIUS - 16, text: "PTO", color: SHIELD_TINT, bornAt: now });
+      }
+      run.player.hp -= damage;
       run.player.invulnUntil = now + I_FRAME_MS;
       run.player.x -= (dx / dist) * KNOCKBACK * 0.3;
       run.player.y -= (dy / dist) * KNOCKBACK * 0.3;
-      run.texts.push({ id: run.nextId++, x: run.player.x, y: run.player.y - PLAYER_RADIUS, text: `-${kind.damage}`, color: "#ff6b6b", bornAt: now });
+      if (damage > 0) run.texts.push({ id: run.nextId++, x: run.player.x, y: run.player.y - PLAYER_RADIUS, text: `-${damage}`, color: "#ff6b6b", bornAt: now });
     }
   }
+}
+
+/**
+ * Stamps each enemy the first time it's inside the view, so its line fades
+ * from when you could first read it rather than from its offscreen spawn.
+ */
+function markSeen(run: RunState, width: number, height: number): void {
+  for (const enemy of run.enemies) {
+    if (enemy.seenAt !== null) continue;
+    if (Math.abs(enemy.x - run.player.x) < width / 2 && Math.abs(enemy.y - run.player.y) < height / 2) {
+      enemy.seenAt = run.elapsedMs;
+    }
+  }
+}
+
+/** How visible an enemy's line is, 0–1. Run time, so a pause holds it. */
+export function lineAlpha(run: RunState, enemy: Enemy): number {
+  if (enemy.seenAt === null) return 1;
+  const t = run.elapsedMs - enemy.seenAt - LINE_HOLD_MS;
+  return t <= 0 ? 1 : Math.max(0, 1 - t / LINE_FADE_MS);
 }
 
 function grantXp(run: RunState, amount: number, now: number): void {
@@ -404,7 +500,7 @@ export function fireWeapon(run: RunState, now: number): boolean {
     }
     run.kills += 1;
     const kind = enemyKind(enemy.kind);
-    run.orbs.push({ id: run.nextId++, x: enemy.x, y: enemy.y, xp: kind.xp });
+    run.orbs.push({ id: run.nextId++, x: enemy.x, y: enemy.y, xp: Math.round(kind.xp * DIFFICULTIES[run.difficulty].xpScale) });
   }
   run.enemies = alive;
   return true;
@@ -496,6 +592,9 @@ export function statLines(run: RunState): StatLine[] {
     { label: "Reply arc", value: `${Math.round((s.attackArc * 180) / Math.PI)}\u00b0`, delta: pct(s.attackArc, base.attackArc) },
     { label: "Move speed", value: `${Math.round(s.moveSpeed)}`, delta: pct(s.moveSpeed, base.moveSpeed) },
     { label: "Cubicle", value: `${Math.round(s.cubicleSize * 2)} wide`, delta: pct(s.cubicleSize, base.cubicleSize) },
+    ...(s.shieldBlock > 0
+      ? [{ label: "PTO shield", value: `${Math.round(s.shieldBlock * 100)}% blocked`, delta: `every ${(s.shieldCooldown / 1000).toFixed(1)}s` }]
+      : []),
   ];
 }
 
@@ -505,6 +604,7 @@ export function stepRun(run: RunState, dx: number, dy: number, dt: number, now: 
   run.elapsedMs += dt * 1000;
   updatePlayer(run, dx, dy, dt);
   updateEnemies(run, dt, now);
+  markSeen(run, width, height);
 
   if (run.player.hp <= 0) {
     run.player.hp = 0;
@@ -514,7 +614,7 @@ export function stepRun(run: RunState, dx: number, dy: number, dt: number, now: 
 
   if (run.elapsedMs >= run.nextSpawnAt) {
     spawnEnemy(run, width, height, rand);
-    run.nextSpawnAt = run.elapsedMs + spawnIntervalMs(run.elapsedMs);
+    run.nextSpawnAt = run.elapsedMs + spawnIntervalMs(run.elapsedMs) / DIFFICULTIES[run.difficulty].spawnScale;
   }
 
   fireWeapon(run, now);

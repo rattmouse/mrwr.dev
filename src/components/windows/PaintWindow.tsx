@@ -44,6 +44,9 @@ export type PaintCommands = {
   flipHorizontal: () => void;
 };
 
+/** What the rotate and flip buttons do to a selection, the way it looks on screen. */
+export type SelectionTurn = "rotate" | "flipVertical" | "flipHorizontal";
+
 export type PaintWindowHandle = {
   clear: () => void;
   newFile: () => void;
@@ -61,6 +64,8 @@ export type PaintWindowHandle = {
   selectAll: () => void;
   /** Open Adjust colors on the selection, if there is one. */
   adjustColors: () => void;
+  /** Rotate or flip the selection. False when there isn't one, so the window turns instead. */
+  turnSelection: (way: SelectionTurn) => boolean;
   deselect: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -86,6 +91,8 @@ type PaintWindowProps = {
   map: boolean;
   /** How the window round the sheet has been turned; Save writes it that way round. */
   turn?: Turn;
+  /** Whether paint.exe is the focused window, and so the one the keyboard belongs to. */
+  active?: boolean;
 };
 
 const BG = "#ffffff";
@@ -223,8 +230,22 @@ type Drag =
   | { kind: "rect"; x0: number; y0: number; x1: number; y1: number }
   | { kind: "lasso"; pts: { x: number; y: number }[]; path: Path2D }
   | { kind: "move"; startX: number; startY: number; origX: number; origY: number; moved: boolean }
-  /** A handle held: `fx`/`fy` say which, `from` is the box it started as, `box` where it is now. */
-  | { kind: "resize"; fx: number; fy: number; startX: number; startY: number; from: Box; box: Box; moved: boolean }
+  /**
+   * A handle held: `fx`/`fy` say which, `from` is the box it started as, `box`
+   * where it is now, and `at` the pointer's last sheet point, so pressing or
+   * letting go of Shift can redo the box without waiting for it to move.
+   */
+  | {
+      kind: "resize";
+      fx: number;
+      fy: number;
+      startX: number;
+      startY: number;
+      from: Box;
+      box: Box;
+      at: { x: number; y: number };
+      moved: boolean;
+    }
   | { kind: "pan"; startX: number; startY: number; origX: number; origY: number }
   | WandDrag
   /** The dropper held down: it picks wherever it's let go, not where it landed. */
@@ -360,6 +381,16 @@ function shown(holder: { keyed?: Keyed }, source: HTMLCanvasElement, background:
   return holder.keyed.canvas;
 }
 
+/** A quarter turn or a mirror, as [a, b, c, d] the way a canvas's transform() takes it. */
+type Quarter = [number, number, number, number];
+/** `p` after `q`. */
+const times = (p: Quarter, q: Quarter): Quarter => [
+  p[0] * q[0] + p[2] * q[1],
+  p[1] * q[0] + p[3] * q[1],
+  p[0] * q[2] + p[2] * q[3],
+  p[1] * q[2] + p[3] * q[3],
+];
+
 const hex2 = (n: number) => n.toString(16).padStart(2, "0");
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -472,7 +503,19 @@ const TOOL_KEYS: Record<string, PaintTool> = {
 const WALK_SPEED = 600;
 
 const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function PaintWindow(
-  { color, secondary, transparent, brushSize, tool, onPickColor, onStatusChange, commands, map, turn = UPRIGHT },
+  {
+    color,
+    secondary,
+    transparent,
+    brushSize,
+    tool,
+    onPickColor,
+    onStatusChange,
+    commands,
+    map,
+    turn = UPRIGHT,
+    active = true,
+  },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1188,8 +1231,10 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
 
   /**
    * Where a handle has pulled the box to. The edges it doesn't hold stay put,
-   * and the box never turns itself inside out. Shift on a corner keeps the
-   * shape it started with.
+   * and the box never turns itself inside out. Shift keeps the shape it
+   * started with: on a corner, whichever way was pulled further wins and the
+   * other follows; on an edge, the other way grows or shrinks to match, about
+   * its middle.
    */
   const resizedBox = (
     drag: { fx: number; fy: number; startX: number; startY: number; from: Box },
@@ -1207,17 +1252,26 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     else if (fx === 1) right = Math.max(right + dx, left + 1);
     if (fy === 0) top = Math.min(top + dy, bottom - 1);
     else if (fy === 1) bottom = Math.max(bottom + dy, top + 1);
-    if (keepShape && fx !== 0.5 && fy !== 0.5) {
-      const ratio = from.w / from.h;
-      let w = right - left;
-      let h = bottom - top;
-      // Whichever way was pulled further wins, and the other follows it.
-      if (w / h > ratio) h = w / ratio;
-      else w = h * ratio;
+    if (keepShape) {
+      const sx = (right - left) / from.w;
+      const sy = (bottom - top) / from.h;
+      // Further means the bigger change of size, out or in.
+      const scale =
+        fy === 0.5 ? sx : fx === 0.5 ? sy : Math.abs(Math.log(sx)) >= Math.abs(Math.log(sy)) ? sx : sy;
+      const w = Math.max(1, from.w * scale);
+      const h = Math.max(1, from.h * scale);
       if (fx === 0) left = right - w;
-      else right = left + w;
+      else if (fx === 1) right = left + w;
+      else {
+        left = from.x + (from.w - w) / 2;
+        right = left + w;
+      }
       if (fy === 0) top = bottom - h;
-      else bottom = top + h;
+      else if (fy === 1) bottom = top + h;
+      else {
+        top = from.y + (from.h - h) / 2;
+        bottom = top + h;
+      }
     }
     const x = Math.round(left);
     const y = Math.round(top);
@@ -1243,6 +1297,49 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     next.base = base;
     setSelection(next);
   };
+
+  // ---- turning a selection ----------------------------------------------
+
+  /**
+   * Rotate the selection a quarter turn clockwise, or flip it, as it looks on
+   * screen — however the window round it has been turned — about its own
+   * middle. Nothing selected, it does nothing and says so, and the button that
+   * asked turns the whole window instead.
+   */
+  const turnSelection = (way: SelectionTurn) => {
+    const sel = selRef.current;
+    if (!sel) return false;
+    finishAdjustRef.current(true);
+    liftSelection();
+    // The step on screen, brought into the sheet: unturn, step, turn back.
+    const screen: Quarter =
+      way === "rotate" ? [0, 1, -1, 0] : way === "flipHorizontal" ? [-1, 0, 0, 1] : [1, 0, 0, -1];
+    const m = turnMatrix(turnRef.current);
+    const [a, b, c, d] = times([m[0], m[2], m[1], m[3]], times(screen, m));
+    const turned = (source: HTMLCanvasElement, readBack = false) => {
+      const { width: w, height: h } = source;
+      const out = a === 0 ? makeCanvas(h, w) : makeCanvas(w, h);
+      const octx = ctxOf(out, readBack);
+      // Shifted back so the turned picture starts at the corner again.
+      const e = -Math.min(0, a * w) - Math.min(0, c * h);
+      const f = -Math.min(0, b * w) - Math.min(0, d * h);
+      octx.setTransform(a, b, c, d, e, f);
+      octx.drawImage(source, 0, 0);
+      return out;
+    };
+    const mask = turned(sel.mask, true);
+    const next = makeSelection(
+      mask,
+      Math.round(sel.x + (sel.w - mask.width) / 2),
+      Math.round(sel.y + (sel.h - mask.height) / 2),
+      turned(sel.pixels),
+    );
+    if (!next) return false;
+    setSelection(next);
+    return true;
+  };
+  const turnSelectionRef = useRef(turnSelection);
+  turnSelectionRef.current = turnSelection;
 
   // ---- how big the sheet is --------------------------------------------
 
@@ -1880,12 +1977,16 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     [pasteCanvas],
   );
 
+  // Set by the paste event, so Ctrl+V can tell whether one ever came.
+  const pasteHeardRef = useRef(false);
+
   /**
    * Ctrl+V. A picture on the system clipboard — a screenshot, something copied
    * in another tab — comes in as it is; with none there, or when paint.exe's
    * own copy is the newer of the two, its own clipboard is pasted instead.
    */
-  const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+  const onPaste = (event: ClipboardEvent) => {
+    pasteHeardRef.current = true;
     if ((event.target as HTMLElement).closest("[data-paint-panel]")) return;
     const item = Array.from(event.clipboardData?.items ?? []).find((entry) =>
       entry.type.startsWith("image/"),
@@ -2039,6 +2140,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         startY: p.y,
         from,
         box: { ...from },
+        at: p,
         moved: false,
       };
       ensureLoop();
@@ -2202,6 +2304,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         liftSelection();
         if (!sel.base) sel.base = { pixels: sel.pixels, mask: sel.mask };
       }
+      drag.at = p;
       drag.box = resizedBox(drag, p, e.shiftKey);
       dirtyRef.current = true;
     } else {
@@ -2347,9 +2450,19 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     walkFrameRef.current = null;
   };
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+  /** Shift pressed or let go mid-resize takes effect straight away. */
+  const reshapeResize = (keepShape: boolean) => {
+    const drag = dragRef.current;
+    if (drag?.kind !== "resize" || !drag.moved) return;
+    drag.box = resizedBox(drag, drag.at, keepShape);
+    dirtyRef.current = true;
+    ensureLoop();
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
+    if (key === "shift") reshapeResize(true);
 
     // With Adjust colors open, Enter is OK and Escape is Cancel. Its sliders
     // keep their own arrow keys; anything else pressed over the picture lands
@@ -2436,8 +2549,15 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       return;
     }
     if (mod && key === "v") {
-      // Left for the paste event, which carries the system clipboard's picture;
-      // if nothing arrives, fall back to what paint.exe copied itself.
+      // Left for the paste event, which carries the system clipboard's picture.
+      // Some browsers only send one to a text box, so if none has turned up
+      // shortly after, paste what paint.exe copied itself.
+      pasteHeardRef.current = false;
+      window.setTimeout(() => {
+        if (pasteHeardRef.current || !CLIPBOARD) return;
+        finishAdjustRef.current(true);
+        paste();
+      }, 50);
       return;
     }
     if (mod) return;
@@ -2499,17 +2619,89 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     }
   };
 
-  const onKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+  const onKeyUp = (e: KeyboardEvent) => {
     const key = e.key.toLowerCase();
     if (key === "w" || key === "a" || key === "s" || key === "d") {
       walkKeysRef.current.delete(key);
       return;
     }
-    if (key === "shift") walkFastRef.current = false;
+    if (key === "shift") {
+      walkFastRef.current = false;
+      reshapeResize(false);
+    }
     if (e.key !== " ") return;
     spaceRef.current = false;
     if (dragRef.current?.kind !== "pan") setPanning(false);
   };
+
+  /**
+   * The keyboard belongs to paint.exe whenever it's the focused window, not
+   * only while the picture itself has the focus: a click on the toolbar, a
+   * menu row or a button that greys itself out all leave the focus somewhere
+   * else, and Ctrl+Z or Ctrl+V pressed then used to go nowhere. So the keys
+   * are heard on the whole page and kept only when they're paint.exe's.
+   */
+  const keysRef = useRef({ onKeyDown, onKeyUp, onPaste });
+  keysRef.current = { onKeyDown, onKeyUp, onPaste };
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  useEffect(() => {
+    if (!active) {
+      stopWalking();
+      spaceRef.current = false;
+      setPanning(false);
+    }
+  }, [active]);
+
+  useEffect(() => {
+    /** Whether a key or a paste aimed at `target` is paint.exe's, and how much of it. */
+    const claim = (target: EventTarget | null): "all" | "control" | "menu" | null => {
+      const wrap = wrapRef.current;
+      if (!activeRef.current || !wrap || !(target instanceof Element)) return null;
+      // On the picture, and in Adjust colors over it, everything is.
+      if (wrap.contains(target)) return "all";
+      // Somewhere to type keeps its own keys.
+      if (
+        (target instanceof HTMLElement && target.isContentEditable) ||
+        target.closest("input, textarea, select")
+      ) {
+        return null;
+      }
+      // Another window's keys are that window's.
+      const frame = target.closest("[data-desktop-window]");
+      if (frame && frame !== wrap.closest("[data-desktop-window]")) return null;
+      // A button, or a menu row, still answers to Space, Enter and the rest.
+      if (target.closest("[role=menu]")) return "menu";
+      return target.closest("button, a, [tabindex]") ? "control" : "all";
+    };
+    // What a focused button would want for itself; a menu wants Escape too.
+    const CONTROL_KEYS = new Set([" ", "enter", "tab", "arrowleft", "arrowright", "arrowup", "arrowdown"]);
+
+    const down = (e: KeyboardEvent) => {
+      const mine = claim(e.target);
+      if (!mine) return;
+      const key = e.key.toLowerCase();
+      const theirs = CONTROL_KEYS.has(key) || (mine === "menu" && key === "escape");
+      if (mine !== "all" && !(e.ctrlKey || e.metaKey) && theirs) return;
+      keysRef.current.onKeyDown(e);
+    };
+    // Letting go is always heard, so nothing is left held down.
+    const up = (e: KeyboardEvent) => {
+      if (activeRef.current) keysRef.current.onKeyUp(e);
+    };
+    const paste = (e: ClipboardEvent) => {
+      if (claim(e.target)) keysRef.current.onPaste(e);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("paste", paste);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("paste", paste);
+    };
+  }, []);
 
   // ---- sheet-wide actions ----------------------------------------------
 
@@ -2603,6 +2795,7 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
         zoomOut: () => zoomBy(1 / ZOOM_STEP),
         zoomReset,
         adjustColors: () => startAdjustRef.current(),
+        turnSelection: (way) => turnSelectionRef.current(way),
       }, () => finishAdjustRef.current(true)),
     [
       applySheet,
@@ -2701,9 +2894,19 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       onClick: () => pickColorAt(m.sheetX, m.sheetY, true),
     },
     "separator",
-    { label: "Rotate", onClick: () => commandsRef.current.rotate() },
-    { label: "Flip vertical", onClick: () => commandsRef.current.flipVertical() },
-    { label: "Flip horizontal", onClick: () => commandsRef.current.flipHorizontal() },
+    // On a selection they turn just that; otherwise the whole window.
+    {
+      label: m.hasSelection ? "Rotate selection" : "Rotate",
+      onClick: () => turnSelection("rotate") || commandsRef.current.rotate(),
+    },
+    {
+      label: m.hasSelection ? "Flip selection vertical" : "Flip vertical",
+      onClick: () => turnSelection("flipVertical") || commandsRef.current.flipVertical(),
+    },
+    {
+      label: m.hasSelection ? "Flip selection horizontal" : "Flip horizontal",
+      onClick: () => turnSelection("flipHorizontal") || commandsRef.current.flipHorizontal(),
+    },
   ];
 
   const sheetCursor = panning
@@ -2719,11 +2922,8 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
     <div
       ref={wrapRef}
       tabIndex={0}
-      onKeyDown={onKeyDown}
-      onKeyUp={onKeyUp}
       // Keys let go of while the picture wasn't listening would walk forever.
       onBlur={stopWalking}
-      onPaste={onPaste}
       onContextMenu={onContextMenu}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

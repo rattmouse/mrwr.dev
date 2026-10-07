@@ -3,16 +3,49 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
+      "version": "6.3",
+      "era": "claude",
+      "name": "Changelog",
+      "date": "2026-10-06",
+      "summary": "Changelog condensed; Tasks rebalance; Paint selection fixes",
+      "issues": [95],
+      "changes": [
+        "Changed: version history condensed to short entries",
+        "Changed: enemy movement speed reduced (tasks.exe)",
+        "Changed: enemy damage increased (tasks.exe)",
+        "Changed: starting health 130 → 100 (tasks.exe)",
+        "Changed: player speed, attack speed, reply reach and arc reduced (tasks.exe)",
+        "Added: PTO shield upgrade (tasks.exe). Blocks part of a hit; repeats cut cooldown, raise block",
+        "Changed: enemy messages fade out after entering view (tasks.exe)",
+        "Changed: reply text travels out along the swing arc (tasks.exe)",
+        "Added: Easy, Medium and Hard difficulty (tasks.exe). Easy 1.5x XP; Hard 1.5x enemies",
+        "Changed: rotate and flip target selection when present (paint.exe)",
+        "Fixed: Shift on any selection handle locks aspect ratio (paint.exe)",
+        "Fixed: Paint shortcuts after toolbar or menu clicks",
+        "Added: hourglass cursor during Grab (paint.exe)"
+      ]
+    },
+    {
       "version": "6.2.2",
       "era": "claude",
       "name": "Fluid",
       "date": "2026-10-05",
-      "summary": "Live ink under the crowd, and a party that spills out across the desktop.",
+      "summary": "Fluid ink surface; desktop party mode; Paint Grab tool; Collections sort and filter",
       "issues": [],
       "changes": [
-        "party.webp has a new Surface in its Palette: Fluid, a pool of live colored ink the crowd wanders through, nudging it along as they go. Whoever you pick, and anyone you've dressed differently, stirs it properly and leaves a wake of their own color. Stir it yourself with the mouse or a finger, tap to drop a splash, throw in a handful with Splash, Pause it mid-swirl or wipe it away, switch its Color, Shading, Bloom and Rays, set how fast it fades, how much it swirls and how big a splash is, and pick what it sits on — the desktop's own teal to start with. Frame > Party now lets the whole party out at once, ink and all: it spreads across the desktop behind the windows, and you can pick anyone out there with a click or a tap. The Palette now shows who it's dressing: whoever you've picked, drawn large, or a little group in the crowd's look when nobody is — and lists everyone you've dressed differently, to pick again or put back with the crowd. Any section of party.webp's panels you've changed shows a small ↺ after its name that puts it back to how it started, and the panel's own name has one for everything else in it; clicking a section's name no longer picks its first option",
-        "collections.exe can sort and filter now. Sort lines the tiles up in neat rows across the desktop \u2014 cards by Value, Name, Set or Rarity, albums by Artist or Title, paintings and songs by Newest or Oldest \u2014 and Shuffle throws them back into a heap. Type in the Filter box to show only what matches, or pick from the funnel menu: cards by rarity or set, albums by artist, paintings and songs by month; a sorted pile closes up around whatever's left. \u25c0 \u25b6 step through the pile in order, and resting the mouse on a tile out on the desktop shows what it is, down to a card's number, set and rarity",
-        "Paint's copy and paste is more dependable: Ctrl+V always brings back what you last copied in Paint, even when the browser wouldn't share it with the rest of the computer, and whatever you paste lands whole and in sight \u2014 the view backs out to take in something big, and anything bigger than the picture itself is shrunk to fit. Selections can be started out on the grey table round the picture, and the marching ants hold still while you draw one out. Paint's new Grab tool (G) takes a picture of anything on the page: everything on the desktop stops moving, then drag a box round whatever you like \u2014 other windows, the desktop, Paint itself \u2014 or just click a window to take the whole thing, and it drops into your picture ready to move about. Anything selected has handles on its corners and edges now: drag one to stretch or shrink it, with Shift on a corner to keep its shape. Paint has a background color as well as a pencil color now: right-click the palette to pick it, click the pair or press X to swap them, and anything you move, cut or delete leaves that color behind. Moving or pasting something leaves its background color out so the picture underneath shows through \u2014 a drawing comes away without a white box round it \u2014 and the new Transparent selection button turns that off for photos"
+        "Added: Fluid surface (party.webp). Live ink, displaced by crowd",
+        "Added: Fluid controls. Stir, splash, pause, clear, shading, bloom, rays, fade, swirl",
+        "Added: Frame > Party (party.webp). Releases party and ink onto desktop",
+        "Changed: Palette previews current selection and lists restyled figures",
+        "Added: per-section ↺ reset (party.webp)",
+        "Added: sort, shuffle and filter (collections.exe)",
+        "Added: ◀ ▶ pile navigation and tile tooltips (collections.exe)",
+        "Fixed: copy/paste reliability (paint.exe)",
+        "Changed: large pastes scale to fit and stay in view (paint.exe)",
+        "Added: Grab tool, G (paint.exe). Captures any page region into canvas",
+        "Added: selection resize handles (paint.exe). Shift locks aspect ratio",
+        "Added: background color (paint.exe). Right-click palette to set, X swaps",
+        "Changed: pastes transparent by default (paint.exe). Toggle for photos"
       ]
     },
     {
@@ -20,17 +53,23 @@
       "era": "claude",
       "name": "Paint.exe",
       "date": "2026-10-01",
-      "summary": "A real tool box, a picture you can zoom around in, and a window that turns.",
+      "summary": "Paint tool box; zoom and pan; selection tools; window rotation",
       "issues": [],
       "changes": [
-        "Paint has a proper tool box now: beside the pencil, a dropper that lifts any color straight off the picture, and three ways to select — a rectangle, a line drawn round something free-hand, or a magic wand that takes everything the same color in one go. Whatever you have picked out can be dragged somewhere else, cut, copied and pasted — a paste lands in the middle of whatever part of the picture you're looking at — a picture copied from anywhere else pastes straight in, and every bit of it undoes twenty steps back. The keyboard reaches most of it: P, M, F, Q and K for the tools, the usual Ctrl+Z, C, V and A, the bracket keys for the pencil's width and the arrow keys to shift a selection a pixel at a time",
-        "Open a picture and the sheet becomes that picture — its own size, one pixel for one pixel, laid on a grey table and shown whole however big it is, and handed back at the size it came in at when you save. The wheel zooms on whatever is under the pointer, from a quarter size up to sixteen times, leaving the pixels square rather than smeared, and space with a drag shoves the sheet about underneath, or hold W, A, S and D to glide about it — Shift to hurry. When there is more picture than window, a small copy of the whole thing sits in the corner with everything you can't currently see shaded back — drag inside it to go somewhere else",
-        "paint.exe has rotate, flip vertical and flip horizontal buttons that turn the whole window with your picture in it, title bar and all. You can keep drawing however it's turned, Save writes the picture the way it looks, and New or Open set it the right way up again",
-        "Paint's magic wand can be loosened or tightened as you use it: hold it down and drag right or down to take in more of the colors nearby, left or up for fewer, watching the selection grow and shrink as you go. The next click remembers where you left it",
-        "Paint's dropper shows a magnifying glass beside the pointer: the pixel under it and the ones around it, blown up square, with the color's code underneath. Hold it down and slide to the exact pixel you want — it picks where you let go, and on a phone the glass sits above your finger",
-        "Paint can recolor whatever you've selected: Adjust colors turns the hue, washes the color out or turns it up, nudges red, green and blue one at a time and lightens or darkens it, all live as you drag the sliders. OK keeps it as one step to undo, and Cancel puts it back",
-        "Hold Shift as you start a selection in Paint — a rectangle, a free-form line or the magic wand — and it adds to what's already selected instead of starting over",
-        "Right-click the picture in Paint for a menu of its own: undo and redo, cut, copy, paste and delete, select all, Adjust colors, picking up the color under the pointer, and the rotate and flip buttons. Paste from there lands right where you clicked"
+        "Added: tool box (paint.exe). Dropper, rectangle select, free-form select, magic wand",
+        "Added: move, cut, copy, paste (paint.exe). 20-step undo",
+        "Added: external image paste (paint.exe)",
+        "Added: keyboard shortcuts (paint.exe). P/M/F/Q/K tools, Ctrl+Z/C/V/A, [ ] brush width, arrows nudge",
+        "Changed: opened images keep native size and resolution (paint.exe)",
+        "Added: zoom 25–1600% (paint.exe). Pointer-anchored, nearest-neighbor",
+        "Added: pan via Space+drag or WASD (paint.exe). Shift accelerates",
+        "Added: minimap for oversized images (paint.exe)",
+        "Added: rotate and flip window buttons (paint.exe). Save writes visible orientation",
+        "Added: magic wand tolerance via drag (paint.exe). Persists between clicks",
+        "Added: dropper magnifier with color code readout (paint.exe)",
+        "Added: Adjust colors (paint.exe). Hue, saturation, RGB, lightness; live preview",
+        "Added: Shift+select adds to selection (paint.exe)",
+        "Added: right-click canvas menu (paint.exe). Paste lands at click point"
       ]
     },
     {
@@ -38,22 +77,30 @@
       "era": "claude",
       "name": "Multitasking",
       "date": "2026-10-01",
-      "summary": "More than one window at a time, and a taskbar that keeps track of them.",
+      "summary": "Multiple windows; taskbar buttons; desktop state persistence",
       "issues": [],
       "changes": [
-        "Open as many programs as you like at once: each new window steps in a little from the last, clicking one brings it to the front, and only the one in front has a lit title bar and hears the keyboard \u2014 so two games open side by side don't both run off with your arrow keys",
-        "Every open window gets a button on the taskbar. Minimize sends a window to the taskbar instead of parking it in the corner, and it keeps going while it waits \u2014 music keeps playing, a game keeps its run \u2014 then comes back exactly where you left it. Click the button of the window you're in to put it away, any other to bring that one up. Open more than the taskbar can fit and the rest tuck into a \u00bb menu at the end instead of being squeezed down to a letter each, with the window you're in always kept on the bar. Right-click a window's taskbar button for Restore, Minimize, Maximize, Close and Center, which brings a window back to the middle of the screen",
-        "The desktop remembers how you left it: come back later and the same windows are open, in the same places and at the same sizes, with the same one in front. Windows stay exactly where you put them when the browser is resized, and a window you maximize goes back to exactly where it was when you restore it. Shut Down forgets it all, so powering back on is a clean start",
-        "Shut Down closes every window the moment you pick it, so nothing left running \u2014 music, games, the office \u2014 carries on behind the shutdown screen",
-        "A performance gauge sits in the taskbar next to the search box: frames per second and a little graph of recent frames that turns amber, then red, when things start to drag. Click it for frame times, hitches, memory and how many windows are open",
-        "Behind the scenes, each program now keeps to its own file, and one list says what every window is called, what it looks like and where it sits in the Start menu — so adding a new program no longer means editing the whole desktop",
-        "Collections keeps its tiles where you leave them: they're only dealt out the first time you open a tab, and after that moving one never reshuffles the rest — the whole arrangement is still there after a reload, a resize, maximizing, or a trip to another tab. A new shuffle button in the top corner deals a fresh pile, and every deal flies out from the middle of the window and lands on open desktop rather than on top of your windows. Maximizing no longer pulls the tiles inside the window — they stay right where they were on the desktop, the same size — and the picture in the middle grows and shrinks with the window, keeping its shape, and the Cards tab shows the top 40",
-        "The welcome window greets every visit the same way: open the site or refresh and it pops up in the middle of the screen, at its usual size and in front of everything, while the rest of your windows come back where you left them",
-        "Sitting down at the computer in cubicles.exe now faces the screen square-on, which keeps its menus and windows from losing their text in Firefox",
-        "cubicles.exe and cmd.exe work on a phone: sitting down at the computer fits its whole screen across even a narrow window instead of cutting off both sides, and cmd.exe's text shrinks to fit and drops the heavy CRT glow that smeared it — help and man keep their columns on one line and scroll sideways instead of wrapping, ls lists in two columns, the prompt is just the folder you're in, and each new command brings you back to the bottom left. Sitting down also turns you the short way round instead of spinning you in circles",
-        "strudel.cc, party.webp and midi.exe remember how you left them: strudel.cc keeps your code and its scope, party.webp keeps everything its panels were set to, and midi.exe keeps its sound, octave, pad bank and buttons — close one, refresh, or come back another day and it picks up where you stopped",
-        "The search box only suggests searches from the last two weeks — older ones drop out of the list on their own",
-        "midi.exe's File > New clears the log but leaves the knobs where you set them, so a new file starts with the same sound"
+        "Added: multiple concurrent windows. Cascade placement, keyboard to front window only",
+        "Added: taskbar button per window",
+        "Changed: minimized windows continue running",
+        "Added: » taskbar overflow menu",
+        "Added: taskbar right-click menu. Restore, Minimize, Maximize, Close, Center",
+        "Added: desktop state persistence. Open windows, positions, sizes, stacking order",
+        "Fixed: windows hold position on browser resize and after maximize/restore",
+        "Changed: Shut Down closes all windows immediately and clears saved state",
+        "Added: taskbar performance gauge. FPS graph; click for frame times, hitches, memory",
+        "Changed: one file per program, single program registry",
+        "Changed: tile positions persist across reload, resize and tabs (collections.exe)",
+        "Added: shuffle button (collections.exe). Deals onto open desktop",
+        "Fixed: maximize no longer moves tiles (collections.exe)",
+        "Changed: Cards tab shows top 40 (collections.exe)",
+        "Changed: welcome window opens centered on every visit",
+        "Fixed: screen text loss in Firefox (cubicles.exe)",
+        "Added: phone layout (cubicles.exe, cmd.exe). Fitted screen, scaled text, no wrap",
+        "Fixed: sit-down turn takes shortest direction (cubicles.exe)",
+        "Added: state persistence (strudel.cc, party.webp, midi.exe)",
+        "Changed: search suggestions limited to last two weeks",
+        "Changed: File > New keeps knob settings (midi.exe)"
       ]
     },
     {
@@ -61,16 +108,16 @@
       "era": "claude",
       "name": "Cubicles.exe",
       "date": "2026-09-24",
-      "summary": "A first-person office you can walk around, and a browser on the desk in it.",
+      "summary": "Terminal; first-person office; in-world browser",
       "issues": [],
       "changes": [
-        "Terminal sits under Tools: a green phosphor cmd.exe with real commands \u2014 ls, cd, cat, history \u2014 walking a filesystem that mirrors the site's own data (projects, the changelog, closed issues), and the desktop's own programs sit right there in the home directory: type one to actually open it",
-        "The terminal can now read the tab's own memory: storage lists everything the site has tucked into local and session storage, grouped by which is which, and storage <key> dumps one of them",
-        "Two more terminal commands: env prints browser and page facts (user agent, language, screen size, url), and cookies lists whatever cookies this page is carrying",
-        "Cubicles sits under Toys: you come in through the only door of an empty office, it locks behind you, and a row of four cubicles is the whole of where you now live \u2014 the arrows or WASD to walk, a drag to look around. Three of them hold nothing but a desk, a chair somebody pushed out on their way past, and whatever was too dull to take: a monitor with no tower under it, a printer with one last page still in the tray, a phone and a couple of half-packed boxes. The fourth is yours, and it has the computer",
-        "The computer on the desk is a real browser, and it starts on this site. Look at it and click, and you lean in until the screen fills the view \u2014 mrwr.dev running on the monitor with nothing framing it, every window and menu in there working the way it does out here",
-        "Open Cubicles on the computer inside the cubicle and the monitor stops trying to load the site: it shows you the room it is standing in instead, and the monitor in that picture shows the frame before it, on down until there are no pixels left to spend",
-        "The door is worth trying. It rattles"
+        "Added: Terminal (cmd.exe), under Tools. ls, cd, cat, history over site data; launches programs",
+        "Added: storage command (cmd.exe). Lists local and session storage",
+        "Added: env and cookies commands (cmd.exe)",
+        "Added: Cubicles (cubicles.exe), under Toys. Locked office, four cubicles; WASD to walk, drag to look",
+        "Added: working browser on cubicle computer (cubicles.exe). Runs this site",
+        "Added: recursive monitor when Cubicles runs inside itself",
+        "Added: locked door. Rattles"
       ]
     },
     {
@@ -78,12 +125,13 @@
       "era": "claude",
       "name": "Tasks.exe",
       "date": "2026-09-24",
-      "summary": "A new game under Toys: survive the workday.",
+      "summary": "Arena game under Toys",
       "issues": [],
       "changes": [
-        "Double-click a window's title bar to throw it between full-screen and its usual size, the way the real thing did \u2014 or to pull a docked one back out",
-        "Tasks sits under Toys: a Vampire-Survivors-style arena game built from Party 2.0's own painted figures — emails, meeting invites, urgent bugs and performance reviews close in from every side, each turning up with something it wants over its head, while the office scrolls past under you, your reply swings on a beat in an arc the way you're walking, and you pick up a desk's worth of upgrades trying to last from 9 to 5 — Esc takes a break, and clocking out at 5 sits you down with the same page: where your numbers ended up and what every upgrade you took was doing",
-        "Tasks moves at a calmer pace \u2014 you and everything chasing you walk a little slower, so a crowded afternoon is easier to read and steer through"
+        "Added: title bar double-click toggles maximize",
+        "Added: Tasks (tasks.exe), under Toys. Survivors-style arena game, office enemies, upgrades, 9-to-5 run",
+        "Added: pause (Esc) and end-of-day summary (tasks.exe)",
+        "Changed: movement speed reduced (tasks.exe)"
       ]
     },
     {
@@ -104,41 +152,43 @@
       "era": "claude",
       "name": "Party 2.0",
       "date": "2026-09-19",
-      "summary": "A crowd on a canvas, and a party that walks out into it.",
+      "summary": "Crowd canvas; floating tool windows; encounters; media player; Marbles",
       "issues": [129, 130, 131, 132, 133, 134, 135, 136],
       "changes": [
-        "Party 2.0 (party.webp) sits under Toys: an old-fashioned frame around a modern one, with a drifting crowd on a canvas that reaches for your pointer and a row of buttons above it — Palette, Motion, Readout and Frame — that each open a small tool window you can drag anywhere on the desktop, floating above the window that opened it",
-        "Party 2.0's Frame tool bends the window it sits in — turn Warp up and the whole frame goes soft and pulls out of true, title bar, borders and all, with its corners rounding off as it goes; Straighten up puts it back",
-        "Party 2.0's canvas is a crowd rather than a scattering of dots: every point is one of a set of little painted figures, walking about in whatever colour the palette is set to — and the Palette tool can swap the whole crowd for rats, for mice, or back to plain dots",
-        "Anyone in that crowd can be picked out of it: click a figure on Party 2.0's canvas and a dashed ring marks it, after which the Palette's colour and shape dress that one alone — one rat among the walkers, or a single point left as a dot — with Reset putting it back in step, and a click on empty canvas handing the Palette back to everybody",
-        "The old Party (dnd.exe) has moved inside: the roster and the character sheet are one more of Party 2.0's floating tools, and everyone you Save walks out onto the canvas to drift with the crowd under their own name — click one out there and their sheet comes up, and when the party's ten minutes are up they set off across the desktop from wherever they were standing",
-        "A character is a person now rather than an empty suit of armour: each one is one of the little painted figures from Party 2.0's crowd, wearing their own gear and bare at the head, hands or feet where they carry none — and since it is the same figure, it takes its colour from the Palette like everybody else. Alignment is a glow behind them instead of patterned wallpaper: its hue tells good from evil, and its shape tells lawful from chaotic, from a tight steady halo to a wide, frayed one",
-        "Party 2.0's Frame tool can light the window up as well as bend it: Colour puts the frame and its title bar into the spectrum at once, and Cycle, Pulse and Strobe set it walking round the colours, breathing in and out, and flashing — Lights out puts it back. The strobe will not go past three flashes a second however far you push it, and anyone whose machine is set to prefer less movement gets the colour holding still instead",
-        "The Frame tool can also hand Party 2.0's own tool windows the desktop's frame: switch Tool windows from Modern to Framed and the Palette, Motion, Readout, Frame and Party panels each come up in a Windows 95 border and title bar, while the sliders, swatches and readouts inside them stay exactly as modern as they were. A panel wearing the frame does whatever the frame does — it lights up on the same beat and warps out of true along with it",
-        "Party 2.0 remembers where you put its tool windows: drag the Palette, or any of the others, somewhere that suits you and closing it and opening it again brings it back to that spot rather than to the edge it started at. Each panel is remembered separately, and one you have never moved still opens in its own slot",
-        "Media (player.exe) sits under Tools: open a song or a video — or a whole folder, and it plays everything in it in order — with play, pause, skip, shuffle, repeat, volume and a playlist you can double-click through, and trim with the Delete key or a right-click. Drag along the seek bar and a tooltip shows where you'll land before you let go. Songs get a little green screen under their name that moves with the sound, like an old monitor with scanlines and a glow that trails behind — a View menu swaps it between bars, the waveform itself, and a spectrum scrolling slowly past. It plays old .au sound files too, and starts out with a drone loop queued up. Files can be dropped straight onto it, and they never leave your computer",
-        "The media player's previous, stop and next buttons are drawn the same way as play, pause and the rest of the row — square-edged pixel shapes instead of three characters borrowed from the system font, which never quite matched",
-        "Projects lists card-binder, the card scanner that fills Collections' card shelf: photograph a trading card — or a whole binder page — and it works out which print it is, prices it, and files it in a binder you can sort and export. It's closed source, so instead of sending you to a repository the entry says so and opens a screenshot of the thing itself",
-        "Collections' cards behave like things on a desk: drag one and it stays on top of the pile instead of dropping back underneath the moment you touch another, and picking one up moves it rather than peeling it off the screen as a picture to drop somewhere else",
-        "Party 2.0's Motion tool has gained a Trails slider: turn it up and the canvas stops wiping itself clean every frame, so the crowd and the lines strung between them smear across it like a long exposure — Wipe clean takes it back to bare surface without interrupting the drift",
-        "Everybody in Party 2.0's crowd has a head again: a handful of the little painted figures were drawn with their heads a shade clear of the shoulders, and had been coming off the paint sheet decapitated",
-        "Party 2.0's crowd is twice the crowd it was: a second sheet of the little painted figures has been cut up and added to the first, so there are 163 of them walking about instead of 76 — fewer twins in a canvas full of people",
-        "Party 2.0's crowd can be pushed around now: a new Forces tool gives them gravity — with a dial you point wherever you like, not only down — a wind that comes in gusts rather than leaning on them steadily, and a jitter that sets everyone fidgeting. The pointer stops being something they merely draw lines at: set it to attract, repel or orbit and it gathers the crowd in, shoves it away, or swings it round in a circle. And three flocking sliders — separation, alignment and cohesion — turn the drift into a flock that clumps together, falls into step and keeps out of its own way. Let them be hands the canvas back to the old aimless wander",
-        "The lines strung between Party 2.0's figures have controls of their own at last: a Links tool sets how strong and how thick they are, how many any one figure is allowed to hold, and whether they run straight or bow out into curves. They can be drawn in ink, in the palette's colour, or in the colours of the two figures at either end so that each line fades from one to the other — and turn Mesh up and the triangles between any three figures standing close together fill in, so the crowd drags a sheet of shattered glass about with it",
-        "Party 2.0 keeps a log of itself: the Console tool is a teletype of what the window has been up to — who joined the party, that the density went from 46 to 88, when the party departed — each line stamped with the time it happened and the whole thing scrolling along as it fills. Drag a slider about and it writes down where you started and where you let go, on one line, rather than every step in between",
-        "Party 2.0's crowd can be told to stop drifting and arrange: the new Formation tool walks them into a grid, a ring or a spiral — and there is a text field, so they will walk into the shape of whatever you type and stand there spelling it. How tightly they hold the shape is a slider, and so is how restless they are: turn that up and they keep breaking out of it and wandering back into it. The word is sized to the crowd rather than to the window, so turning Density up makes it bigger rather than more crowded",
-        "Party 2.0's crowd can be let out: the Frame tool — which already bends and lights the window from inside it — now has a switch that opens the frame altogether, and the crowd wanders off across the desktop, in behind whatever else you have open, with the lines still strung between the ones out there and the ones still inside. Shut it again and they file back in",
-        "There is something to roll at last: Party 2.0's Dice tool throws a d20, a d6 or a d100 across the canvas — with advantage or disadvantage, which throws two and shows you which one it kept — and the die tumbles through the crowd, knocks people out of its way and comes to rest showing its number, which is also when the panel tells you what you got. Every roll goes in a log. Roll for initiative and the whole party rolls, takes its number over its head, and lines up across the canvas in order",
-        "Party 2.0's Encounters tool gives the party something to do with its ten minutes: roll and something walks in off the edge — a goblin, a troll, a dragon — with a reason for being there and a pile of loot for afterwards. The party converges on it and stops just short; everybody else clears the ground around it and drifts back once it has gone. Now and then — rarely — what walks in is friendly instead: the cat, a wizard, phoebe. Then the crowd does the exact opposite and gathers round in a ring to look, with the party pushing to the front and a gift at the end rather than loot. Nothing can be fought and there is nothing to win: it is a prompt, the way the roster is a character sheet rather than a character",
-        "Marbles (marbles.exe) sits under Toys: a rolling globe on a course of platforms hanging in the dark, watched over its own shoulder. Arrows or WASD send it whichever way the camera is looking, space jumps, and dragging on the picture swings the camera round it. A different course is dealt every time you open the window — and again whenever you ask for a new one — put together out of the same handful of things a course is made of: a bridge barely wider than the ball, a zigzag between walls, a ramp up or down, a ferry that slides back and forth across open space and only comes up to each side at the ends of its travel, a staircase curving away and dropping as it goes, a run between bumpers, and gaps and stepping stones with nothing across them but the jump. Nothing is drawn over the view — the clock for the run you are on sits up in the window bar with the rest of the controls, and there is no counter and no lives: roll off the edge and you are put back wherever you last had firm footing, and reaching the lit pad at the end lights it up, stops the clock and asks whether you want another go at that one — it remembers the best you have done it in — or a course you have never seen",
-        "Party 2.0’s encounters have consequences now: whatever wanders in gets hold of people. A monster hunts down the nearest figure on the canvas and lunges at whoever it catches, the party sets off to meet it from wherever they happened to be standing, and the crowd — which is a crowd and not an audience — scatters out of its reach and then turns round and starts throwing things. Every blow comes off somebody as a number lifting into the air, red for damage and green for help, with a little bar of what they have left under anyone who has lost some. Nobody is killed: the worst that happens is being knocked flat, drawn lying where you fell, until you come round — and a guest does the exact opposite of a monster, going about the room patching people up and helping them back onto their feet. A goblin gets driven off and drops its loot; a wyvern simply outlasts its welcome and leaves the party on the floor",
-        "A new Goings-on tool watches all of that while it is going on: who is out there, whether they are a monster or a guest, how much of them is left, who they presently have hold of, how many exchanges it has come to and what the last thing to happen was — with the party’s condition underneath it, a bar each, and a line on how the crowd is faring",
-        "Party 2.0 will tell you about anything you click at last. The new Info tool describes whatever is picked on the canvas: one of the crowd gives you which of the painted figures he is, which way he faces, how tall he was rolled, where he is standing, how fast he is walking and how many of the others he is strung to; a party member gives you their sheet read back — level, race and class, alignment, all six scores with their modifiers, and how they are bearing up; and whatever has wandered in gives you why it came, what it is carrying and how it is getting on. Monsters and guests can be clicked now too, and wear the same dashed ring as everybody else",
-        "Every marbles.exe course has a name now, and it is the number it was rolled from: the seed sits up in the window bar where you can read it, copy it out to keep a course you liked, or type one over it — and anything you type that isn't a seed is stirred into a course of its own, so a word or a name gets you somewhere too",
-        "marbles.exe can hand a course to somebody else the way a game on a console with no memory handed you your progress: a code. The Code button opens a little window with the code for where you are — the course, your best time on it, and the whole of the run you did it in, written out in groups of five — to copy and send however you like. Paste one somebody sends you into the same window, or straight into the seed box, press Go, and you are on their course with their time to beat. The code is stamped with a check, so a time can't be quietly edited into one nobody did",
-        "And what comes with that time is the run itself. The best run known on a marbles.exe course — yours, or the one that arrived in a code — rides it again beside you: a pale little moon of a marble that sets off when you do, takes the corners the way they were taken and gets home when it got home. Finish ahead of it and it is left standing out on the course wherever it had got to, which is the margin you won by. Ghost in the window bar turns it off",
-        "A marbles.exe run starts rolling rather than standing still: the first push spins the ball up on the spot for three seconds — you can see it turning, faster and faster, with the count standing over it — and when the count runs out it is let go with everything it has gathered. Hold it the whole three seconds and it goes off faster than it could ever push itself along the flat, which it sheds again over the first second of the run; let go of the keys early and it winds down again, so what it leaves the line at is exactly what you can see it doing",
-        "marbles.exe's window bar is buttons and nothing else now. The clock has moved into the corner of the picture, where a game keeps it, with whatever time there is to beat underneath it — and everything the keys do has moved into a How to play window behind a Help button, instead of being strung along the toolbar in small grey type"
+        "Added: Party 2.0 (party.webp), under Toys. Crowd canvas with floating tool windows",
+        "Added: Warp (Frame tool). Bends window; Straighten up resets",
+        "Changed: painted figures replace dots. Palette swaps to rats, mice or dots",
+        "Added: single-figure selection. Palette styles selection only",
+        "Changed: dnd.exe merged into party.webp. Saved characters join crowd",
+        "Changed: characters drawn as painted figures with gear. Alignment shown as glow",
+        "Added: frame lighting (Frame tool). Colour, Cycle, Pulse, Strobe; strobe capped at 3 Hz; respects reduced motion",
+        "Added: Framed tool window option. Windows 95 borders on panels",
+        "Added: tool window positions persist (party.webp)",
+        "Added: Media (player.exe), under Tools. Audio/video playlist, shuffle, repeat, seek preview",
+        "Added: visualizer (player.exe). Bars, waveform, spectrum",
+        "Added: .au playback and drag-and-drop (player.exe). Files stay local",
+        "Changed: pixel-drawn transport buttons (player.exe)",
+        "Added: card-binder entry (projects.txt). Closed source; links screenshot",
+        "Fixed: dragged cards stay on top (collections.exe)",
+        "Added: Trails slider (Motion tool). Wipe clean resets",
+        "Fixed: clipped heads on some crowd figures",
+        "Changed: crowd sprite count 76 → 163",
+        "Added: Forces tool. Gravity, wind, jitter, pointer attract/repel/orbit, flocking",
+        "Added: Links tool. Strength, thickness, max links, curves, colour modes, mesh fill",
+        "Added: Console tool. Timestamped event log",
+        "Added: Formation tool. Grid, ring, spiral, typed text",
+        "Added: open-frame switch (Frame tool). Crowd exits onto desktop",
+        "Added: Dice tool. d20, d6, d100, advantage/disadvantage, initiative order",
+        "Added: Encounters tool. Random monsters with loot; rare friendly guests",
+        "Added: Marbles (marbles.exe), under Toys. Generated platform courses, timer, respawn, best time",
+        "Added: encounter combat. Damage numbers, health bars, knockdowns, guest healing; no deaths",
+        "Added: Goings-on tool. Live encounter and party status",
+        "Added: Info tool. Details for selected figure, party member or encounter",
+        "Added: course seeds (marbles.exe). Editable; any text maps to a course",
+        "Added: share codes (marbles.exe). Course, best time and run; checksummed",
+        "Added: ghost replay of best run (marbles.exe). Toggle in window bar",
+        "Added: 3-second spin-up launch (marbles.exe)",
+        "Changed: toolbar reduced to buttons, clock moved into view, controls moved to Help (marbles.exe)"
       ]
     },
     {
@@ -146,18 +196,18 @@
       "era": "claude",
       "name": "Save & read",
       "date": "2026-09-10",
-      "summary": "Work that sticks around, and a history you can read.",
+      "summary": "Notepad and Paint persistence; version history layout",
       "issues": [12, 112, 118],
       "changes": [
-        "Notepad and Paint remember what you left in them — closing the window, refreshing or shutting down no longer wipes the page — and both have a File menu to start fresh, open a file from your computer, or save your work as a download",
-        "This window is easier to read: every change gets its own bullet with room around it, each version shows its name, and older versions fold down to one line — click one to open it",
-        "Past searches under the search bar are tidier — each one starts with just how long ago it was made — and clicking one takes you to the issue it became, opened to the right comment, or into Notepad if it never became one — and if that window is already open it stays where it is, with the search added to the page or the issue opened alongside what you had open",
-        "Past searches that shouldn't be on show can be taken out of the search box's history, and they stay out after every update",
-        "Projects lists midi-scope, a live MIDI analyser with a 3D spectrogram you fly through — it's closed source, so instead of sending you to a repository the entry says so and opens a screenshot of the thing itself",
-        "Party (dnd.exe) no longer throws away a half-finished sheet when you click another character — your edits wait for you, marked with a *, until you come back and Save",
-        "Moving or resizing a window works the old way now — a dotted outline follows your pointer and the window jumps there when you let go, and Escape leaves it where it was",
-        "Collections now opens on a Cards tab holding the Pokémon card collection — each card shows its number, its set and how rare it is — and the cards scatter across the desktop like the albums and paintings do",
-        "Maximizing Collections now shows whatever you have picked as big as the window will allow, rather than a stamp in the middle of it"
+        "Added: persistence and File menu (Notepad, Paint). New, Open, Save as download",
+        "Changed: version history layout. One bullet per change, collapsible older versions",
+        "Changed: search history shows age; click opens linked issue or Notepad",
+        "Added: search history hide list",
+        "Added: midi-scope entry (projects.txt). Closed source; links screenshot",
+        "Fixed: unsaved character edits kept across selection (dnd.exe). Marked with *",
+        "Changed: move and resize use outline drag. Esc cancels",
+        "Added: Cards tab (collections.exe). Pokémon collection with number, set, rarity",
+        "Changed: maximize enlarges selected item to fit (collections.exe)"
       ]
     },
     {
@@ -165,14 +215,14 @@
       "era": "claude",
       "name": "Drag & play",
       "date": "2026-09-10",
-      "summary": "Windows that move, faders that play.",
+      "summary": "Window dragging; midi.exe controls and phone layout",
       "issues": [],
       "changes": [
-        "Windows can be moved now — grab a title bar and drag it anywhere on the desktop; the window keeps whatever size you gave it",
-        "midi.exe's Mod fader and stick finally do something: Mod adds vibrato, and the stick sweeps the filter — left and right for brighter or darker, up and down for more or less resonance",
-        "midi.exe's drum pads hit harder — the whole kit is louder next to the keys",
-        "midi.exe fits a phone now — the keys stay at the bottom with room for a fingertip, and the pads, knobs, wheels, log and scope take turns in one space above them, with a tall Bank pad beside the drum pads",
-        "midi.exe's meters and scope moved into a new View menu, and on a wide window they sit to the right of the knobs instead of pushing the keys down"
+        "Added: window dragging by title bar",
+        "Added: Mod vibrato and stick filter sweep (midi.exe)",
+        "Changed: drum pad volume increased (midi.exe)",
+        "Added: phone layout (midi.exe)",
+        "Added: View menu for meters and scope (midi.exe). Side placement on wide windows"
       ]
     },
     {
@@ -180,13 +230,13 @@
       "era": "claude",
       "name": "Scope & small screens",
       "date": "2026-09-09",
-      "summary": "See the sound, fit the screen.",
+      "summary": "midi.exe scope; small-screen layout",
       "issues": [],
       "changes": [
-        "midi.exe has a Scope button now: it draws the shape of the sound you're playing above a little 3D spectrogram — the last few seconds of its frequencies stacked back into the distance — and reads out the frequency in Hz, the note it's nearest to and how many cents sharp or flat, plus what's being held and how loud it is",
-        "midi.exe folds itself up when the window is narrow — a phone, or a window you've dragged small: the bend, pad and knob sections go behind tabs, the function buttons split into two rows, and the keybed shows as many octaves as will fit at a size you can actually hit, with arrows to move along it",
-        "Windows no longer open wider than the screen they're on, so on a phone the title bar and its buttons are where you can reach them",
-        "Dropped midi.exe's Edit menu — the Prog button on the panel already steps through the waveforms"
+        "Added: Scope (midi.exe). Waveform, 3D spectrogram, pitch and cents readout",
+        "Added: narrow-window layout (midi.exe). Tabbed sections, scrolling keybed",
+        "Fixed: windows capped to screen width",
+        "Removed: Edit menu (midi.exe)"
       ]
     },
     {
@@ -194,14 +244,17 @@
       "era": "claude",
       "name": "Party & Projects",
       "date": "2026-09-09",
-      "summary": "A pocket D&D party, and real projects.",
+      "summary": "D&D party generator; open-source project listings",
       "issues": [],
       "changes": [
-        "Added Party (dnd.exe) under Toys: roll up a D&D character — name, race, class, alignment, level and 4d6-drop-lowest ability scores — and Save it to a party roster that's remembered in your browser. Each one gets a chunky pixel loadout tile laid out like an armour stand — head, chest, hands, legs, feet and what they carry — where class picks the gear, race picks its colours and how tall they stand, and alignment picks the backdrop. A party only stays ten minutes — then it walks out from behind the window and off the desktop, and the roster starts fresh",
-        "Projects (projects.txt) now lists real open-source work, starting with cairn, a local-first markdown notes editor. The nine interface demos moved to their own Demos window (demos.txt) under Documents",
-        "Each project in projects.txt now shows the description and preview image straight from its GitHub repo, falling back to a hand-written blurb and thumbnail when the repo has none",
-        "Added this site itself to projects.txt",
-        "about.txt now credits Claude with even more help, not just cleanup work"
+        "Added: Party (dnd.exe), under Toys. D&D character generator with saved roster",
+        "Added: pixel loadout tile per character. Gear by class, colours by race, backdrop by alignment",
+        "Added: 10-minute party expiry (dnd.exe)",
+        "Changed: projects.txt lists open-source work, starting with cairn",
+        "Added: Demos window (demos.txt). Moved from projects.txt",
+        "Added: GitHub descriptions and preview images (projects.txt). Hand-written fallback",
+        "Added: mrwr.dev entry (projects.txt)",
+        "Changed: expanded Claude credit (about.txt)"
       ]
     },
     {
@@ -209,15 +262,15 @@
       "era": "claude",
       "name": "MPK mini",
       "date": "2026-09-08",
-      "summary": "midi.exe grows a real controller.",
+      "summary": "midi.exe controller layout; drum kit; knob assignments",
       "issues": [],
       "changes": [
-        "midi.exe is now laid out like an AKAI MPK mini PLUS — pitch bend and mod faders, a thumbstick, eight pads and eight knobs, all of which play and show up in the message log",
-        "midi.exe's thumbstick now sends its own two controls instead of doubling up on the bend and mod faders, so you can move all four at once",
-        "midi.exe's pads now have two banks — hit Bank to swap between them, and anything still sounding stops on the way out",
-        "The labels on midi.exe's front panel sit inside their own frames now, instead of spilling over the box next door",
-        "midi.exe's pads now play an actual drum kit — kick, snare, hats, claps, toms and cymbals across two banks, with each pad's piece written on it",
-        "midi.exe's eight knobs now do something: filter cutoff and resonance, attack and release, drum tune and decay, echo and volume — with a readout on the display of what you just changed"
+        "Changed: MPK mini PLUS layout (midi.exe). Faders, thumbstick, 8 pads, 8 knobs",
+        "Changed: thumbstick sends independent controls (midi.exe)",
+        "Added: two pad banks (midi.exe)",
+        "Fixed: front panel label overflow (midi.exe)",
+        "Added: drum kit on pads (midi.exe)",
+        "Added: knob assignments (midi.exe). Filter, envelope, drum tune/decay, echo, volume"
       ]
     },
     {
@@ -225,12 +278,12 @@
       "era": "claude",
       "name": "Search & windows",
       "date": "2026-09-08",
-      "summary": "Notes that nudge, windows that resize.",
+      "summary": "Scratchpad notifications; window resizing",
       "issues": [3, 53, 55, 95],
       "changes": [
-        "The search-bar scratchpad now nudges me when you finish jotting a thought, so notes don't sit unread",
-        "Windows have a working resize grip in the bottom-right corner now — drag it to size a window, and it stays put where you left it",
-        "Split the version history into minor releases, so each card here is a short, readable list instead of one long dump"
+        "Added: scratchpad notification on completed note",
+        "Added: window resize grip",
+        "Changed: version history split into minor releases"
       ]
     },
     {
@@ -238,16 +291,16 @@
       "era": "claude",
       "name": "Desktop shell",
       "date": "2026-09-06",
-      "summary": "Start menu, Paint, and a tidier desktop.",
+      "summary": "Start menu groups; Paint; desktop fixes",
       "issues": [29, 66, 70, 81, 85],
       "changes": [
-        "Renamed the REPL program to Sounds in the Start menu",
-        "Swapped the LinkedIn social link for Bluesky",
-        "Tidied the Start menu's Programs list into App, Tools, and Toys groups, with Welcome left on its own",
-        "Kept the Start menu's submenus on screen in narrow browser windows — one that would run off the right edge now opens to the left instead",
-        "Stopped the Issues window from wrapping long lines — they run on and scroll sideways now, like Notepad with word wrap off",
-        "Added Paint: a blank white sheet you scribble on with a pencil — pick a colour, change the brush size, and Clear to start over",
-        "Made Shut Down / restart fetch the newest published build instead of a cached copy, and stamped the current version on the shutdown and startup screens"
+        "Changed: REPL renamed to Sounds (Start menu)",
+        "Changed: LinkedIn link replaced with Bluesky",
+        "Changed: Start menu Programs grouped into App, Tools, Toys",
+        "Fixed: Start submenus flip left at screen edge",
+        "Changed: Issues window lines no longer wrap",
+        "Added: Paint. Pencil, colour, brush size, Clear",
+        "Fixed: Shut Down/restart loads newest build. Version shown on boot screens"
       ]
     },
     {
@@ -255,13 +308,13 @@
       "era": "claude",
       "name": "Collections & Projects",
       "date": "2026-09-06",
-      "summary": "Pictures get room to breathe.",
+      "summary": "Collections tabs and desktop tiles; interface demos",
       "issues": [67],
       "changes": [
-        "Projects now shows nine interface demos — marked as demos, not client work — with the full set at /mockups/",
-        "Gave Collections its own Albums, Paintings, and Songs tabs, with paintings and songs drawn from picked Bluesky posts",
-        "Switched the Collections category picker from tabs to toggle buttons that match the Sounds and Keys toolbars",
-        "Reworked Collections: the picture tiles now scatter across the whole desktop, you can drag them anywhere and they stay put, and picking one no longer reshuffles the others — the window just grew a little so the selected picture sits centred"
+        "Added: nine interface demos (Projects). Full set at /mockups/",
+        "Added: Albums, Paintings, Songs tabs (Collections). Bluesky-sourced",
+        "Changed: Collections tabs replaced with toggle buttons",
+        "Changed: Collections tiles scatter across desktop; draggable, persistent"
       ]
     },
     {
@@ -269,16 +322,16 @@
       "era": "claude",
       "name": "Keys",
       "date": "2026-09-06",
-      "summary": "A MIDI monitor grows into a synth.",
+      "summary": "MIDI monitor; built-in synth; .mid import and export",
       "issues": [],
       "changes": [
-        "Added the Keys program: lists connected MIDI inputs and logs their messages live",
-        "Expanded the Keys monitor with activity meters, a one-octave keyboard, raw message bytes, and a Scan button to grant MIDI access",
-        "Keys makes sound now — a built-in synth plays incoming notes and an on-screen keyboard you click, tap, or play with your computer keys, with a square/saw/triangle/sine waveform picker",
-        "Keys keeps a running message list you can Play back through the synth, Save as a .mid file, or export as CSV or JSON",
-        "Open a .mid file in Keys to load its notes into the message list, then hit Play to hear it",
-        "Keys now opens on any browser — no MIDI hardware or Web MIDI support needed, since the on-screen keyboard and .mid playback work on their own",
-        "Tidied Keys for phones — narrower window, a two-octave keyboard you can now slide across with one finger, and octave up/down buttons on the full keyboard when it's maximised on a small screen"
+        "Added: Keys. MIDI input list and live message log",
+        "Added: activity meters, one-octave keyboard, raw bytes, Scan button (Keys)",
+        "Added: built-in synth (Keys). On-screen and computer-key input; four waveforms",
+        "Added: message playback and export (Keys). .mid, CSV, JSON",
+        "Added: .mid file import (Keys)",
+        "Changed: Keys works without MIDI hardware",
+        "Changed: phone layout (Keys). Two-octave slide keyboard, octave buttons"
       ]
     },
     {
@@ -286,15 +339,15 @@
       "era": "claude",
       "name": "Claude cleanup",
       "date": "2026-09-05",
-      "summary": "Cleanup and deploy plumbing, no new toys.",
+      "summary": "Deploy pipeline; cleanup. No new features",
       "stats": { "commits": 12, "files": 21, "insertions": 767, "deletions": 53 },
       "issues": [],
       "changes": [
-        "Swapped the build-VM deploy for a plain scripts/deploy/ pipeline",
-        "Ship a minimal production package.json and track the lockfile",
-        "Refresh the issues list from GitHub as a deploy step",
-        "Cleared out ESLint errors and dead image assets",
-        "Added a Claude credit and tidied the README headings"
+        "Changed: build-VM deploy replaced with deploy scripts",
+        "Added: minimal production package.json; lockfile tracked",
+        "Added: issues refresh as deploy step",
+        "Fixed: ESLint errors; dead image assets removed",
+        "Added: Claude credit; README headings tidied"
       ]
     },
     {

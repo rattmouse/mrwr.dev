@@ -525,8 +525,12 @@ export default function PaintProgram(props: ProgramProps) {
         variant="menu"
         size="sm"
         aria-label="Rotate"
-        title="Rotate a quarter turn clockwise"
-        onClick={() => setTurn(rotateRight)}
+        title={
+          paintStatus.hasSelection
+            ? "Rotate the selection a quarter turn clockwise"
+            : "Rotate a quarter turn clockwise"
+        }
+        onClick={() => paintRef.current?.turnSelection("rotate") || setTurn(rotateRight)}
       >
         <RotateIcon />
       </Button>
@@ -534,8 +538,8 @@ export default function PaintProgram(props: ProgramProps) {
         variant="menu"
         size="sm"
         aria-label="Flip vertical"
-        title="Flip upside down"
-        onClick={() => setTurn(flipVertical)}
+        title={paintStatus.hasSelection ? "Flip the selection upside down" : "Flip upside down"}
+        onClick={() => paintRef.current?.turnSelection("flipVertical") || setTurn(flipVertical)}
       >
         <FlipVerticalIcon />
       </Button>
@@ -543,8 +547,8 @@ export default function PaintProgram(props: ProgramProps) {
         variant="menu"
         size="sm"
         aria-label="Flip horizontal"
-        title="Flip left to right"
-        onClick={() => setTurn(flipHorizontal)}
+        title={paintStatus.hasSelection ? "Flip the selection left to right" : "Flip left to right"}
+        onClick={() => paintRef.current?.turnSelection("flipHorizontal") || setTurn(flipHorizontal)}
       >
         <FlipHorizontalIcon />
       </Button>
@@ -572,6 +576,7 @@ export default function PaintProgram(props: ProgramProps) {
         commands={paintCommands}
         map={paintMap}
         turn={turn}
+        active={props.active ?? true}
       />
     </DesktopWindow>
   );

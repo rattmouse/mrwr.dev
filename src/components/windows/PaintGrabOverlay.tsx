@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Z } from "@/constants/zIndex";
 import type { GrabRect } from "@/lib/desktopGrab";
+import { HOURGLASS_SIZE, useHourglass } from "@/lib/hourglass";
 
 /** Less of a drag than this, either way, counts as a click. */
 const CLICK_SLOP = 4;
@@ -48,6 +49,14 @@ export default function PaintGrabOverlay({ onGrab, onCancel }: Props) {
   const [hover, setHover] = useState<GrabRect | null>(null);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const hourglass = useHourglass(busy);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -66,7 +75,12 @@ export default function PaintGrabOverlay({ onGrab, onCancel }: Props) {
     setBusy(true);
     setHover(null);
     setDrag(null);
-    void onGrab(box);
+    // Taking the picture holds the page up for a moment, so the hourglass is
+    // put on screen first, the way Windows would before getting to work. A
+    // timer rather than a frame: the frozen page holds every frame back.
+    window.setTimeout(() => {
+      if (mountedRef.current) void onGrab(box);
+    }, 50);
   };
 
   const shown: GrabRect | null = drag
@@ -128,7 +142,7 @@ export default function PaintGrabOverlay({ onGrab, onCancel }: Props) {
         position: "fixed",
         inset: 0,
         zIndex: Z.GRAB,
-        cursor: busy ? "wait" : "crosshair",
+        cursor: busy ? hourglass.cursor : "crosshair",
         touchAction: "none",
         userSelect: "none",
       }}
@@ -166,7 +180,14 @@ export default function PaintGrabOverlay({ onGrab, onCancel }: Props) {
           pointerEvents: "none",
         }}
       >
-        {busy ? "Grabbing…" : "Drag a box round anything, or click a window to grab it · Esc to cancel"}
+        {busy ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <img src={hourglass.url} alt="" aria-hidden {...HOURGLASS_SIZE} />
+            Grabbing…
+          </span>
+        ) : (
+          "Drag a box round anything, or click a window to grab it · Esc to cancel"
+        )}
       </div>
     </div>,
     document.body,
