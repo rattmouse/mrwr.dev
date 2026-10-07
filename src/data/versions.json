@@ -10,7 +10,15 @@
       "summary": "Changelog condensed; Tasks rebalance; Paint selection fixes",
       "issues": [95],
       "changes": [
-        "Changed: version history condensed to short entries"
+        "Changed: version history condensed to short entries",
+        "Changed: enemy movement speed reduced (tasks.exe)",
+        "Changed: enemy damage increased (tasks.exe)",
+        "Changed: starting health 130 → 100 (tasks.exe)",
+        "Changed: player speed, attack speed, reply reach and arc reduced (tasks.exe)",
+        "Added: PTO shield upgrade (tasks.exe). Blocks part of a hit; repeats cut cooldown, raise block",
+        "Changed: enemy messages fade out after entering view (tasks.exe)",
+        "Changed: reply text travels out along the swing arc (tasks.exe)",
+        "Added: Easy, Medium and Hard difficulty (tasks.exe). Easy 1.5x XP; Hard 1.5x enemies"
       ]
     },
     {
