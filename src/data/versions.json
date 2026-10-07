@@ -18,7 +18,11 @@
         "Added: PTO shield upgrade (tasks.exe). Blocks part of a hit; repeats cut cooldown, raise block",
         "Changed: enemy messages fade out after entering view (tasks.exe)",
         "Changed: reply text travels out along the swing arc (tasks.exe)",
-        "Added: Easy, Medium and Hard difficulty (tasks.exe). Easy 1.5x XP; Hard 1.5x enemies"
+        "Added: Easy, Medium and Hard difficulty (tasks.exe). Easy 1.5x XP; Hard 1.5x enemies",
+        "Changed: rotate and flip target selection when present (paint.exe)",
+        "Fixed: Shift on any selection handle locks aspect ratio (paint.exe)",
+        "Fixed: Paint shortcuts after toolbar or menu clicks",
+        "Added: hourglass cursor during Grab (paint.exe)"
       ]
     },
     {
