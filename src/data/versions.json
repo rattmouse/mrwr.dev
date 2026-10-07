@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0",
+      "version": "7.0.1",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-06",
@@ -17,7 +17,8 @@
         "Added: tree details on click (trees.exe). Species, address, trunk, planted year, care",
         "Added: Tilt view (trees.exe). City diorama on USGS elevation, tilt angle slider, 8 headings",
         "Added: Canopy toggle (trees.exe). 850k park and yard trees from the 2021 LiDAR survey",
-        "Added: removed street trees on the Planted timeline (trees.exe). Red in their removal year"
+        "Added: removed street trees on the Planted timeline (trees.exe). Red in their removal year",
+        "Fixed: street tree data blocked on the live site (trees.exe). Served as a 404"
       ]
     },
     {
