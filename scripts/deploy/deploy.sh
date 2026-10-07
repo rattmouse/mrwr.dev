@@ -4,7 +4,7 @@
 # Usage:
 #   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build] [--skip-issues]
 #                            [--skip-search-history] [--skip-projects]
-#                            [--skip-probes]
+#                            [--skip-probes] [--skip-trees]
 #
 # Run this from whatever machine has the repo checked out and can reach prod
 # over ssh — that's your Kubuntu box, not a separate build VM. There's no
@@ -27,6 +27,7 @@ SKIP_ISSUES=0
 SKIP_SEARCH_HISTORY=0
 SKIP_PROJECTS=0
 SKIP_PROBES=0
+SKIP_TREES=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
@@ -35,7 +36,8 @@ for arg in "$@"; do
     --skip-search-history) SKIP_SEARCH_HISTORY=1 ;;
     --skip-projects) SKIP_PROJECTS=1 ;;
     --skip-probes) SKIP_PROBES=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes)" ;;
+    --skip-trees) SKIP_TREES=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes, --skip-trees)" ;;
   esac
 done
 
@@ -110,6 +112,18 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
     node "$REPO_ROOT/scripts/content/refresh-probes.mjs"
   else
     warn "Skipping probe refresh (--skip-probes) — shipping src/data/probes.json as-is."
+  fi
+
+  if [[ "$SKIP_TREES" -ne 1 ]]; then
+    log "Refreshing street trees..."
+    # public/trees/trees.bin.gz is gitignored — Seattle's street trees for
+    # trees.exe, a static file the window fetches from this site. Best-effort
+    # (trees.exe says so when the file is missing), and it skips the download
+    # while the file is under a week old.
+    "$REPO_ROOT/scripts/content/refresh-trees.sh" \
+      || warn "Street-tree refresh failed; shipping public/trees/ as-is."
+  else
+    warn "Skipping street-tree refresh (--skip-trees) — shipping public/trees/ as-is."
   fi
 
   log "Installing dependencies..."

@@ -132,6 +132,14 @@ export const PROGRAMS = {
     menu: { label: "Tasks", folder: "toys" },
     shell: { blurb: "survive the workday." },
   },
+  trees: {
+    kind: "program",
+    title: "trees.exe",
+    icon: "../w95_tree.ico",
+    size: { width: 460, height: 560 },
+    menu: { label: "Trees", folder: "toys" },
+    shell: { blurb: "every street tree in Seattle, through the year." },
+  },
   cubicles: {
     kind: "program",
     title: "cubicles.exe",

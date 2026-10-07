@@ -203,3 +203,30 @@ from a longer previous run are cleaned up each time.
 Card art is © Pokémon / Nintendo / Creatures / GAME FREAK; the scans come from
 the binder's own image host, and neither the binder nor this site is affiliated
 with them.
+
+## The Trees window
+
+trees.exe draws every street tree in Seattle from `public/trees/trees.bin.gz`,
+a gitignored static file the window fetches from this site when it opens — the
+site never calls ArcGIS itself.
+
+### `refresh-trees.sh` — pull Seattle's street trees from ArcGIS
+
+Runs `refresh-trees.mjs`, which pages through the City of Seattle's public
+**SDOT Trees (Active)** layer on ArcGIS Online (about 215k points, 2,000 per
+request, no credentials) and packs position, species, address, planted year,
+trunk diameter and a few flags into one binary — about 1.5MB gzipped. The
+format is written up at the top of the script and read back by
+`src/lib/trees.ts`.
+
+`scripts/deploy/deploy.sh` runs it before every build (best-effort, or pass
+`--skip-trees`), but the inventory moves slowly, so it leaves a file under a
+week old alone. `--force` refetches regardless:
+
+```bash
+scripts/content/refresh-trees.sh --force
+```
+
+Planted dates before 1993 are mostly the city's first inventory (1990–92)
+rather than real planting years; trees.exe says so on its timeline. The city
+publishes the layer with a no-warranty disclaimer on accuracy and placement.

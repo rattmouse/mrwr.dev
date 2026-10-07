@@ -15,6 +15,7 @@ import PlayerProgram from "@/components/programs/PlayerProgram";
 import MarblesProgram from "@/components/programs/MarblesProgram";
 import TasksProgram from "@/components/programs/TasksProgram";
 import CubiclesProgram from "@/components/programs/CubiclesProgram";
+import TreesProgram from "@/components/programs/TreesProgram";
 import BashProgram from "@/components/programs/BashProgram";
 
 /**
@@ -36,6 +37,7 @@ const PROGRAM_COMPONENTS: Record<ProgramWindowId, React.ComponentType<ProgramPro
   marbles: MarblesProgram,
   tasks: TasksProgram,
   cubicles: CubiclesProgram,
+  trees: TreesProgram,
   bash: BashProgram,
 };
 
