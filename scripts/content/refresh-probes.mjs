@@ -6,6 +6,9 @@
 // clipped, and raw IPs never leave this script: sources are counted, and the few
 // shown are masked to their /24 (IPv4) or /48 (IPv6).
 //
+// Sources on the ignore list (--ignore: one IP or IPv4 CIDR per line, #
+// comments) are dropped from both reports before anything is counted.
+//
 // Never fatal: the build imports the file, so on any failure this still writes
 // an empty report.
 
@@ -27,10 +30,11 @@ function warn(msg) {
 }
 
 function parseArgs(argv) {
-  const args = { records: "", tarpit: "" };
+  const args = { records: "", tarpit: "", ignore: "" };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--records" && argv[i + 1]) args.records = argv[++i];
     else if (argv[i] === "--tarpit" && argv[i + 1]) args.tarpit = argv[++i];
+    else if (argv[i] === "--ignore" && argv[i + 1]) args.ignore = argv[++i];
   }
   return args;
 }
@@ -58,6 +62,40 @@ function maskIp(ip) {
   return "?";
 }
 
+function bareIp(ip) {
+  return String(ip ?? "").replace(/^::ffff:/i, "").toLowerCase();
+}
+
+function ipv4ToInt(ip) {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+/** Ignore-list lines → a predicate on a source IP. Exact IPs, or IPv4 CIDRs. */
+function ignoreMatcher(lines) {
+  const exact = new Set();
+  const ranges = [];
+  for (const raw of lines) {
+    const entry = raw.replace(/#.*/, "").trim();
+    if (!entry) continue;
+    const cidr = /^([\d.]+)\/(\d{1,2})$/.exec(entry);
+    const base = cidr && ipv4ToInt(cidr[1]);
+    if (cidr && base !== null && Number(cidr[2]) <= 32) {
+      const mask = Number(cidr[2]) === 0 ? 0 : (~0 << (32 - Number(cidr[2]))) >>> 0;
+      ranges.push({ base: (base & mask) >>> 0, mask });
+    } else {
+      exact.add(bareIp(entry));
+    }
+  }
+  return (ip) => {
+    const bare = bareIp(ip);
+    if (exact.has(bare)) return true;
+    const n = ipv4ToInt(bare);
+    return n !== null && ranges.some((r) => ((n & r.mask) >>> 0) === r.base);
+  };
+}
+
 function countBy(items, keyOf) {
   const counts = new Map();
   for (const item of items) {
@@ -83,12 +121,13 @@ function daily(items) {
   return days.map((date) => ({ date, count: counts.get(date) }));
 }
 
-function webReport(lines) {
+function webReport(lines, ignored = () => false) {
   const probes = [];
   for (const line of lines) {
     try {
       const r = JSON.parse(line);
       if (typeof r.at !== "string" || !Number.isFinite(Date.parse(r.at))) continue;
+      if (ignored(r.ip)) continue;
       probes.push({ at: r.at, ip: String(r.ip ?? ""), path: clip(r.path), ua: clip(r.ua), trap: clip(r.trap), bait: r.bait === true });
     } catch {
       // torn line — skip
@@ -113,11 +152,11 @@ function webReport(lines) {
 }
 
 // endlessh: "2026-09-27T06:00:00.000Z CLOSE host=::ffff:1.2.3.4 port=5555 fd=4 time=123.456 bytes=789"
-function tarpitReport(lines) {
+function tarpitReport(lines, ignored = () => false) {
   const held = [];
   for (const line of lines) {
     const m = /^(\S+)\s+CLOSE\s.*\bhost=(\S+).*\btime=([\d.]+)/.exec(line);
-    if (!m || !Number.isFinite(Date.parse(m[1]))) continue;
+    if (!m || !Number.isFinite(Date.parse(m[1])) || ignored(m[2])) continue;
     held.push({ at: new Date(Date.parse(m[1])).toISOString(), ip: m[2], seconds: Number.parseFloat(m[3]) || 0 });
   }
   held.sort((a, b) => a.at.localeCompare(b.at));
@@ -139,10 +178,11 @@ function tarpitReport(lines) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  const ignored = ignoreMatcher(readLines(args.ignore));
   const report = {
     generatedAt: new Date().toISOString(),
-    web: webReport(readLines(args.records)),
-    ssh: tarpitReport(readLines(args.tarpit)),
+    web: webReport(readLines(args.records), ignored),
+    ssh: tarpitReport(readLines(args.tarpit), ignored),
   };
   writeFileSync(OUT_PATH, `${JSON.stringify(report, null, 2)}\n`);
   process.stdout.write(

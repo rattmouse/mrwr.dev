@@ -9,6 +9,11 @@
 # refresh-probes.mjs boils both down to counts, top paths and a few recent
 # catches. Raw IPs never reach the build — only masked /24s (/48s for IPv6).
 #
+# Sources on the ignore list ($PROD_BASE/shared/probes-ignore.txt, one IP or
+# IPv4 CIDR per line, # comments) are left out of both — the owner's own
+# testing, say. It lives on prod, not in the repo, so the IPs stay private and
+# the list applies whichever machine deploys. Edit it there by hand.
+#
 # The file is gitignored and read only at build time; the site never calls
 # anything at runtime. scripts/deploy/deploy.sh runs this before every build.
 #
@@ -21,6 +26,7 @@
 #
 #   --file PATH         Read tripwire records from a local NDJSON copy instead of ssh.
 #   --tarpit-file PATH  With --file: a local copy of endlessh's log lines.
+#   --ignore-file PATH  With --file: a local ignore list (default: none).
 #   -h, --help          This help.
 
 set -euo pipefail
@@ -32,12 +38,14 @@ source "$REPO_ROOT/scripts/deploy/lib/common.sh"
 
 LOCAL_FILE=""
 TARPIT_FILE=""
+IGNORE_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --file) LOCAL_FILE="${2:?--file needs a path}"; shift 2 ;;
     --tarpit-file) TARPIT_FILE="${2:?--tarpit-file needs a path}"; shift 2 ;;
-    -h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --ignore-file) IGNORE_FILE="${2:?--ignore-file needs a path}"; shift 2 ;;
+    -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "Unknown argument: $1 (try --help)" ;;
   esac
 done
@@ -48,8 +56,10 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/refresh-probes.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
 RECORDS="$WORK_DIR/tripwire.ndjson"
 TARPIT="$WORK_DIR/tarpit.log"
+IGNORE="$WORK_DIR/ignore.txt"
 : > "$RECORDS"
 : > "$TARPIT"
+: > "$IGNORE"
 
 if [[ -n "$LOCAL_FILE" ]]; then
   if [[ -f "$LOCAL_FILE" ]]; then
@@ -59,6 +69,9 @@ if [[ -n "$LOCAL_FILE" ]]; then
   fi
   if [[ -n "$TARPIT_FILE" && -f "$TARPIT_FILE" ]]; then
     cp "$TARPIT_FILE" "$TARPIT"
+  fi
+  if [[ -n "$IGNORE_FILE" && -f "$IGNORE_FILE" ]]; then
+    cp "$IGNORE_FILE" "$IGNORE"
   fi
 else
   load_config
@@ -71,6 +84,9 @@ else
   # retention bounds how far back this goes.
   ssh_prod "journalctl -u endlessh -o cat --no-pager 2>/dev/null | grep ' CLOSE ' || true" > "$TARPIT" \
     || warn "Could not read endlessh's log — no tarpit numbers in this report."
+  # Missing on prod just means nothing is ignored.
+  ssh_prod "cat '$PROD_BASE/shared/probes-ignore.txt' 2>/dev/null || true" > "$IGNORE" \
+    || warn "Could not read the ignore list — every source counts in this report."
 fi
 
-node "$SCRIPT_DIR/refresh-probes.mjs" --records "$RECORDS" --tarpit "$TARPIT"
+node "$SCRIPT_DIR/refresh-probes.mjs" --records "$RECORDS" --tarpit "$TARPIT" --ignore "$IGNORE"

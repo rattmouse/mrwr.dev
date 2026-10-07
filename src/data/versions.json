@@ -3,10 +3,10 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.2",
+      "version": "7.0.3",
       "era": "claude",
       "name": "Trees",
-      "date": "2026-10-06",
+      "date": "2026-10-07",
       "summary": "Seattle street tree map; season, planting and species views; tilted diorama; LiDAR canopy",
       "issues": [],
       "changes": [
@@ -18,7 +18,8 @@
         "Added: Tilt view (trees.exe). City diorama on USGS elevation, tilt angle slider, 8 headings",
         "Added: Canopy toggle (trees.exe). 850k park and yard trees from the 2021 LiDAR survey",
         "Added: removed street trees on the Planted timeline (trees.exe). Red in their removal year",
-        "Fixed: street tree data blocked on the live site (trees.exe). Served as a 404"
+        "Fixed: street tree data blocked on the live site (trees.exe). Served as a 404",
+        "Changed: bots command excludes the owner's own traffic (bash.exe). Ignore list kept on the server"
       ]
     },
     {

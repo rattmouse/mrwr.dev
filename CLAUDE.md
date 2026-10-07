@@ -88,6 +88,9 @@ Orientation notes for working in this repo.
   refreshed by `scripts/content/refresh-probes.sh` (also run by `deploy.sh`).
   The build imports it, so the script always writes the file, empty when prod
   is unreachable.
+  Sources listed in prod's `$PROD_BASE/shared/probes-ignore.txt` (one IP or
+  IPv4 CIDR per line, edited by hand there, kept out of the repo so the IPs stay
+  private) are dropped before counting. It currently holds the owner's own IP.
 
 ## Every PR bumps the version and updates the changelog
 
