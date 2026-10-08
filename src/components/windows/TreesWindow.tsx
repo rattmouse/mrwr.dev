@@ -82,7 +82,7 @@ import { WALKER_STALE_MS, WalkerAt, walkerChannel, WalkerMessage } from "@/lib/t
  * pan, wheel or pinch to zoom, click a tree for its details.
  *
  * Tilt stands the same trees on their hills, seen from an angle the
- * toolbar's slider sets and facing whichever way its other slider turns it
+ * Tilt dial sets and facing whichever way the Rotate dial turns it
  * (treesTilt.ts); every coloring works in both.
  *
  * Under the trees, when the toolbar asks: the parks with their restoration
@@ -438,7 +438,7 @@ export type TreesWindowProps = {
   mode: TreesMode;
   /** The diorama: the city seen from a locked angle, standing on its hills. */
   tilt: boolean;
-  /** Degrees above the horizon Tilt looks down from; the toolbar's slider. */
+  /** Degrees above the horizon Tilt looks down from; the Tilt dial. */
   pitch: number;
   /** Which way Tilt faces, degrees clockwise from north; the flat map is always north-up. */
   heading: Heading;
@@ -448,7 +448,7 @@ export type TreesWindowProps = {
   active: boolean;
   /** Minimized: stop any playback. */
   paused: boolean;
-  /** Bumped by the toolbar's Reset button: the whole city in view, and the day and year back to today. */
+  /** Bumped by the control panel's Reset button: the whole city in view, and the day and year back to today. */
   fitSignal: number;
   /** Draw the street trees (and the ones taken down, on the Age timeline). */
   street: boolean;
@@ -465,8 +465,10 @@ export type TreesWindowProps = {
   minutes: number;
   /** The Today button: the sun's hour back to now, as the day goes back to today. */
   onNow: () => void;
-  /** Controls laid over the map's bottom-right corner (Tilt's sliders, Reset). */
-  overlay?: React.ReactNode;
+  /** The control panel, under the map and the view's own controls, over the status line. */
+  controls?: React.ReactNode;
+  /** The coloring's knob, to the left of the view's own controls: the day or year slider, or the Type legend. */
+  modeKnob?: React.ReactNode;
 };
 
 export default function TreesWindow({
@@ -486,7 +488,8 @@ export default function TreesWindow({
   sun,
   minutes,
   onNow,
-  overlay,
+  controls,
+  modeKnob,
 }: TreesWindowProps) {
   const [trees, setTrees] = useState<Trees | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1544,7 +1547,7 @@ export default function TreesWindow({
     fittedForRef.current = { prepared, fitSignal };
     fit();
     requestDraw();
-    // fitSignal is the toolbar's Reset button; prepared is the first load.
+    // fitSignal is the control panel's Reset button; prepared is the first load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prepared, fitSignal]);
 
@@ -2294,163 +2297,173 @@ export default function TreesWindow({
         ) : wantCrowns && trees ? (
           <LoadingPanel label="Loading the city's other 850,000 trees" progress={crownsProgress} corner />
         ) : null}
-        {overlay && (
-          <div style={{ position: "absolute", right: 6, bottom: 6, zIndex: 2 }} onPointerDown={(e) => e.stopPropagation()}>
-            {overlay}
-          </div>
-        )}
         {selectedCard && <TreeCard card={selectedCard} onClose={() => setSelected(null)} />}
         {!selectedCard && selectedPlaceCard && <TreeCard card={selectedPlaceCard} onClose={() => setSelectedPlace(null)} />}
 
       </div>
 
-      {trees && prepared && mode === "season" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Button
-              size="sm"
-              square
-              active={playing}
-              title={playing ? "Pause (Space)" : "Play the year (Space)"}
-              aria-label={playing ? "Pause" : "Play"}
-              onClick={togglePlay}
-            >
-              {playing ? <PauseIcon /> : <PlayIcon />}
-            </Button>
-            <TrackSlider
-              min={0}
-              max={364}
-              value={Math.floor(day)}
-              onChange={(v) => {
-                setPlaying(false);
-                setDay(v);
-              }}
-              format={dayLabel}
-              label="Day of the year"
-              below={
-                <div style={{ position: "relative", height: 12, fontSize: 10, opacity: 0.7 }}>
-                  {"JFMAMJJASOND".split("").map((m, k) => (
-                    <span
-                      key={k}
-                      style={{ position: "absolute", left: `${(doy(k + 1, 15) / 364) * 100}%`, transform: "translateX(-50%)" }}
-                    >
-                      {m}
-                    </span>
-                  ))}
-                </div>
-              }
-            />
-            <span style={{ minWidth: 52, flex: "none", whiteSpace: "nowrap", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{dayLabel(Math.floor(day))}</span>
-            <Button
-              size="sm"
-              onClick={() => {
-                setPlaying(false);
-                setDay(todayDoy());
-                onNow();
-              }}
-              title={sun && tilt ? "Back to today, and the sun to now" : "Back to today"}
-            >
-              Today
-            </Button>
+      {/* The same 10px gaps as the control panel's, so the separators after their knobs line up; and
+          as tall whichever view's controls are in it, so switching views doesn't move the map's edge. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, height: MODE_ROW_H, flex: "none" }}>
+        {modeKnob}
+        <div
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            alignSelf: "stretch",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            overflowY: "auto",
+          }}
+        >
+        {trees && prepared && mode === "season" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Button
+                size="sm"
+                square
+                active={playing}
+                title={playing ? "Pause (Space)" : "Play the year (Space)"}
+                aria-label={playing ? "Pause" : "Play"}
+                onClick={togglePlay}
+              >
+                {playing ? <PauseIcon /> : <PlayIcon />}
+              </Button>
+              <TrackSlider
+                min={0}
+                max={364}
+                value={Math.floor(day)}
+                onChange={(v) => {
+                  setPlaying(false);
+                  setDay(v);
+                }}
+                format={dayLabel}
+                label="Day of the year"
+                below={
+                  <div style={{ position: "relative", height: 12, fontSize: 10, opacity: 0.7 }}>
+                    {"JFMAMJJASOND".split("").map((m, k) => (
+                      <span
+                        key={k}
+                        style={{ position: "absolute", left: `${(doy(k + 1, 15) / 364) * 100}%`, transform: "translateX(-50%)" }}
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                }
+              />
+              <span style={{ minWidth: 52, flex: "none", whiteSpace: "nowrap", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{dayLabel(Math.floor(day))}</span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setPlaying(false);
+                  setDay(todayDoy());
+                  onNow();
+                }}
+                title={sun && tilt ? "Back to today, and the sun to now" : "Back to today"}
+              >
+                Today
+              </Button>
+            </div>
+            <div style={{ fontSize: 11, minHeight: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {seasonNotes && seasonNotes.bloom.length > 0 && <span><b>In bloom:</b> {seasonNotes.bloom.join(", ")}</span>}
+              {seasonNotes && seasonNotes.bloom.length > 0 && seasonNotes.turning.length > 0 && " · "}
+              {seasonNotes && seasonNotes.turning.length > 0 && <span><b>Turning:</b> {seasonNotes.turning.join(", ")}</span>}
+              {seasonNotes && !seasonNotes.bloom.length && !seasonNotes.turning.length && (
+                <span style={{ opacity: 0.7 }}>Nothing much flowering or turning.</span>
+              )}
+            </div>
           </div>
-          <div style={{ fontSize: 11, minHeight: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {seasonNotes && seasonNotes.bloom.length > 0 && <span><b>In bloom:</b> {seasonNotes.bloom.join(", ")}</span>}
-            {seasonNotes && seasonNotes.bloom.length > 0 && seasonNotes.turning.length > 0 && " · "}
-            {seasonNotes && seasonNotes.turning.length > 0 && <span><b>Turning:</b> {seasonNotes.turning.join(", ")}</span>}
-            {seasonNotes && !seasonNotes.bloom.length && !seasonNotes.turning.length && (
-              <span style={{ opacity: 0.7 }}>Nothing much flowering or turning.</span>
-            )}
-          </div>
-        </div>
-      )}
+        )}
 
-      {trees && prepared && mode === "planted" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
-            <Button
-              size="sm"
-              square
-              active={playing}
-              title={playing ? "Pause (Space)" : "Play the years (Space)"}
-              aria-label={playing ? "Pause" : "Play"}
-              onClick={togglePlay}
-            >
-              {playing ? <PauseIcon /> : <PlayIcon />}
-            </Button>
-            <TrackSlider
-              min={YEAR_MIN}
-              max={yearMax}
-              value={year}
-              onChange={(v) => {
-                setPlaying(false);
-                setYear(v);
-              }}
-              format={String}
-              label="Year"
-              above={
-                <YearHistogram
-                  counts={prepared.yearCounts}
-                  felled={removedPrep?.removedCounts ?? null}
-                  extraPlanted={removedPrep?.plantedCounts ?? null}
-                  year={year}
-                  onPick={(y) => {
-                    setPlaying(false);
-                    setYear(y);
-                  }}
-                />
-              }
-            />
-            <span style={{ minWidth: 36, flex: "none", whiteSpace: "nowrap", textAlign: "right", fontWeight: "bold", fontVariantNumeric: "tabular-nums" }}>{year}</span>
+        {trees && prepared && mode === "planted" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
+              <Button
+                size="sm"
+                square
+                active={playing}
+                title={playing ? "Pause (Space)" : "Play the years (Space)"}
+                aria-label={playing ? "Pause" : "Play"}
+                onClick={togglePlay}
+              >
+                {playing ? <PauseIcon /> : <PlayIcon />}
+              </Button>
+              <TrackSlider
+                min={YEAR_MIN}
+                max={yearMax}
+                value={year}
+                onChange={(v) => {
+                  setPlaying(false);
+                  setYear(v);
+                }}
+                format={String}
+                label="Year"
+                behind={
+                  <YearHistogram
+                    counts={prepared.yearCounts}
+                    felled={removedPrep?.removedCounts ?? null}
+                    extraPlanted={removedPrep?.plantedCounts ?? null}
+                    year={year}
+                  />
+                }
+              />
+              <span style={{ minWidth: 36, flex: "none", whiteSpace: "nowrap", textAlign: "right", fontWeight: "bold", fontVariantNumeric: "tabular-nums" }}>{year}</span>
+            </div>
+            <div style={{ fontSize: 11, minHeight: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {fmt(plantedTotals.thisYear)} dated {year}
+              {removedPrep && (
+                <>
+                  {" · "}
+                  <span style={{ color: plantedTotals.felled ? "#b01e10" : undefined }}>{fmt(plantedTotals.felled)} removed</span>
+                </>
+              )}
+              {" · "}
+              {fmt(plantedTotals.standing)} standing
+              {year >= INVENTORY[0] && year <= INVENTORY[1] ? (
+                <span style={{ opacity: 0.75 }}> · {INVENTORY[0]}–{INVENTORY[1]} dates are mostly the city&apos;s first inventory, not plantings</span>
+              ) : year < INVENTORY[0] ? (
+                <span style={{ opacity: 0.75 }}> · few trees were dated before the {INVENTORY[0]} inventory</span>
+              ) : null}
+            </div>
           </div>
-          <div style={{ fontSize: 11, minHeight: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {fmt(plantedTotals.thisYear)} dated {year}
-            {removedPrep && (
-              <>
-                {" · "}
-                <span style={{ color: plantedTotals.felled ? "#b01e10" : undefined }}>{fmt(plantedTotals.felled)} removed</span>
-              </>
-            )}
-            {" · "}
-            {fmt(plantedTotals.standing)} standing
-            {year >= INVENTORY[0] && year <= INVENTORY[1] ? (
-              <span style={{ opacity: 0.75 }}> · {INVENTORY[0]}–{INVENTORY[1]} dates are mostly the city&apos;s first inventory, not plantings</span>
-            ) : year < INVENTORY[0] ? (
-              <span style={{ opacity: 0.75 }}> · few trees were dated before the {INVENTORY[0]} inventory</span>
-            ) : null}
-          </div>
-        </div>
-      )}
+        )}
 
-      {trees && prepared && mode === "species" && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
-          {prepared.groups.map((g, k) => (
-            <button
-              key={g.key}
-              type="button"
-              onClick={() => setGroup((cur) => (cur === k ? null : k))}
-              title={group === k ? "Show every tree again" : `Show only ${g.label.toLowerCase()}`}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "1px 5px",
-                font: "inherit",
-                fontSize: 11,
-                cursor: "pointer",
-                background: group === k ? "#000080" : "transparent",
-                color: group === k ? "#ffffff" : "inherit",
-                border: "1px solid transparent",
-                borderColor: group === k ? "#000080" : "transparent",
-                opacity: group === null || group === k ? 1 : 0.55,
-              }}
-            >
-              <span style={{ width: 9, height: 9, background: g.color, border: "1px solid #000", flex: "none" }} />
-              {g.label}
-              <span style={{ opacity: 0.7, fontVariantNumeric: "tabular-nums" }}>{fmt(g.count)}</span>
-            </button>
-          ))}
+        {trees && prepared && mode === "species" && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+            {prepared.groups.map((g, k) => (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => setGroup((cur) => (cur === k ? null : k))}
+                title={group === k ? "Show every tree again" : `Show only ${g.label.toLowerCase()}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "1px 5px",
+                  font: "inherit",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  background: group === k ? "#000080" : "transparent",
+                  color: group === k ? "#ffffff" : "inherit",
+                  border: "1px solid transparent",
+                  borderColor: group === k ? "#000080" : "transparent",
+                  opacity: group === null || group === k ? 1 : 0.55,
+                }}
+              >
+                <span style={{ width: 9, height: 9, background: g.color, border: "1px solid #000", flex: "none" }} />
+                {g.label}
+                <span style={{ opacity: 0.7, fontVariantNumeric: "tabular-nums" }}>{fmt(g.count)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         </div>
-      )}
+      </div>
+
+      {controls && <div style={{ borderTop: "1px solid #808080", boxShadow: "inset 0 1px #fff" }}>{controls}</div>}
 
       <div style={{ ...SUNK, padding: "1px 4px", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {status}
@@ -2458,6 +2471,9 @@ export default function TreesWindow({
     </div>
   );
 }
+
+/** The coloring's row under the map: the Season view's slider, its month letters and its notes. */
+const MODE_ROW_H = 64;
 
 // react95's Slider centres its 18px thumb on the value, so it overhangs each
 // end of the track by half that — pad for it, and measure positions inside it.
@@ -2482,8 +2498,9 @@ const TOOLTIP_STYLE: React.CSSProperties = {
 /**
  * media.exe's seek bar, for a day or a year: react95's Slider with a navy fill
  * along the groove up to the thumb, and a tip saying where a click or a drag
- * would land. Whatever sits `above` or `below` it is inset to the track, so a
- * month or a year in it lines up with the same spot on the slider.
+ * would land. Whatever sits `above`, `below` or `behind` it is inset to the
+ * track, so a month or a year in it lines up with the same spot on the slider;
+ * `behind` fills the slider's own height, under the groove and thumb.
  */
 function TrackSlider({
   min,
@@ -2494,6 +2511,7 @@ function TrackSlider({
   label,
   above,
   below,
+  behind,
 }: {
   min: number;
   max: number;
@@ -2503,6 +2521,7 @@ function TrackSlider({
   label: string;
   above?: React.ReactNode;
   below?: React.ReactNode;
+  behind?: React.ReactNode;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -2527,6 +2546,11 @@ function TrackSlider({
         onPointerUp={() => setDragging(false)}
         onPointerCancel={() => setDragging(false)}
       >
+        {behind && (
+          <div aria-hidden style={{ position: "absolute", left: THUMB_INSET, right: THUMB_INSET, top: 0, bottom: 0, pointerEvents: "none" }}>
+            {behind}
+          </div>
+        )}
         <div
           aria-hidden
           style={{
@@ -2606,7 +2630,6 @@ function YearHistogram({
   felled,
   extraPlanted,
   year,
-  onPick,
 }: {
   counts: Int32Array;
   /** Trees taken down each year, hung red from the top. */
@@ -2614,7 +2637,6 @@ function YearHistogram({
   /** Removed trees' plantings, added to each year's bar. */
   extraPlanted: Int32Array | null;
   year: number;
-  onPick: (year: number) => void;
 }) {
   const planted = Array.from(counts, (c, k) => c + (extraPlanted?.[k] ?? 0));
   const max = Math.max(1, ...planted);
@@ -2625,12 +2647,8 @@ function YearHistogram({
     <svg
       viewBox={`0 0 ${n} ${H}`}
       preserveAspectRatio="none"
-      style={{ width: "100%", height: H, display: "block", cursor: "pointer", background: "rgb(14,20,16)" }}
-      onClick={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const k = Math.floor(((e.clientX - rect.left) / rect.width) * n);
-        onPick(YEAR_MIN + Math.max(0, Math.min(n - 1, k)));
-      }}
+      // Laid behind the year slider, as tall as it is: a click on it is the slider's.
+      style={{ width: "100%", height: "100%", display: "block", background: "rgb(14,20,16)" }}
       aria-label="Trees planted each year, and removed"
     >
       {planted.map((c, k) => {
