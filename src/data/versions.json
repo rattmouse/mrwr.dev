@@ -3,10 +3,10 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.7",
+      "version": "7.0.8",
       "era": "claude",
       "name": "Trees",
-      "date": "2026-10-07",
+      "date": "2026-10-08",
       "summary": "Seattle street and park tree map; season, planting and species views; tilted diorama; LiDAR canopy; parks and creeks; sunlight",
       "issues": [],
       "changes": [
@@ -48,7 +48,10 @@
         "Changed: tree views moved to File > Open as -s, -t, -a (trees.exe). Own icon each",
         "Changed: map views moved to File > Show as 2D, 2.5D, 2.5D+ (trees.exe). Were Flat, Tilt and Sun",
         "Changed: sliders and Reset moved onto the map, bottom right (trees.exe). Values on the knobs",
-        "Changed: window and taskbar title ./trees (trees.exe)"
+        "Changed: window and taskbar title ./trees (trees.exe)",
+        "Added: UW campus trees (./trees). 8,600 from UW Grounds' inventory, with the Parks layer",
+        "Added: Quad cherry bloom dates (./trees). First day in bloom each spring, from bud checks",
+        "Added: UW Facilities GIS credit (about.txt)"
       ]
     },
     {

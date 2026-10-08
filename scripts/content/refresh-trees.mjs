@@ -16,7 +16,7 @@
 // is what lets gzip find the pattern in them.
 //
 // trees.bin.gz — what the map needs, about 830KB:
-//   "TRE3"  u32 metaLength  meta (UTF-8 JSON: count, parkCount, bbox, species, posShift)
+//   "TRE3"  u32 metaLength  meta (UTF-8 JSON: count, parkCount, uwCount, bbox, species, posShift)
 //   then n-byte planes:
 //     dx lo, dx hi, dy lo, dy hi   position, quantized across meta.bbox to
 //                                  16 − posShift bits (x = east), as the
@@ -28,7 +28,8 @@
 //     flags                        bits 0–1 owner (0 private, 1 SDOT, 2 parks,
 //                                  3 other), bit 2 heritage, bit 3 exceptional,
 //                                  bit 4 from Parks' inventory (its "street"
-//                                  is then the park's name, and house is 0)
+//                                  is then the park's name, and house is 0),
+//                                  bit 5 from UW's campus inventory
 //
 // addresses.bin.gz — only the tree card and hover line need it, so the window
 // fetches it after the map is up, about 170KB:
@@ -48,6 +49,11 @@
 //                         bit 3 slabs cracked, bit 4 slab tilted, bit 5 all of
 //                         it repaired since, bit 6 matched by nearness, not id
 //   year                  latest inspection − 1900
+//
+// UW Grounds' campus inventory rides in trees.bin.gz too (flags bit 5, owner
+// "other", its "street" the university), with what else UW knows about each
+// one — tag, height, and for the Quad cherries their bloom record — in
+// uw.bin.gz (format at packUw).
 //
 // It also writes public/trees/terrain.bin.gz — the ground under them, for
 // trees.exe's Tilt view: USGS 3DEP elevation on square-degree cells across
@@ -79,6 +85,7 @@ const REMOVED_PATH = resolve(ROOT, "public/trees/removed.bin.gz");
 const CROWNS_PATH = resolve(ROOT, "public/trees/crowns.bin.gz");
 const PLACES_PATH = resolve(ROOT, "public/trees/places.bin.gz");
 const SIDEWALK_PATH = resolve(ROOT, "public/trees/sidewalk.bin.gz");
+const UW_PATH = resolve(ROOT, "public/trees/uw.bin.gz");
 /** Bits of position dropped: 0.4 m east–west, 0.8 m north–south — finer than the city's own placement. */
 const POS_SHIFT = 1;
 /** Terrain heights in half metres: plenty under 2.5× exaggeration, and half the file of decimetres. */
@@ -233,6 +240,47 @@ const GENUS_OF_COMMON = {
   alder: "Alnus",
 };
 
+/** The street layer's own row for each scientific name, so another inventory's tree of a kind it has takes its names. */
+function knownSpecies(street) {
+  const known = new Map();
+  for (const r of street) {
+    const key = cleanScientific(r.SCIENTIFIC_NAME).toLowerCase();
+    if (key && !known.has(key)) known.set(key, r);
+  }
+  return known;
+}
+
+/**
+ * A test for a street tree of `genus` within a couple of metres of a point —
+ * the same tree, inventoried twice.
+ */
+function nearStreetTree(street) {
+  const CELL = 10 / 111320;
+  const grid = new Map();
+  const cellOf = (lon, lat) => `${Math.floor(lon / (CELL * 1.48))},${Math.floor(lat / CELL)}`;
+  for (const r of street) {
+    if (!Number.isFinite(r.SHAPE_LAT) || !Number.isFinite(r.SHAPE_LNG)) continue;
+    const key = cellOf(r.SHAPE_LNG, r.SHAPE_LAT);
+    let list = grid.get(key);
+    if (!list) grid.set(key, (list = []));
+    list.push(r);
+  }
+  const lat0 = Math.cos(47.6 * (Math.PI / 180));
+  return (lon, lat, genus) => {
+    const [gx, gy] = cellOf(lon, lat).split(",").map(Number);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (const r of grid.get(`${gx + dx},${gy + dy}`) ?? []) {
+          const ex = (r.SHAPE_LNG - lon) * 111320 * lat0;
+          const ey = (r.SHAPE_LAT - lat) * 110574;
+          if (ex * ex + ey * ey < 4 && String(r.GENUS ?? "").trim() === genus) return true;
+        }
+      }
+    }
+    return false;
+  };
+}
+
 /**
  * Parks' trees in the street-tree layer's shape, so pack() takes both. A
  * species the street layer already has keeps the street layer's names, so the
@@ -247,11 +295,7 @@ async function fetchParkTrees(street) {
     "OBJECTID,PARK,COMMON,SPECIES,DBH_WL,EXCEPTIONAL_WL",
     "",
   );
-  const known = new Map();
-  for (const r of street) {
-    const key = cleanScientific(r.SCIENTIFIC_NAME).toLowerCase();
-    if (key && !known.has(key)) known.set(key, r);
-  }
+  const known = knownSpecies(street);
   // Common names to species, for the rows whose species is missing or garbled:
   // the street layer's names first, then the inventory's own good rows.
   const byCommon = new Map();
@@ -266,31 +310,7 @@ async function fetchParkTrees(street) {
     if (key && isSpecies(sci) && !byCommon.has(key)) byCommon.set(key, sci);
   }
 
-  // Street trees in 10 m buckets, by genus, to find a double.
-  const CELL = 10 / 111320;
-  const grid = new Map();
-  const cellOf = (lon, lat) => `${Math.floor(lon / (CELL * 1.48))},${Math.floor(lat / CELL)}`;
-  for (const r of street) {
-    if (!Number.isFinite(r.SHAPE_LAT) || !Number.isFinite(r.SHAPE_LNG)) continue;
-    const key = cellOf(r.SHAPE_LNG, r.SHAPE_LAT);
-    let list = grid.get(key);
-    if (!list) grid.set(key, (list = []));
-    list.push(r);
-  }
-  const lat0 = Math.cos(47.6 * (Math.PI / 180));
-  const near = (lon, lat, genus) => {
-    const [gx, gy] = cellOf(lon, lat).split(",").map(Number);
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        for (const r of grid.get(`${gx + dx},${gy + dy}`) ?? []) {
-          const ex = (r.SHAPE_LNG - lon) * 111320 * lat0;
-          const ey = (r.SHAPE_LAT - lat) * 110574;
-          if (ex * ex + ey * ey < 4 && String(r.GENUS ?? "").trim() === genus) return true;
-        }
-      }
-    }
-    return false;
-  };
+  const near = nearStreetTree(street);
 
   const rows = [];
   let doubles = 0;
@@ -334,6 +354,164 @@ async function fetchParkTrees(street) {
   return { rows, doubles };
 }
 
+// --- the University of Washington's campus trees ----------------------------
+
+/**
+ * UW Grounds' inventory of the Seattle campus, which the city's layers leave
+ * out (it's state land): about 8,900 trees, tagged, with trunks and heights.
+ */
+const UW_TREES_LAYER = "https://gis.maps.uw.edu/federated/rest/services/PublicData/PublicData/MapServer/37/query";
+/** Where UW Grounds publishes its spring bud checks, one CherryTreeBloomYYYY service a season. */
+const UW_MAPS_ORG = "https://services5.arcgis.com/6LVFZwzHP10W01nS/arcgis/rest/services";
+/** Bloom checks dated before this are typos (there are a couple from the 1990s). */
+const BLOOM_FIRST_YEAR = 2010;
+
+/**
+ * UW's trees in the street-tree layer's shape, like fetchParkTrees: the
+ * street layer's names for a species it has, the campus for an address, and
+ * any tree within a couple of metres of a street tree of the same genus — the
+ * planting strips along the campus edge — left to the street layer.
+ */
+async function fetchUwTrees(street) {
+  const features = await fetchFeatures(
+    UW_TREES_LAYER,
+    "1=1",
+    "OBJECTID,TreeNumber,SpeciesName,CommonName,DSH,Height,MeasurementDate",
+    "",
+  );
+  const known = knownSpecies(street);
+  const near = nearStreetTree(street);
+  const rows = [];
+  let doubles = 0;
+  for (const f of features) {
+    const a = f.attributes;
+    const lon = f.geometry?.x;
+    const lat = f.geometry?.y;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    let scientific = cleanScientific(a.SpeciesName).replace(/\s+(sp|spp)\.?$/i, "");
+    if (!isSpecies(scientific)) scientific = "";
+    const same = known.get(scientific.toLowerCase());
+    const genus = same ? String(same.GENUS ?? "").trim() : scientific ? scientific.split(" ")[0] : "Unknown";
+    if (near(lon, lat, genus)) {
+      doubles++;
+      continue;
+    }
+    // "08/10/2018", or "Measurement Date Over 10 Years Ago".
+    const measured = String(a.MeasurementDate ?? "").match(/\b(19|20)\d\d\b/);
+    rows.push({
+      uw: {
+        tag: Number(a.TreeNumber) || 0,
+        height: Math.max(0, Math.min(255, Math.round(Number(a.Height) || 0))),
+        measured: measured ? Number(measured[0]) - 1900 : 0,
+      },
+      UNITDESC: "University of Washington",
+      OWNERSHIP: "UW",
+      PLANTED_DATE: null,
+      SCIENTIFIC_NAME: same ? same.SCIENTIFIC_NAME : scientific,
+      COMMON_NAME: same ? same.COMMON_NAME : String(a.CommonName ?? "").trim() || "Unknown",
+      GENUS: genus,
+      HERITAGE: "N",
+      EXCEPTIONAL: "N",
+      DIAM: a.DSH,
+      SHAPE_LAT: lat,
+      SHAPE_LNG: lon,
+    });
+  }
+  return { rows, doubles };
+}
+
+/**
+ * The Quad cherries' bloom record, by tag: UW Grounds checks each one's buds
+ * every few days through the spring. For each tree, the day each year it was
+ * first seen in bloom (the "In Bloom" stage, or half its blossoms open), and
+ * the last stage anyone wrote down. The newest season's service is used.
+ */
+async function fetchCherryBloom() {
+  const { services } = await getJson(`${UW_MAPS_ORG}?f=json`);
+  const seasons = services
+    .map((s) => s.name.match(/^CherryTreeBloom(\d{4})$/))
+    .filter(Boolean)
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+  if (!seasons.length) throw new Error("no CherryTreeBloomYYYY service");
+  const service = `${UW_MAPS_ORG}/${seasons[0][0]}/FeatureServer`;
+  const { tables = [] } = await getJson(`${service}?f=json`);
+  const table = tables.find((t) => /observation/i.test(t.name)) ?? tables[0];
+  if (!table) throw new Error(`${seasons[0][0]} has no observations table`);
+  const rows = await fetchAll(
+    `${service}/${table.id}/query`,
+    "1=1",
+    "OBJECTID,TreeNumber,CurrentStage,PercentBlossomsInBloom,Date",
+  );
+  const byTag = new Map();
+  for (const r of rows) {
+    const tag = Number(String(r.TreeNumber ?? "").trim());
+    if (!tag || !r.Date) continue;
+    const d = new Date(r.Date);
+    const year = d.getUTCFullYear();
+    if (year < BLOOM_FIRST_YEAR) continue;
+    let t = byTag.get(tag);
+    if (!t) byTag.set(tag, (t = { blooms: {}, stage: null, seen: 0 }));
+    // Pacific time is a few hours behind; a check at 5pm stays on its own day.
+    const day = new Date(r.Date - 8 * 3600 * 1000).toISOString().slice(0, 10);
+    if (r.CurrentStage === "In Bloom" || Number(r.PercentBlossomsInBloom) >= 50) {
+      if (!t.blooms[year] || day < t.blooms[year]) t.blooms[year] = day;
+    }
+    if (r.CurrentStage && r.Date > t.seen) {
+      t.seen = r.Date;
+      t.stage = r.CurrentStage;
+    }
+  }
+  return { byTag, source: seasons[0][0], observations: rows.length };
+}
+
+/**
+ * uw.bin.gz — what the campus card says beyond trees.bin.gz, about 25KB. Its
+ * rows are indexes into trees.bin.gz's order, like sidewalk.bin.gz:
+ *   "UWT1"  u32 metaLength  meta (JSON: count, cherries)
+ *   tree b0, b1, b2      the tree's index, 24 bits, as the step from the row before
+ *   tag lo, tag hi       UW Grounds' tag number
+ *   height               feet, 0 = not measured
+ *   measured             year last measured − 1900, 0 = over ten years ago
+ * meta.cherries is [row, stage, last seen (YYYY-MM-DD), {year: first day in bloom}].
+ */
+function packUw(parsed, bloom) {
+  const rows = [];
+  parsed.forEach((t, i) => {
+    if (t.uw) rows.push({ i, ...t.uw });
+  });
+  const n = rows.length;
+  const idx = Buffer.alloc(n * 3);
+  let prev = 0;
+  rows.forEach((t, k) => {
+    const d = t.i - prev;
+    prev = t.i;
+    idx[k] = d & 255;
+    idx[n + k] = (d >>> 8) & 255;
+    idx[n * 2 + k] = (d >>> 16) & 255;
+  });
+  const cherries = [];
+  let matched = 0;
+  rows.forEach((r, k) => {
+    const c = bloom?.byTag.get(r.tag);
+    if (!c) return;
+    matched++;
+    cherries.push([k, c.stage, c.seen ? new Date(c.seen - 8 * 3600 * 1000).toISOString().slice(0, 10) : null, c.blooms]);
+  });
+  const body = Buffer.concat([
+    idx,
+    planes16(rows.map((r) => r.tag)),
+    Buffer.from(rows.map((r) => r.height)),
+    Buffer.from(rows.map((r) => r.measured)),
+  ]);
+  const meta = {
+    source: "University of Washington Grounds, PublicTrees" + (bloom ? ` and ${bloom.source}` : ""),
+    fetched: new Date().toISOString(),
+    count: n,
+    cherries,
+  };
+  return { bytes: withHeader("UWT1", meta, body), n, cherries: matched, unmatched: bloom ? bloom.byTag.size - matched : 0 };
+}
+
 /** The layer's scientific names are cut off at 30 characters and use backticks for cultivar quotes. */
 function cleanScientific(name) {
   let s = String(name ?? "").replace(/`/g, "'").replace(/\s+/g, " ").trim();
@@ -346,7 +524,7 @@ function owner(code) {
   if (code === "PRIV") return 0;
   if (code === "SDOT") return 1;
   if (code === "PARK") return 2;
-  return 3;
+  return 3; // UW, and anyone else
 }
 
 function pack(rows) {
@@ -384,7 +562,7 @@ function pack(rows) {
     // "2033 1ST AV" splits into a house number and a street the next tree on
     // the block shares; "31ST AVE AND E JEFFERSON ST" stays whole.
     const desc = String(r.UNITDESC ?? "").replace(/\s+/g, " ").trim();
-    const m = r.park ? null : desc.match(/^(\d{1,5}) (.+)$/);
+    const m = r.park || r.uw ? null : desc.match(/^(\d{1,5}) (.+)$/);
     let house = 0;
     let street = desc;
     if (m && Number(m[1]) > 0 && Number(m[1]) < 65536) {
@@ -400,10 +578,14 @@ function pack(rows) {
     }
     const diam = Math.max(0, Math.min(255, Math.round(Number(r.DIAM) || 0)));
     const flags =
-      owner(r.OWNERSHIP) | (r.HERITAGE === "Y" ? 4 : 0) | (r.EXCEPTIONAL === "Y" ? 8 : 0) | (r.park ? 16 : 0);
+      owner(r.OWNERSHIP) |
+      (r.HERITAGE === "Y" ? 4 : 0) |
+      (r.EXCEPTIONAL === "Y" ? 8 : 0) |
+      (r.park ? 16 : 0) |
+      (r.uw ? 32 : 0);
     const x = Math.round(((r.SHAPE_LNG - west) / (east - west)) * 65535);
     const y = Math.round(((r.SHAPE_LAT - south) / (north - south)) * 65535);
-    return { x, y, sp, st, house, year, diam, flags, unit: r.park ? null : r.UNITID };
+    return { x, y, sp, st, house, year, diam, flags, unit: r.park || r.uw ? null : r.UNITID, uw: r.uw ?? null };
   });
 
   // Block by block: neighbours share a street and run on in house numbers,
@@ -413,10 +595,11 @@ function pack(rows) {
   const delta = (key) => deltas(parsed, key);
 
   const meta = {
-    source: "City of Seattle, SDOT Trees (Active) and Seattle Parks and Recreation Trees",
+    source: "City of Seattle, SDOT Trees (Active) and Seattle Parks and Recreation Trees; University of Washington Grounds",
     fetched: new Date().toISOString(),
     count: n,
     parkCount: rows.filter((r) => r.park).length,
+    uwCount: rows.filter((r) => r.uw).length,
     bbox: { south, north, west, east },
     posShift: POS_SHIFT,
     species,
@@ -1571,7 +1754,8 @@ async function main() {
     (await isFresh(ADDR_PATH, "TRA1")) &&
     (await isFresh(REMOVED_PATH, "RMV1")) &&
     (await isFresh(CROWNS_PATH, "CRW1")) &&
-    (await isFresh(SIDEWALK_PATH, "SDW1"));
+    (await isFresh(SIDEWALK_PATH, "SDW1")) &&
+    (await isFresh(UW_PATH, "UWT1"));
   if (fresh) {
     console.log(`[trees] ${OUT_PATH} and the rest are under a week old; keeping them (--force to refetch).`);
   } else {
@@ -1587,7 +1771,25 @@ async function main() {
     } catch (err) {
       console.warn(`[trees] warning: park-tree fetch failed (${err.message}); street trees only.`);
     }
-    const packed = pack(rows.concat(parkRows));
+    // So does UW's campus inventory, and the Quad cherries' bloom record with it.
+    let uwRows = [];
+    let bloom = null;
+    try {
+      console.log("[trees] fetching UW Grounds' campus tree inventory...");
+      const uw = await fetchUwTrees(rows);
+      uwRows = uw.rows;
+      console.log(`[trees] ${uwRows.length} campus trees (${uw.doubles} already street trees, left out)`);
+      try {
+        console.log("[trees] fetching UW Grounds' cherry bloom checks...");
+        bloom = await fetchCherryBloom();
+        console.log(`[trees] ${bloom.observations} bud checks on ${bloom.byTag.size} trees, from ${bloom.source}`);
+      } catch (err) {
+        console.warn(`[trees] warning: cherry bloom fetch failed (${err.message}); the campus cards go without.`);
+      }
+    } catch (err) {
+      console.warn(`[trees] warning: UW tree fetch failed (${err.message}); no campus trees.`);
+    }
+    const packed = pack(rows.concat(parkRows, uwRows));
     const mapGz = gzipSync(packed.map, { level: 9 });
     const addrGz = gzipSync(packed.addresses, { level: 9 });
     await writeAtomic(OUT_PATH, mapGz);
@@ -1597,6 +1799,19 @@ async function main() {
       `[trees] wrote ${packed.n} trees, ${packed.species} species, ${packed.streets} streets — ` +
         `map ${(mapGz.length / 1e6).toFixed(2)}MB, addresses ${(addrGz.length / 1e6).toFixed(2)}MB gzipped`,
     );
+
+    // Its rows are indexes into the trees just written, so it goes with them, or not at all.
+    if (uwRows.length) {
+      const uw = packUw(packed.parsed, bloom);
+      const gz = gzipSync(uw.bytes, { level: 9 });
+      await writeAtomic(UW_PATH, gz);
+      console.log(
+        `[trees] wrote ${uw.n} campus tree notes, ${uw.cherries} with a bloom record ` +
+          `(${uw.unmatched} checked trees matched to none) — ${(gz.length / 1e3).toFixed(0)}KB gzipped`,
+      );
+    } else {
+      await rm(UW_PATH, { force: true });
+    }
 
     // The extras are best-effort: trees.exe draws without any of them.
     try {

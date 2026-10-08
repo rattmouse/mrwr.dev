@@ -4,13 +4,17 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Button, ProgressBar, Slider, Window, WindowContent, WindowHeader } from "react95";
 import { PauseIcon, PlayIcon } from "@/components/common/MediaGlyphs";
 import {
+  CherryBloom,
   Crowns,
+  GROUNDS_TREE,
   isParkTree,
+  isUwTree,
   loadAddresses,
   loadCrowns,
   loadRemoved,
   loadSidewalk,
   loadTrees,
+  loadUw,
   RemovedTrees,
   SIDEWALK_BY_NEARNESS,
   SIDEWALK_CRACKED,
@@ -25,6 +29,7 @@ import {
   TreeSidewalk,
   treeYear,
   Trees,
+  UwTrees,
 } from "@/lib/trees";
 import { dayLabel, doy, isConifer, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { loadTerrain, Terrain } from "@/lib/terrain";
@@ -491,6 +496,7 @@ export default function TreesWindow({
   const [addresses, setAddresses] = useState<TreeAddresses | null>(null);
   const [removed, setRemoved] = useState<RemovedTrees | null>(null);
   const [sidewalk, setSidewalk] = useState<TreeSidewalk | null>(null);
+  const [uw, setUw] = useState<UwTrees | null>(null);
   // Set a moment after the map is up: the ground starts coming down then, so
   // Tilt is usually ready before it's asked for.
   const [prefetchGround, setPrefetchGround] = useState(false);
@@ -509,6 +515,11 @@ export default function TreesWindow({
         loadSidewalk(abort.signal)
           .then(setSidewalk)
           .catch(() => {});
+        // UW Grounds' tags, heights and cherry bloom checks, for the campus trees' cards.
+        if (loaded.uwCount)
+          loadUw(abort.signal)
+            .then(setUw)
+            .catch(() => {});
         // The trees that have come down, for the Planted timeline.
         loadRemoved(abort.signal)
           .then(setRemoved)
@@ -642,7 +653,7 @@ export default function TreesWindow({
     const keys = new Uint16Array(packed.n);
     for (let k = 0; k < packed.n; k++) {
       const i = packed.index[k];
-      if (i < nS) keys[k] = (trees.flags[i] & 16 ? parks : street) ? trees.species16[i] : NO_KEY;
+      if (i < nS) keys[k] = (trees.flags[i] & GROUNDS_TREE ? parks : street) ? trees.species16[i] : NO_KEY;
       else if (i < at) keys[k] = NO_KEY;
       else keys[k] = shownCrowns ? S + shownCrowns.conifer[i - at] : NO_KEY;
     }
@@ -739,8 +750,8 @@ export default function TreesWindow({
         }
         return true;
       }
-      // A street tree with the Street layer, a park tree with the Parks layer.
-      if (!(trees.flags[i] & 16 ? parks : street)) return false;
+      // A street tree with the Street layer, a park or campus tree with the Parks layer.
+      if (!(trees.flags[i] & GROUNDS_TREE ? parks : street)) return false;
       if (mode === "planted") {
         const y = trees.year[i];
         return y !== 0 && 1900 + y <= year;
@@ -956,7 +967,7 @@ export default function TreesWindow({
           }
           // Street trees go with the Street layer, park trees with Parks.
           if (!street || !parks) {
-            for (let i = 0; i < nS; i++) if (!(trees.flags[i] & 16 ? parks : street)) colors[i] = 0;
+            for (let i = 0; i < nS; i++) if (!(trees.flags[i] & GROUNDS_TREE ? parks : street)) colors[i] = 0;
           }
           for (let r = 0; r < nR; r++) {
             colors[nS + r] = street && removedPrep && mode === "planted" ? removedColor(removedPrep, r, year, agePalette) : 0;
@@ -1048,7 +1059,7 @@ export default function TreesWindow({
       const n = order.length;
       for (let k = 0; k < n; k++) {
         const i = order[k];
-        if (!(fl[i] & 16 ? parks : street)) continue;
+        if (!(fl[i] & GROUNDS_TREE ? parks : street)) continue;
         let color: number;
         if (planted) {
           const y = yr[i];
@@ -1813,6 +1824,29 @@ export default function TreesWindow({
     const flags = trees.flags[i];
     const count = prepared?.speciesCount[trees.species16[i]] ?? 0;
     const measured = crowns?.streetHeight[i] ?? 0;
+    if (isUwTree(trees, i)) {
+      const k = uw?.row.get(i);
+      const ft = k !== undefined ? uw!.height[k] : 0;
+      const when = k !== undefined && uw!.measured[k] ? `, ${1900 + uw!.measured[k]}` : "";
+      const rows: [string, string][] = [
+        ["Species", speciesLabel(sp)],
+        ["Campus", "University of Washington"],
+      ];
+      if (k !== undefined && uw!.tag[k]) rows.push(["Tag", String(uw!.tag[k])]);
+      rows.push(["Trunk", trees.diam[i] ? `${trees.diam[i]} in across` : "not measured"]);
+      if (measured > 0) rows.push(["Height", `${metres(measured)} (LiDAR, 2021)`]);
+      else if (ft) rows.push(["Height", `${metres(ft * 0.3048)} (UW Grounds${when})`]);
+      rows.push(["Cared for by", "UW Grounds"]);
+      const notes = ["From UW Grounds' inventory of the trees on its Seattle campus."];
+      const cherry = k !== undefined ? uw!.cherries.get(k) : undefined;
+      if (cherry) {
+        const bloom = cherryRows(cherry);
+        rows.push(...bloom.rows);
+        if (bloom.note) notes.push(bloom.note);
+      }
+      notes.push(count <= 1 ? "The only one inventoried." : `One of ${fmt(count)} inventoried across the city and campus.`);
+      return { kind: cherry ? "Quad cherry" : "Campus tree", title: sp.common, rows, notes, italicSpecies: true };
+    }
     const inPark = isParkTree(trees, i);
     // Some records have no address, or only a number; the park it stands in will do, if it's in one.
     let address = treeAddress(addresses, i);
@@ -1856,7 +1890,8 @@ export default function TreesWindow({
     const get = (k: string) => card.rows.find(([key]) => key === k)?.[1];
     const parts = [
       card.title,
-      get("Address") ?? get("Park"),
+      get("Address") ?? get("Park") ?? get("Campus"),
+      get("Blossom") ? `in bloom ${get("Blossom")!.split("; ")[0]}` : null,
       get("Height"),
       get("Trunk"),
       get("Roots") ? `roots ${get("Roots")}` : null,
@@ -1889,7 +1924,15 @@ export default function TreesWindow({
   else if (canopy && crowns && mode !== "planted")
     status = `${fmt(trees.count)} street and park trees and ${fmt(crowns.count)} more from the city's 2021 LiDAR survey`;
   else if (mode === "planted" && removed)
-    status = `${fmt(trees.count - trees.parkCount)} street trees standing, ${fmt(removed.count)} more the city has taken down`;
+    status = `${fmt(trees.count - trees.parkCount - trees.uwCount)} street trees standing, ${fmt(removed.count)} more the city has taken down`;
+  else if (trees.parkCount && trees.uwCount)
+    status = `${fmt(trees.count - trees.parkCount - trees.uwCount)} street trees, ${fmt(trees.parkCount)} in parks and ${fmt(
+      trees.uwCount,
+    )} on the UW campus · fetched ${new Date(trees.fetched).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })}`;
   else if (trees.parkCount)
     status = `${fmt(trees.count - trees.parkCount)} street trees and ${fmt(trees.parkCount)} in parks · fetched ${new Date(
       trees.fetched,
@@ -2337,6 +2380,29 @@ function sidewalkRows(sw: TreeSidewalk, i: number): { rows: [string, string][]; 
     (f & SIDEWALK_REPAIRED ? ", since repaired." : ".") +
     (f & SIDEWALK_BY_NEARNESS ? " The inspector named no tree; this is the nearest." : "");
   return { rows, note };
+}
+
+/** "2025-03-31" → "Mar 31, 2025". */
+function dayOf(iso: string, year = true): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: year ? "numeric" : undefined,
+    timeZone: "UTC",
+  });
+}
+
+/** A Quad cherry's bloom record as card rows: the day it opened in the last four springs it was checked, newest first, and the last check. */
+function cherryRows(c: CherryBloom): { rows: [string, string][]; note: string | null } {
+  const rows: [string, string][] = [];
+  const years = Object.keys(c.blooms).sort().reverse();
+  if (years.length) rows.push(["Blossom", years.slice(0, 4).map((y) => dayOf(c.blooms[y])).join("; ")]);
+  if (c.stage && c.seen) rows.push(["Last check", `${c.stage.toLowerCase()}, ${dayOf(c.seen)}`]);
+  if (!rows.length) return { rows, note: null };
+  return {
+    rows,
+    note: "UW Grounds checks the Quad cherries' buds every few days each spring; Blossom is the first day it was seen in bloom.",
+  };
 }
 
 /** The scientific name, or the genus, or — for a record with neither — saying so. */

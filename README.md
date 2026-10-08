@@ -13,6 +13,7 @@ my website
 - music from [strudel.cc](https://strudel.cc) - https://strudel.cc
 - fluid from [PavelDoGreat](https://github.com/PavelDoGreat/WebGL-Fluid-Simulation) - https://github.com/PavelDoGreat/WebGL-Fluid-Simulation
 - trees from [Seattle GeoData](https://data-seattlecitygis.opendata.arcgis.com/) - https://data-seattlecitygis.opendata.arcgis.com/
+- campus from [UW Facilities GIS](https://facilities.uw.edu/services/space/gis-maps) - https://facilities.uw.edu/services/space/gis-maps
 - elevation from [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) - https://www.usgs.gov/3d-elevation-program
 - seasons tuned to [USA-NPN](https://www.usanpn.org/) observations - https://www.usanpn.org/
 - some help from [Chat GPT](https://chatgpt.com/) - https://chatgpt.com/

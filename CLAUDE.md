@@ -57,7 +57,8 @@ Orientation notes for working in this repo.
   browser. Each sheet gets its own hand-judged crop. Re-run it only when one of
   those photographs changes or another sheet is painted, and pass `--debug` for
   a contact sheet of the cut-outs to check.
-- `public/trees/` (trees.exe: street and Parks-inventory trees, removed trees,
+- `public/trees/` (trees.exe: street, Parks- and UW-campus-inventory trees and
+  the Quad cherries' bloom checks, removed trees,
   LiDAR crowns, terrain, and `places.bin.gz` — parks, restoration zones,
   P-Patches, creeks) is gitignored and build-time only, refreshed by
   `scripts/content/refresh-trees.sh` (run by `deploy.sh`; skips files under a
