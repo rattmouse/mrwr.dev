@@ -5,9 +5,9 @@
  * the trees (the format is written up there).
  */
 
-import { fetchGzip, Progress, readHeader } from "@/lib/trees";
+import { dataUrl, fetchGzip, Progress, readHeader } from "@/lib/trees";
 
-export const TERRAIN_URL = "/trees/terrain.bin.gz";
+export const TERRAIN_URL = dataUrl("/trees/terrain.bin.gz");
 
 export type Terrain = {
   w: number;
