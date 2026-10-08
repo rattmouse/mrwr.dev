@@ -1152,7 +1152,15 @@ export default function TreesWindow({
           ctx.lineTo(x - half, bottom);
           ctx.closePath();
         } else if (outline) {
-          ctx.arc(outline.x / dpr, outline.y / dpr, Math.max(5, outline.r / dpr + 3), 0, Math.PI * 2);
+          ctx.ellipse(
+            outline.x / dpr,
+            outline.y / dpr,
+            Math.max(5, outline.r / dpr + 3),
+            Math.max(5, outline.ry / dpr + 3),
+            0,
+            0,
+            Math.PI * 2,
+          );
         } else {
           const sx = w / 2 + (scene.mx[i] - v.cx) * v.s;
           const sy = h / 2 - (scene.my[i] - v.cy) * v.s;
@@ -1432,8 +1440,9 @@ export default function TreesWindow({
             d = Math.sqrt(ex * ex + ey * ey) / dpr;
             size = Math.max(o.half, (o.bottom - o.top) / 2) / dpr;
           } else {
-            d = Math.max(0, Math.hypot(pxd - o.x, pyd - o.y) - o.r) / dpr;
-            size = o.r / dpr;
+            // Squashed back to a circle the oval's width, then measured as one.
+            d = Math.max(0, Math.hypot(pxd - o.x, ((pyd - o.y) * o.r) / Math.max(0.5, o.ry)) - o.r) / dpr;
+            size = Math.max(o.r, o.ry) / dpr;
           }
           // A little to spare, and a small tree still 9 pixels' worth to aim at.
           if (d > Math.max(3, 9 - size) || !isLive(i)) continue;

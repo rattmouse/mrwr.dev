@@ -15,13 +15,20 @@
  * so they can go in any order. Only the ones within REACH are drawn, out of a
  * coarse grid; the fog has nearly swallowed them by then.
  *
+ * The ground is Tilt's wireframe: its dark fill, its green lines along the
+ * terrain grid (every cell, or every other, or halved, whichever keeps them a
+ * few pixels apart at that distance), the parks solid green, and the creeks,
+ * gardens, track and areaways draped over it (placesDraw.ts).
+ *
  * Off the edge of the city's rectangle is the table the diorama stands on.
  *
  * Everything here works on a raw Uint32 ImageData buffer, like treesTilt.ts.
  */
 
 import type { Ground } from "@/lib/treesTilt";
-import { WATER } from "@/lib/treesTilt";
+import { crownBall, groundZ, WATER } from "@/lib/treesTilt";
+import { OVERLAY_RESTORATION, overlayAt, Places } from "@/lib/places";
+import { drapeWalkPlaces, PlacesShown } from "@/lib/placesDraw";
 
 /** Metres from the ground to the eye. */
 export const EYE = 1.7;
@@ -49,7 +56,14 @@ const ZENITH = [104, 128, 152] as const;
 const TABLE = pack(20, 26, 22);
 const FLAT_LAND = pack(60, 68, 52);
 const TRUNK = pack(70, 52, 40);
+/** Stood on it, Tilt's wireframe wants to be a little lighter than seen from up high. */
 const GROUND_LIGHT = 1.35;
+/** The fewest pixels between the wireframe's lines. */
+const WIRE_GAP = 9;
+/** The most wireframe lines one step of a column can cross. */
+const RUNS = 6;
+/** Places further than this aren't draped: past it they're under a pixel and fogged out. */
+const PLACE_REACH = 1200;
 /** The map's water is a dark navy for under the trees' dots; stood on the shore it's a lake, and blue. */
 const LAKE = [58, 112, 172] as const;
 /** Water keeps its colour further out than land does: only this much of the fog. */
@@ -73,6 +87,39 @@ function fogged(c: number, k: number): number {
 
 function shade(c: number, k: number): number {
   return pack(Math.min(255, (c & 255) * k), Math.min(255, ((c >>> 8) & 255) * k), Math.min(255, ((c >>> 16) & 255) * k));
+}
+
+/**
+ * Where a column passes over lines of the wireframe between two steps: a
+ * grid coordinate going from `a` to `b`, in lines, and the column's half
+ * width in the same, `hw`. Each stretch within `hw` of a whole number goes
+ * into `runs` as fractions of the way from `a` to `b`, after the `n` already
+ * there; returns how many there are now.
+ */
+function lineRuns(a: number, b: number, hw: number, runs: Float32Array, n: number): number {
+  const d = b - a;
+  const lo = Math.ceil((a < b ? a : b) - hw);
+  const hi = Math.floor((a < b ? b : a) + hw);
+  for (let m = lo; m <= hi && n < RUNS; m++) {
+    let t0: number;
+    let t1: number;
+    if (d > -1e-9 && d < 1e-9) {
+      if (Math.abs(m - b) >= hw) continue;
+      t0 = 0;
+      t1 = 1;
+    } else {
+      t0 = (m - hw - a) / d;
+      t1 = (m + hw - a) / d;
+      if (t0 > t1) [t0, t1] = [t1, t0];
+      if (t1 < 0 || t0 > 1) continue;
+      if (t0 < 0) t0 = 0;
+      if (t1 > 1) t1 = 1;
+    }
+    runs[n * 2] = t0;
+    runs[n * 2 + 1] = t1;
+    n++;
+  }
+  return n;
 }
 
 // --- the world --------------------------------------------------------------------
@@ -174,7 +221,14 @@ export function walkFrame(W: number, H: number, buf: Uint32Array): WalkFrame {
 
 // --- drawing ----------------------------------------------------------------------
 
-export function renderWalk(frame: WalkFrame, cam: WalkCamera, w: WalkWorld) {
+export function renderWalk(
+  frame: WalkFrame,
+  cam: WalkCamera,
+  w: WalkWorld,
+  /** The parks, creeks, gardens, track and areaways, once they're in, and which of them to show. */
+  places: Places | null = null,
+  show: PlacesShown = { parks: true, water: true, underground: true },
+) {
   const { W, H, buf, depth, treeDepth, id } = frame;
   const f = H / 2 / Math.tan(FOV / 2);
   const horizon = H / 2 + f * Math.tan(cam.pitch);
@@ -213,11 +267,45 @@ export function renderWalk(frame: WalkFrame, cam: WalkCamera, w: WalkWorld) {
   const hazeG = HAZE[1];
   const hazeB = HAZE[2];
 
+  // The wireframe's spacing at each step, in grid cells: lines across the
+  // screen a few pixels apart, and lines going away from you a few pixels
+  // apart where they cross the ground, foreshortened by how high the eye is
+  // above it. Powers of two, so the lines nearer in include the further ones'.
+  const overlay = places && show.parks ? places.overlay : null;
+  const every = new Float32Array(nSteps);
+  const halfX = new Float32Array(nSteps);
+  const halfY = new Float32Array(nSteps);
+  if (g) {
+    const perM = Math.max(Math.abs(ax), Math.abs(ay));
+    const lift = Math.max(EYE, cam.z - groundZ(g, cam.x, cam.y));
+    for (let k = 0; k < nSteps; k++) {
+      const z = zs[k];
+      // Pixels per cell across, and down the screen.
+      const across = fz[k] / perM;
+      const down = (fz[k] * lift) / z / perM;
+      const px = Math.min(across, down);
+      let e = 1;
+      while (e * px < WIRE_GAP && e < 1 << 12) e *= 2;
+      while (e * px >= WIRE_GAP * 2 && e > 1 / 64) e /= 2;
+      every[k] = e;
+      // Half a column's width, in lines: a line is on the column within it.
+      halfX[k] = (Math.abs(ax * rx) / fz[k] / e) * 0.5;
+      halfY[k] = (Math.abs(ay * ry) / fz[k] / e) * 0.5;
+    }
+  }
+  // The rows each step's span crosses a line on, as fractions of the way from the step before.
+  const runs = new Float32Array(RUNS * 2);
+
   for (let x = 0; x < W; x++) {
     const t = (x + 0.5 - W / 2) / f;
     const dx = fx + rx * t;
     const dy = fy + ry * t;
     let yb = H;
+    // Where the step before sat on the grid and on screen: the wireframe's
+    // lines are found between the two.
+    let lastX = NaN;
+    let lastY = NaN;
+    let lastTop = NaN;
     for (let k = 0; k < nSteps; k++) {
       const z = zs[k];
       const wx = cam.x + dx * z;
@@ -261,6 +349,23 @@ export function renderWalk(frame: WalkFrame, cam: WalkCamera, w: WalkWorld) {
       }
       const ys = horizon - (h - cam.z) * fz[k];
       const y0 = ys <= 0 ? 0 : Math.ceil(ys);
+      // Where the column, a pixel wide, passed over a line of the wireframe
+      // since the step before: a line across the screen for a row, one running
+      // away up it for as much of the span as it stays in the column.
+      let nRuns = 0;
+      if (gc && !off && !wet) {
+        const gx = ax * wx + bx;
+        const gy = ay * wy + by;
+        if (lastX === lastX) {
+          const e = every[k];
+          nRuns = lineRuns(lastX / e, gx / e, halfX[k], runs, 0);
+          nRuns = lineRuns(lastY / e, gy / e, halfY[k], runs, nRuns);
+        }
+        lastX = gx;
+        lastY = gy;
+      } else lastX = NaN;
+      const fromTop = lastTop;
+      lastTop = ys;
       if (y0 < yb) {
         let r: number;
         let gg: number;
@@ -275,35 +380,50 @@ export function renderWalk(frame: WalkFrame, cam: WalkCamera, w: WalkWorld) {
           gg = LAKE[1];
           bb = LAKE[2];
         } else {
-          const a = gc[ci];
-          const b = gc[ci + 1];
-          const c = gc[ci + gw];
-          const d = gc[ci + gw + 1];
-          // Only the land cells round it: on the shore, the water's navy would
-          // otherwise bleed into the grass as a grey-blue band.
-          let wa = a === WATER ? 0 : (1 - tx) * (1 - ty);
-          let wb = b === WATER ? 0 : tx * (1 - ty);
-          let wc = c === WATER ? 0 : (1 - tx) * ty;
-          let wd = d === WATER ? 0 : tx * ty;
-          const land = wa + wb + wc + wd;
-          wa /= land;
-          wb /= land;
-          wc /= land;
-          wd /= land;
-          // The map's colours are for looking down on from a height; stood on,
-          // the ground wants to be lighter. And close to, a grain in the grass,
-          // or the ground under your feet is one flat smear.
-          let k2 = GROUND_LIGHT;
-          if (z < 80) {
-            const n = (Math.imul((wx * 3) | 0, 73856093) ^ Math.imul((wy * 3) | 0, 19349663)) & 15;
-            k2 *= 1 + ((n - 7.5) / 7.5) * 0.045 * (1 - z / 80);
+          // The line's colour from the land cells round it, leaving the water
+          // out, or the parks' own green; the fill between, dark.
+          let fill = g!.fillColor;
+          let line: number;
+          const o = overlay ? overlayAt(overlay, wx, wy) : 0;
+          if (o) {
+            fill = o & OVERLAY_RESTORATION ? g!.restorationColor : g!.parkColor;
+            line = shade(fill, 1.3);
+          } else {
+            const gw2 = g!.wire;
+            const wa = gc[ci] === WATER ? 0 : (1 - tx) * (1 - ty);
+            const wb = gc[ci + 1] === WATER ? 0 : tx * (1 - ty);
+            const wc = gc[ci + gw] === WATER ? 0 : (1 - tx) * ty;
+            const wd = gc[ci + gw + 1] === WATER ? 0 : tx * ty;
+            const sum = wa + wb + wc + wd || 1;
+            const a = gw2[ci];
+            const b = gw2[ci + 1];
+            const c = gw2[ci + gw];
+            const d = gw2[ci + gw + 1];
+            line = pack(
+              ((a & 255) * wa + (b & 255) * wb + (c & 255) * wc + (d & 255) * wd) / sum,
+              (((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd) / sum,
+              (((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd) / sum,
+            );
           }
-          r = ((a & 255) * wa + (b & 255) * wb + (c & 255) * wc + (d & 255) * wd) * k2;
-          gg = (((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd) * k2;
-          bb = (((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd) * k2;
-          if (r > 255) r = 255;
-          if (gg > 255) gg = 255;
-          if (bb > 255) bb = 255;
+          const fog = fogs[k];
+          const lineOut = fogged(shade(line, GROUND_LIGHT), fog);
+          const fillOut = fogged(shade(fill, GROUND_LIGHT), fog);
+          for (let y = y0; y < yb; y++) {
+            const p = y * W + x;
+            buf[p] = fillOut;
+            depth[p] = z;
+          }
+          for (let n = 0; n < nRuns; n++) {
+            const a = fromTop + (ys - fromTop) * runs[n * 2];
+            const b = fromTop + (ys - fromTop) * runs[n * 2 + 1];
+            const r0 = Math.max(y0, Math.floor(a < b ? a : b));
+            const r1 = Math.min(yb - 1, Math.max(r0, Math.ceil(a < b ? b : a) - 1));
+            for (let y = r0; y <= r1; y++) buf[y * W + x] = lineOut;
+          }
+          yb = y0;
+          if (yb <= 0) break;
+          if (zCeil >= cam.z ? horizon - (zCeil - cam.z) * fz[k] >= yb : horizon >= yb) break;
+          continue;
         }
         const fog = wet && !off ? fogs[k] * LAKE_FOG : fogs[k];
         const out =
@@ -328,6 +448,33 @@ export function renderWalk(frame: WalkFrame, cam: WalkCamera, w: WalkWorld) {
       buf[p] = sky[y];
       depth[p] = Infinity;
     }
+  }
+
+  if (places) {
+    drapeWalkPlaces(
+      buf,
+      depth,
+      {
+        W,
+        H,
+        near: NEAR,
+        f,
+        cx: cam.x,
+        cy: cam.y,
+        reach: PLACE_REACH,
+        project: (mx, my, z) => {
+          const ox = mx - cam.x;
+          const oy = my - cam.y;
+          const d = ox * fx + oy * fy;
+          const s = f / d;
+          return { x: W / 2 + (ox * rx + oy * ry) * s, y: horizon - (z - cam.z) * s, d };
+        },
+        tint: (c, d) => fogged(c, 1 - Math.exp(-d / FOG)),
+      },
+      g,
+      places,
+      show,
+    );
   }
 
   treeDepth.fill(Infinity);
@@ -405,7 +552,7 @@ function drawTrees(frame: WalkFrame, cam: WalkCamera, w: WalkWorld, f: number, h
         const dark = fogged(shade(col, 0.7), fogK);
 
         // The trunk, up into the middle of the crown (or a little way up a cone).
-        const ballY = base - Math.max(hp - r, r * 0.8);
+        const { y: ballY, ry: ballRy } = crownBall(base, hp, r);
         const trunkTop = Math.round(shape === 1 ? base - hp * 0.15 : ballY);
         const tw = Math.max(1, Math.round(Math.max(0.25, crown[i] * 0.1) * s));
         const tx0 = Math.max(0, Math.round(sx) - (tw >> 1));
@@ -433,11 +580,13 @@ function drawTrees(frame: WalkFrame, cam: WalkCamera, w: WalkWorld, f: number, h
           continue;
         }
 
-        const y0 = Math.max(0, Math.ceil(ballY - r));
-        const y1 = Math.min(H - 1, Math.floor(ballY + r));
+        // A broadleaf crown: an oval as tall as the crown stands, as wide as it spreads.
+        const y0 = Math.max(0, Math.ceil(ballY - ballRy));
+        const y1 = Math.min(H - 1, Math.floor(ballY + ballRy));
         const rr = Math.max(0.5, r);
+        const rv = Math.max(0.5, ballRy);
         for (let y = y0; y <= y1; y++) {
-          const dyc = (y - ballY) / rr;
+          const dyc = (y - ballY) / rv;
           const half = r * Math.sqrt(Math.max(0, 1 - dyc * dyc));
           const x0 = Math.max(0, Math.ceil(sx - half));
           const x1 = Math.min(W - 1, Math.floor(sx + half));

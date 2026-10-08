@@ -527,3 +527,221 @@ export function outlinePlace(
     } else drapeLine(buf, tilt.depth, tilt.view, tilt.g, place, color, 2, 0);
   }
 }
+
+// --- walking among them --------------------------------------------------------
+
+/**
+ * A perspective eye for drapeWalkPlaces (treesWalk.ts's camera): where a
+ * world point lands on screen and how far ahead of the eye it is, and the
+ * fog to colour it by.
+ */
+export type PlaceEye = {
+  W: number;
+  H: number;
+  /** Screen x and y of a point `mx`, `my` metres across and `z` metres up, and its distance ahead; `d` under `near` is behind the eye. */
+  project(mx: number, my: number, z: number): { x: number; y: number; d: number };
+  near: number;
+  /** Pixels per metre, one metre ahead. */
+  f: number;
+  /** Where the eye stands, and the furthest a place is drawn. */
+  cx: number;
+  cy: number;
+  reach: number;
+  /** A colour seen `d` metres off, into the fog. */
+  tint(c: number, d: number): number;
+};
+
+/** Metres across each kind of line, stood on it: at least a pixel however far. */
+const WALK_CREEK = 1.2;
+const WALK_RAIL = 1.4;
+const WALK_EDGE = 0.35;
+/** Metres a dash runs, for piped creek and tunnelled track. */
+const WALK_DASH = 6;
+
+/**
+ * The places as the walk sees them: the same lines draped on the ground as
+ * Tilt's — park edges, creeks, track, platforms — each sampled about a pixel
+ * apart at its own distance and hidden behind any hill in front, gardens as
+ * plots, and the areaways as open pits under the sidewalk, seen through it.
+ * Drawn after the ground, before the trees.
+ */
+export function drapeWalkPlaces(
+  buf: Uint32Array,
+  depth: Float32Array,
+  eye: PlaceEye,
+  g: Ground | null,
+  places: Places,
+  show: PlacesShown,
+) {
+  const near = (p: Place) => {
+    const b = p.box;
+    const dx = Math.max(b[0] - eye.cx, 0, eye.cx - b[2]);
+    const dy = Math.max(b[1] - eye.cy, 0, eye.cy - b[3]);
+    return dx * dx + dy * dy < eye.reach * eye.reach;
+  };
+  for (const p of places.list) {
+    if (!near(p)) continue;
+    if (p.kind === "park" && show.parks) walkLine(buf, depth, eye, g, p, TILT_PARK_EDGE, WALK_EDGE, 0);
+    else if (p.kind === "creek" && show.water) {
+      walkLine(buf, depth, eye, g, p, p.piped ? CREEK_PIPED : CREEK, WALK_CREEK, p.piped ? WALK_DASH : 0);
+    } else if (p.kind === "garden" && show.parks) walkGarden(buf, depth, eye, g, p);
+    else if (show.underground) {
+      if (p.kind === "areaway") walkPit(buf, depth, eye, g, p);
+      else if (p.kind === "rail") walkLine(buf, depth, eye, g, p, RAIL, WALK_RAIL, tunnel(p) ? WALK_DASH : 0);
+      else if (p.kind === "station") walkLine(buf, depth, eye, g, p, STATION_EDGE, WALK_EDGE, 0);
+    }
+  }
+}
+
+/** How far behind the ground drawn at a pixel a point can be and still be that ground. */
+const walkSlack = (d: number) => 0.3 + d * 0.02;
+
+/** Every part of a place as a line on the ground, `wide` metres across, dashed every `dash` metres if that's not 0. */
+function walkLine(
+  buf: Uint32Array,
+  depth: Float32Array,
+  eye: PlaceEye,
+  g: Ground | null,
+  p: Place,
+  color: number,
+  wide: number,
+  dash: number,
+) {
+  const { W, H } = eye;
+  const { x, y, parts } = p;
+  const ring = !isLine(p);
+  const reach2 = eye.reach * eye.reach;
+  for (let k = 0; k + 1 < parts.length; k++) {
+    const from = parts[k];
+    const to = parts[k + 1];
+    const last = ring ? to : to - 1;
+    let run = 0;
+    for (let i = from; i < last; i++) {
+      const j = i + 1 < to ? i + 1 : from;
+      const ax = x[i];
+      const ay = y[i];
+      const len = Math.hypot(x[j] - ax, y[j] - ay);
+      if (len < 1e-6) continue;
+      const ux = (x[j] - ax) / len;
+      const uy = (y[j] - ay) / len;
+      // Only the stretch of the segment within reach of the eye.
+      const along = (eye.cx - ax) * ux + (eye.cy - ay) * uy;
+      const offX = ax + ux * along - eye.cx;
+      const offY = ay + uy * along - eye.cy;
+      const off2 = offX * offX + offY * offY;
+      if (off2 >= reach2) {
+        run += len;
+        continue;
+      }
+      const half = Math.sqrt(reach2 - off2);
+      let s = Math.max(0, along - half);
+      const end = Math.min(len, along + half);
+      while (s <= end) {
+        const mx = ax + ux * s;
+        const my = ay + uy * s;
+        const at = eye.project(mx, my, (g ? groundZ(g, mx, my) : 0) + 0.05);
+        // About a pixel apart wherever it's seen. Behind the eye, straight on
+        // to where it could come in front (a metre along moves it at most a
+        // metre nearer); off the side of the screen, to where it could come
+        // back on, at the fastest a point that far out can cross the screen.
+        let step: number;
+        if (at.d < eye.near) step = Math.max(0.12, eye.near - at.d);
+        else {
+          step = Math.max(0.12, (at.d / eye.f) * 0.8);
+          const outX = Math.max(-at.x, at.x - W, 0);
+          const outY = Math.max(-at.y, at.y - H, 0);
+          const out = Math.max(outX, outY);
+          if (out > 2) {
+            const rate = (eye.f / at.d) * (1 + (Math.abs(at.x - W / 2) + Math.abs(at.y - H / 2)) / eye.f);
+            step = Math.max(step, (out / rate) * 0.5);
+          }
+        }
+        if (at.d >= eye.near && !(dash && Math.floor((run + s) / dash) & 1)) {
+          const px = Math.round(at.x);
+          const py = Math.round(at.y);
+          const w = Math.max(1, Math.round((wide * eye.f) / at.d));
+          const h = Math.max(1, Math.round(w / 3));
+          const x0 = px - (w >> 1);
+          if (x0 + w > 0 && x0 < W && py + h > 0 && py < H) {
+            const slack = walkSlack(at.d);
+            const c = eye.tint(color, at.d);
+            for (let yy = Math.max(0, py); yy < Math.min(H, py + h); yy++) {
+              for (let xx = Math.max(0, x0); xx < Math.min(W, x0 + w); xx++) {
+                const q = yy * W + xx;
+                if (at.d <= depth[q] + slack) buf[q] = c;
+              }
+            }
+          }
+        }
+        s += step;
+      }
+      run += len;
+    }
+  }
+}
+
+/** A garden as its square plot on the ground, edged, hidden whole if a hill stands in front of its middle. */
+function walkGarden(buf: Uint32Array, depth: Float32Array, eye: PlaceEye, g: Ground | null, p: Place) {
+  const cx = p.x[0];
+  const cy = p.y[0];
+  const half = gardenSide(p) / 2;
+  const z = (g ? groundZ(g, cx, cy) : 0) + 0.05;
+  const mid = eye.project(cx, cy, z);
+  if (!visibleAt(depth, eye, mid, half)) return;
+  const corners = [
+    [cx - half, cy - half],
+    [cx + half, cy - half],
+    [cx + half, cy + half],
+    [cx - half, cy + half],
+  ];
+  const sx = new Float32Array(4);
+  const sy = new Float32Array(4);
+  for (let i = 0; i < 4; i++) {
+    const at = eye.project(corners[i][0], corners[i][1], z);
+    if (at.d < eye.near) return;
+    sx[i] = at.x;
+    sy[i] = at.y;
+  }
+  const ring = Uint32Array.of(0, 4);
+  fillScreen(buf, eye.W, eye.H, sx, sy, ring, eye.tint(GARDEN, mid.d));
+  const rim = eye.tint(GARDEN_EDGE, mid.d);
+  for (let i = 0; i < 4; i++) screenLine(buf, eye.W, eye.H, sx[i], sy[i], sx[(i + 1) % 4], sy[(i + 1) % 4], rim);
+}
+
+/** An areaway as an open pit `deep` feet down, its floor filled and its walls and rim drawn, seen through the sidewalk over it. */
+function walkPit(buf: Uint32Array, depth: Float32Array, eye: PlaceEye, g: Ground | null, p: Place) {
+  const { x, y, box: b, parts } = p;
+  const mx = (b[0] + b[2]) / 2;
+  const my = (b[1] + b[3]) / 2;
+  const mid = eye.project(mx, my, g ? groundZ(g, mx, my) : 0);
+  if (!visibleAt(depth, eye, mid, b[2] - b[0] + b[3] - b[1])) return;
+  const drop = (p.deep ?? 8) * FT;
+  const n = x.length;
+  const tx = new Float32Array(n);
+  const ty = new Float32Array(n);
+  const fx = new Float32Array(n);
+  const fy = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const z = g ? groundZ(g, x[i], y[i]) : 0;
+    const top = eye.project(x[i], y[i], z);
+    const bottom = eye.project(x[i], y[i], z - drop);
+    if (top.d < eye.near) return;
+    tx[i] = top.x;
+    ty[i] = top.y;
+    fx[i] = bottom.x;
+    fy[i] = bottom.y;
+  }
+  fillScreen(buf, eye.W, eye.H, fx, fy, parts, eye.tint(AREAWAY_FLOOR, mid.d));
+  pitEdges(buf, eye.W, eye.H, { tx, ty, fx, fy }, parts, eye.tint(AREAWAY_WALL, mid.d), eye.tint(AREAWAY_EDGE, mid.d), 1);
+}
+
+/** Whether a point on the ground is in front of the eye, in reach, on screen (near enough) and not behind a hill. */
+function visibleAt(depth: Float32Array, eye: PlaceEye, at: { x: number; y: number; d: number }, size: number) {
+  if (at.d < eye.near || at.d > eye.reach) return false;
+  const margin = (size * eye.f) / at.d + 2;
+  if (at.x < -margin || at.y < -margin || at.x >= eye.W + margin || at.y >= eye.H + margin) return false;
+  const qx = Math.round(at.x);
+  const qy = Math.round(at.y);
+  if (qx < 0 || qy < 0 || qx >= eye.W || qy >= eye.H) return true;
+  return at.d <= depth[qy * eye.W + qx] + walkSlack(at.d) + size;
+}

@@ -25,7 +25,7 @@ import type { Light } from "@/lib/sun";
 /** Degrees above the horizon the view looks down from: the slider's range and where it starts. */
 export const PITCH_MIN = 15;
 export const PITCH_MAX = 75;
-export const PITCH_DEFAULT = 30;
+export const PITCH_DEFAULT = PITCH_MAX;
 /** Seattle's hills are 150 m over 26 km: flat as a plate unless they're stretched. */
 export const EXAG = 2.5;
 /** Trees are stretched less than the hills, or a block of them turns into a forest of poles. */
@@ -802,11 +802,14 @@ export function visibleSlice(
 const TRUNK = pack(70, 52, 40);
 
 /**
- * Where a broadleaf crown's centre sits on screen: its top at the top of the
- * tree, or for a tree wider than it is tall, resting just above the ground.
+ * A broadleaf crown on screen: an oval stretched up to fill the tree, from
+ * the treetop down to where a cone's crown would end, leaving the same bit of
+ * trunk showing; or, for a tree wider than that, a ball resting just above
+ * the ground. Its centre and its half-height, in device pixels.
  */
-function crownCentre(base: number, hp: number, r: number): number {
-  return base - Math.max(hp - r, r * 0.8);
+export function crownBall(base: number, hp: number, r: number): { y: number; ry: number } {
+  const ry = Math.max(r, hp * 0.44);
+  return { y: base - Math.max(hp - ry, ry * 0.8), ry };
 }
 
 /** Where a tree's crown sits on screen, in device pixels, and how far away it is. */
@@ -822,16 +825,16 @@ export function treeScreen(
   const v = view.vx * mx + view.vy * my;
   const x = view.W / 2 + (u - view.cu) * view.S;
   const base = view.H / 2 - (v - view.cv) * view.S * view.sin - gz * view.S * view.cos * EXAG;
-  const y = crownCentre(base, height * TREE_SCALE * TREE_EXAG * view.S * view.cos, crown * TREE_SCALE * view.S);
+  const { y } = crownBall(base, height * TREE_SCALE * TREE_EXAG * view.S * view.cos, crown * TREE_SCALE * view.S);
   return { x, y, base, v };
 }
 
 /**
  * The outline of a tree's crown on screen, in device pixels, as the tree pass
- * draws it: a cone's triangle, or a ball's (or a column's) circle.
+ * draws it: a cone's triangle, or a ball's (or a column's) oval.
  */
 export type CrownOutline =
-  | { shape: "circle"; x: number; y: number; r: number }
+  | { shape: "oval"; x: number; y: number; r: number; ry: number }
   | { shape: "cone"; x: number; top: number; bottom: number; half: number };
 
 export function crownOutline(
@@ -847,7 +850,7 @@ export function crownOutline(
   const hp = height * TREE_SCALE * TREE_EXAG * view.S * view.cos;
   const r = crown * TREE_SCALE * view.S;
   if (shape === 1 && hp >= 3) return { shape: "cone", x: at.x, top: at.base - hp, bottom: at.base - hp * 0.12, half: r };
-  return { shape: "circle", x: at.x, y: at.y, r };
+  return { shape: "oval", x: at.x, y: at.y, r, ry: crownBall(at.base, hp, r).ry };
 }
 
 /**
@@ -1017,9 +1020,9 @@ export function drawTiltTrees(
     const dark = shadeColor(c, 0.7 * bright);
     const mid = bright === 1 ? c : shadeColor(c, bright);
 
-    // A broadleaf crown is a ball sitting at the top of the tree; the trunk
-    // runs up into its middle, however tall the tree and small the crown.
-    const ballY = crownCentre(base, hp, r);
+    // A broadleaf crown is an oval filling the tree above a stub of trunk;
+    // the trunk runs up into its middle.
+    const { y: ballY, ry: ballRy } = crownBall(base, hp, r);
 
     const trunkTop = Math.round(shape === 1 ? base - hp * 0.15 : ballY);
     const tw = r < 4 ? 1 : Math.max(1, Math.round(r * 0.14));
@@ -1075,7 +1078,7 @@ export function drawTiltTrees(
       const shy = base + shadow.dy * lift;
       const shv = v + shadow.dv * lift;
       const rx = Math.max(1, r);
-      const ry = Math.max(1, rx * view.sin);
+      const ry = Math.max(1, ballRy * view.sin);
       const y0 = Math.max(0, Math.ceil(shy - ry));
       const y1 = Math.min(H - 1, Math.floor(shy + ry));
       for (let y = y0; y <= y1; y++) {
@@ -1135,15 +1138,16 @@ export function drawTiltTrees(
       continue;
     }
 
-    // Round (and upright cultivars, at their narrower spread): a circle — a
-    // ball looks round from any angle.
+    // Round (and upright cultivars, at their narrower spread): an oval as
+    // tall as the crown stands, as wide as it spreads.
     const cy = ballY;
     const rr = Math.max(0.5, r);
-    const y0 = Math.max(0, Math.ceil(cy - r));
-    const y1 = Math.min(H - 1, Math.floor(cy + r));
+    const ry = Math.max(0.5, ballRy);
+    const y0 = Math.max(0, Math.ceil(cy - ry));
+    const y1 = Math.min(H - 1, Math.floor(cy + ry));
     const step = -lx / rr;
     for (let y = y0; y <= y1; y++) {
-      const dy = (y - cy) / rr;
+      const dy = (y - cy) / ry;
       const half = r * Math.sqrt(Math.max(0, 1 - dy * dy));
       const x0 = Math.max(0, Math.ceil(sx - half));
       const x1 = Math.min(W - 1, Math.floor(sx + half));

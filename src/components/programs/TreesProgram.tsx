@@ -82,8 +82,10 @@ export default function TreesProgram(props: ProgramProps) {
   const [tilt, setTilt] = useState(false);
   const [pitch, setPitch] = useState(PITCH_DEFAULT);
   // Which way Tilt faces, degrees clockwise from north: the slider, or Q and E a step at a time.
-  const [heading, setHeading] = useState<Heading>(0);
-  const turn = useCallback((step: 1 | -1) => setHeading((h) => (h + step * TURN_STEP + 360) % 360), []);
+  // The slider runs 0–360, north at both ends, and starts at the right one.
+  const [heading, setHeading] = useState<Heading>(360);
+  const facing = heading % 360;
+  const turn = useCallback((step: 1 | -1) => setHeading((h) => ((h % 360) + step * TURN_STEP + 360) % 360), []);
   // Bumped to put the whole city back in view.
   const [fitSignal, setFitSignal] = useState(0);
   // The layer buttons. The street trees; the LiDAR's other 850,000 trees under them in both views.
@@ -179,13 +181,13 @@ export default function TreesProgram(props: ProgramProps) {
         <KnobSlider
           length={140}
           min={0}
-          max={355}
+          max={360}
           step={5}
           value={heading}
           onChange={setHeading}
-          knob={headingName(heading).charAt(0)}
+          knob={headingName(facing).charAt(0)}
           label="Facing"
-          title={`Facing ${heading}° — Q and E turn it ${TURN_STEP}° at a time`}
+          title={`Facing ${facing}° — Q and E turn it ${TURN_STEP}° at a time`}
         />
       )}
       {tilt && (
@@ -207,7 +209,7 @@ export default function TreesProgram(props: ProgramProps) {
         title="Show the whole city, and put the sliders back: the angle, facing north, the sun to now, the day and year to today"
         onClick={() => {
           setPitch(PITCH_DEFAULT);
-          setHeading(0);
+          setHeading(360);
           setMinutes(nowMinutes());
           setFitSignal((n) => n + 1);
         }}
@@ -292,7 +294,7 @@ export default function TreesProgram(props: ProgramProps) {
         mode={mode}
         tilt={tilt}
         pitch={pitch}
-        heading={heading}
+        heading={facing}
         onTurn={turn}
         active={props.active ?? true}
         paused={props.layout === "minimized"}

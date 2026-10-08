@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.8",
+      "version": "7.0.9",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
@@ -51,7 +51,9 @@
         "Changed: window and taskbar title ./trees (trees.exe)",
         "Added: UW campus trees (./trees). 8,600 from UW Grounds' inventory, with the Parks layer",
         "Added: Quad cherry bloom dates (./trees). First day in bloom each spring, from bud checks",
-        "Added: UW Facilities GIS credit (about.txt)"
+        "Added: UW Facilities GIS credit (about.txt)",
+        "Changed: broadleaf crowns drawn as ovals to tree height (./trees). Same trunk stub as conifers",
+        "Changed: Facing slider north at both ends (./trees). Facing and tilt sliders start at max"
       ]
     },
     {
