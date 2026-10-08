@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Refresh public/trees/trees.bin.gz — every street tree in Seattle, for
-// trees.exe. Pulled from the City of Seattle's "SDOT Trees (Active)" layer on
-// ArcGIS Online (about 215k points, 2,000 per request) and packed into one
+// Refresh public/trees/trees.bin.gz — every street tree in Seattle, and every
+// tree Seattle Parks has inventoried in its parks, for trees.exe. Pulled from
+// the City of Seattle's "SDOT Trees (Active)" and "SPR Trees" layers on ArcGIS
+// Online (about 215k and 22k points, 2,000 per request) and packed into one
 // small binary, so the window loads a single static file from this site and
 // never calls ArcGIS itself.
 //
@@ -15,7 +16,7 @@
 // is what lets gzip find the pattern in them.
 //
 // trees.bin.gz — what the map needs, about 830KB:
-//   "TRE2"  u32 metaLength  meta (UTF-8 JSON: count, bbox, species, posShift)
+//   "TRE3"  u32 metaLength  meta (UTF-8 JSON: count, parkCount, bbox, species, posShift)
 //   then n-byte planes:
 //     dx lo, dx hi, dy lo, dy hi   position, quantized across meta.bbox to
 //                                  16 − posShift bits (x = east), as the
@@ -25,7 +26,9 @@
 //     year                         year planted − 1900, 0 = unknown
 //     diam                         trunk diameter, inches, capped at 255
 //     flags                        bits 0–1 owner (0 private, 1 SDOT, 2 parks,
-//                                  3 other), bit 2 heritage, bit 3 exceptional
+//                                  3 other), bit 2 heritage, bit 3 exceptional,
+//                                  bit 4 from Parks' inventory (its "street"
+//                                  is then the park's name, and house is 0)
 //
 // addresses.bin.gz — only the tree card and hover line need it, so the window
 // fetches it after the map is up, about 170KB:
@@ -43,6 +46,10 @@
 //                            west (or, starting a row, the one above)
 //   water u8[w*h]            1 = open water (lake or Sound)
 //
+// And public/trees/places.bin.gz — the parks, Green Seattle Partnership
+// restoration zones, P-Patch gardens and creeks drawn under the
+// trees (format at packPlaces). Also separate, also best-effort.
+//
 // Needs Node 18+ (global fetch). No credentials.
 
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -55,6 +62,7 @@ const OUT_PATH = resolve(ROOT, "public/trees/trees.bin.gz");
 const ADDR_PATH = resolve(ROOT, "public/trees/addresses.bin.gz");
 const REMOVED_PATH = resolve(ROOT, "public/trees/removed.bin.gz");
 const CROWNS_PATH = resolve(ROOT, "public/trees/crowns.bin.gz");
+const PLACES_PATH = resolve(ROOT, "public/trees/places.bin.gz");
 /** Bits of position dropped: 0.4 m east–west, 0.8 m north–south — finer than the city's own placement. */
 const POS_SHIFT = 1;
 /** Terrain heights in half metres: plenty under 2.5× exaggeration, and half the file of decimetres. */
@@ -122,28 +130,191 @@ async function getJson(url) {
 }
 
 async function fetchAll(layer = LAYER, where = "1=1", fields = FIELDS) {
+  return (await fetchFeatures(layer, where, fields)).map((f) => f.attributes);
+}
+
+/**
+ * Every feature of a layer, attributes and — when `geometry` is set — shapes
+ * in plain longitude and latitude, `geometry` being any extra query string
+ * (simplification, precision). Paged by offset, PAGE at a time.
+ */
+async function fetchFeatures(layer, where, fields, geometry = null) {
   const w = encodeURIComponent(where);
   const { count } = await getJson(`${layer}?where=${w}&returnCountOnly=true&f=json`);
-  if (!count) throw new Error("layer reported no trees");
+  if (!count) throw new Error(`${layer.split("/services/")[1]} reported nothing`);
   const pages = Math.ceil(count / PAGE);
   const out = new Array(pages);
   let next = 0;
+  const shapes = geometry === null ? "&returnGeometry=false" : `&returnGeometry=true&outSR=4326${geometry}`;
   const worker = async () => {
     while (next < pages) {
       const page = next++;
       const url =
-        `${layer}?where=${w}&outFields=${fields}&returnGeometry=false&orderByFields=OBJECTID` +
+        `${layer}?where=${w}&outFields=${fields}${shapes}&orderByFields=OBJECTID` +
         `&resultOffset=${page * PAGE}&resultRecordCount=${PAGE}&f=json`;
       const body = await getJson(url);
-      out[page] = body.features.map((f) => f.attributes);
+      out[page] = body.features;
     }
   };
   await Promise.all(Array.from({ length: WORKERS }, worker));
   const rows = out.flat();
   // Paging by offset on a live layer can drift by a few rows if the city edits
   // it mid-pull; anything more than that is a broken pull, not a refresh.
-  if (Math.abs(rows.length - count) > 50) throw new Error(`expected ${count} trees, got ${rows.length}`);
+  if (Math.abs(rows.length - count) > 50) throw new Error(`expected ${count} rows, got ${rows.length}`);
   return rows;
+}
+
+// --- Seattle Parks' own tree inventory --------------------------------------------
+
+/** The trees Parks looks after inside its parks, which the street-tree layer mostly doesn't have. */
+const PARK_TREES_LAYER =
+  "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/SPR_Tree_View/FeatureServer/0/query";
+
+/** A real binomial (or at least a genus), not blank, "Unknown" or an error message. */
+function isSpecies(name) {
+  return /^[A-Z][a-z]+(\s|$)/.test(name) && !/error|unknown|null/i.test(name);
+}
+
+/** A species for a common name: exactly, or the one whose longer name starts with it ("Deodar" → "Deodar cedar"). */
+function speciesForCommon(byCommon, common) {
+  if (!common) return "";
+  if (byCommon.has(common)) return byCommon.get(common);
+  for (const [name, sci] of byCommon) if (name.startsWith(`${common} `)) return sci;
+  return "";
+}
+
+/** The inventory's one-word common names that name a genus, for trees with no species. */
+const GENUS_OF_COMMON = {
+  maple: "Acer",
+  pine: "Pinus",
+  hawthorn: "Crataegus",
+  oak: "Quercus",
+  cherry: "Prunus",
+  plum: "Prunus",
+  birch: "Betula",
+  spruce: "Picea",
+  fir: "Abies",
+  cedar: "Cedrus",
+  larch: "Larix",
+  larix: "Larix",
+  redwood: "Sequoia",
+  sumac: "Rhus",
+  willow: "Salix",
+  poplar: "Populus",
+  ash: "Fraxinus",
+  elm: "Ulmus",
+  magnolia: "Magnolia",
+  dogwood: "Cornus",
+  apple: "Malus",
+  crabapple: "Malus",
+  pear: "Pyrus",
+  holly: "Ilex",
+  hemlock: "Tsuga",
+  juniper: "Juniperus",
+  cypress: "Cupressus",
+  linden: "Tilia",
+  alder: "Alnus",
+};
+
+/**
+ * Parks' trees in the street-tree layer's shape, so pack() takes both. A
+ * species the street layer already has keeps the street layer's names, so the
+ * two don't count it as two kinds; the address is the park. Snags — standing
+ * dead trees — are left out, and so is any tree within a couple of metres of a
+ * street tree of the same genus, which is the same tree inventoried twice.
+ */
+async function fetchParkTrees(street) {
+  const features = await fetchFeatures(
+    PARK_TREES_LAYER,
+    "STATUS IS NULL OR STATUS <> 'Snag'",
+    "OBJECTID,PARK,COMMON,SPECIES,DBH_WL,EXCEPTIONAL_WL",
+    "",
+  );
+  const known = new Map();
+  for (const r of street) {
+    const key = cleanScientific(r.SCIENTIFIC_NAME).toLowerCase();
+    if (key && !known.has(key)) known.set(key, r);
+  }
+  // Common names to species, for the rows whose species is missing or garbled:
+  // the street layer's names first, then the inventory's own good rows.
+  const byCommon = new Map();
+  for (const r of street) {
+    const sci = cleanScientific(r.SCIENTIFIC_NAME);
+    const key = String(r.COMMON_NAME ?? "").trim().toLowerCase();
+    if (key && isSpecies(sci) && !byCommon.has(key)) byCommon.set(key, sci);
+  }
+  for (const f of features) {
+    const sci = cleanScientific(f.attributes.SPECIES);
+    const key = String(f.attributes.COMMON ?? "").trim().toLowerCase();
+    if (key && isSpecies(sci) && !byCommon.has(key)) byCommon.set(key, sci);
+  }
+
+  // Street trees in 10 m buckets, by genus, to find a double.
+  const CELL = 10 / 111320;
+  const grid = new Map();
+  const cellOf = (lon, lat) => `${Math.floor(lon / (CELL * 1.48))},${Math.floor(lat / CELL)}`;
+  for (const r of street) {
+    if (!Number.isFinite(r.SHAPE_LAT) || !Number.isFinite(r.SHAPE_LNG)) continue;
+    const key = cellOf(r.SHAPE_LNG, r.SHAPE_LAT);
+    let list = grid.get(key);
+    if (!list) grid.set(key, (list = []));
+    list.push(r);
+  }
+  const lat0 = Math.cos(47.6 * (Math.PI / 180));
+  const near = (lon, lat, genus) => {
+    const [gx, gy] = cellOf(lon, lat).split(",").map(Number);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (const r of grid.get(`${gx + dx},${gy + dy}`) ?? []) {
+          const ex = (r.SHAPE_LNG - lon) * 111320 * lat0;
+          const ey = (r.SHAPE_LAT - lat) * 110574;
+          if (ex * ex + ey * ey < 4 && String(r.GENUS ?? "").trim() === genus) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const rows = [];
+  let doubles = 0;
+  for (const f of features) {
+    const a = f.attributes;
+    const lon = f.geometry?.x;
+    const lat = f.geometry?.y;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    const common = String(a.COMMON ?? "").trim();
+    let scientific = cleanScientific(a.SPECIES);
+    // Some of the inventory's species are the text of a database error. Its
+    // common name usually still says what the tree is: the street layer's (or
+    // another park tree's) species of that name, or for "Maple" or "Pine"
+    // just the genus.
+    if (!isSpecies(scientific)) scientific = speciesForCommon(byCommon, common.toLowerCase());
+    const same = known.get(scientific.toLowerCase());
+    const genus = same
+      ? String(same.GENUS ?? "").trim()
+      : scientific
+        ? scientific.split(" ")[0]
+        : (GENUS_OF_COMMON[common.toLowerCase()] ?? "Unknown");
+    if (near(lon, lat, genus)) {
+      doubles++;
+      continue;
+    }
+    rows.push({
+      park: true,
+      UNITDESC: String(a.PARK ?? "").trim() || "Seattle park",
+      OWNERSHIP: "PARK",
+      PLANTED_DATE: null,
+      SCIENTIFIC_NAME: same ? same.SCIENTIFIC_NAME : scientific,
+      COMMON_NAME: same ? same.COMMON_NAME : common || "Unknown",
+      GENUS: genus,
+      HERITAGE: "N",
+      EXCEPTIONAL: a.EXCEPTIONAL_WL === "Exceptional" || a.EXCEPTIONAL_WL === "Yes" ? "Y" : "N",
+      DIAM: a.DBH_WL,
+      SHAPE_LAT: lat,
+      SHAPE_LNG: lon,
+    });
+  }
+  return { rows, doubles };
 }
 
 /** The layer's scientific names are cut off at 30 characters and use backticks for cultivar quotes. */
@@ -196,7 +367,7 @@ function pack(rows) {
     // "2033 1ST AV" splits into a house number and a street the next tree on
     // the block shares; "31ST AVE AND E JEFFERSON ST" stays whole.
     const desc = String(r.UNITDESC ?? "").replace(/\s+/g, " ").trim();
-    const m = desc.match(/^(\d{1,5}) (.+)$/);
+    const m = r.park ? null : desc.match(/^(\d{1,5}) (.+)$/);
     let house = 0;
     let street = desc;
     if (m && Number(m[1]) > 0 && Number(m[1]) < 65536) {
@@ -211,7 +382,8 @@ function pack(rows) {
       if (y > 1900 && y < 2156) year = y - 1900;
     }
     const diam = Math.max(0, Math.min(255, Math.round(Number(r.DIAM) || 0)));
-    const flags = owner(r.OWNERSHIP) | (r.HERITAGE === "Y" ? 4 : 0) | (r.EXCEPTIONAL === "Y" ? 8 : 0);
+    const flags =
+      owner(r.OWNERSHIP) | (r.HERITAGE === "Y" ? 4 : 0) | (r.EXCEPTIONAL === "Y" ? 8 : 0) | (r.park ? 16 : 0);
     const x = Math.round(((r.SHAPE_LNG - west) / (east - west)) * 65535);
     const y = Math.round(((r.SHAPE_LAT - south) / (north - south)) * 65535);
     return { x, y, sp, st, house, year, diam, flags };
@@ -224,9 +396,10 @@ function pack(rows) {
   const delta = (key) => deltas(parsed, key);
 
   const meta = {
-    source: "City of Seattle, SDOT Trees (Active)",
+    source: "City of Seattle, SDOT Trees (Active) and Seattle Parks and Recreation Trees",
     fetched: new Date().toISOString(),
     count: n,
+    parkCount: rows.filter((r) => r.park).length,
     bbox: { south, north, west, east },
     posShift: POS_SHIFT,
     species,
@@ -242,7 +415,7 @@ function pack(rows) {
   const addresses = Buffer.concat([planes16(parsed.map((t) => t.st)), planes16(parsed.map((t) => t.house))]);
 
   return {
-    map: withHeader("TRE2", meta, map),
+    map: withHeader("TRE3", meta, map),
     addresses: withHeader("TRA1", { count: n, streets }, addresses),
     n,
     species: species.length,
@@ -495,6 +668,159 @@ function packCrowns(rows, bbox, street) {
   return { bytes: withHeader("CRW1", meta, body), n: kept.length, matched, junk };
 }
 
+// --- places: parks, restoration sites, gardens, creeks ------------------------------
+
+const ORG = "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services";
+/** Shapes simplified to about a metre and a half, which none of the views can tell apart. */
+const SIMPLIFY = "&maxAllowableOffset=0.000015&geometryPrecision=6";
+/**
+ * Creek reaches by what SPU calls them. Piped stretches are kept (drawn faint);
+ * side sewers, detention tanks and stubs aren't creek.
+ */
+const CREEK_KEEP = new Set(["Open Stream Channel", "Mainline", "Lateral", "Bridge", "Ditch", "Surface Drainage", "Culvert"]);
+
+const PLACE_LAYERS = [
+  {
+    kind: "park",
+    // The generalized outline, one shape per park, rather than its 2,800 parcels.
+    url: `${ORG}/Park_Boundaries/FeatureServer/1/query`,
+    // Parks owns tidelands too, out under the Sound in survey-grid squares; they aren't park you can stand in.
+    where: "NAME NOT LIKE '%TIDELAND%'",
+    fields: "OBJECTID,NAME,PARKSBND_AREA",
+    attrs: (a) => ({ name: parkName(a.NAME), acres: round(Number(a.PARKSBND_AREA) / 43560, 1) }),
+  },
+  {
+    kind: "restoration",
+    // Green Seattle Partnership's forest restoration zones, at the phase last seen:
+    // 0 not yet started, 1 invasives cleared, 2 secondary clearing, 3 planted, 4 maintained.
+    url: `${ORG}/GSP_Sites_By_Phase/FeatureServer/0/query`,
+    where: "MOSTRECENT='Y'",
+    fields: "OBJECTID,PARKNAME,ZONENAME,PHASE,DATEVISIT,AREA_ACRES",
+    attrs: (a) => ({
+      name: a.PARKNAME,
+      zone: a.ZONENAME,
+      phase: Number(a.PHASE) || 0,
+      visited: a.DATEVISIT ? new Date(a.DATEVISIT).getUTCFullYear() : null,
+      acres: round(Number(a.AREA_ACRES), 1),
+    }),
+  },
+  {
+    kind: "garden",
+    url: `${ORG}/P_Patch/FeatureServer/0/query`,
+    where: "1=1",
+    fields: "OBJECTID,NAME,ADDRESS,NUMPLOTS,DATE_ESTAB,SIZE_SQFT",
+    attrs: (a) => ({
+      name: a.NAME,
+      address: a.ADDRESS,
+      plots: Number(a.NUMPLOTS) || null,
+      since: Number(a.DATE_ESTAB) || null,
+      sqft: Number(a.SIZE_SQFT) || null,
+    }),
+  },
+  {
+    kind: "creek",
+    url: `${ORG}/Urban_Watercourses/FeatureServer/0/query`,
+    where: "1=1",
+    fields: "OBJECTID,STRM_FULL_NAME_TEXT,STRM_FEATYPE_TEXT",
+    keep: (a) => CREEK_KEEP.has(a.STRM_FEATYPE_TEXT),
+    attrs: (a) => ({ name: a.STRM_FULL_NAME_TEXT || null, piped: a.STRM_FEATYPE_TEXT === "Culvert" ? 1 : 0 }),
+  },
+];
+
+/** "MARTIN LUTHER KING JR MEMORIAL PARK" → "Martin Luther King Jr Memorial Park"; "NE", "NW" and the like stay capitals. */
+function parkName(name) {
+  return String(name ?? "")
+    .toLowerCase()
+    .replace(/\b([a-z])([a-z']*)\b/g, (word, first, rest) =>
+      /^(n|s|e|w|ne|nw|se|sw|ii|iii)$/.test(word) ? word.toUpperCase() : first.toUpperCase() + rest,
+    )
+    .replace(/\b(\d+)(St|Nd|Rd|Th)\b/g, (_m, n, suf) => n + suf.toLowerCase())
+    .trim();
+}
+
+function round(n, places) {
+  if (!Number.isFinite(n)) return null;
+  const k = 10 ** places;
+  return Math.round(n * k) / k;
+}
+
+/** A feature's shape as a list of parts, each a list of [lon, lat]. */
+function partsOf(geometry) {
+  if (!geometry) return [];
+  if (Number.isFinite(geometry.x)) return [[[geometry.x, geometry.y]]];
+  return geometry.rings ?? geometry.paths ?? [];
+}
+
+/**
+ * places.bin.gz — everything trees.exe draws under the trees that isn't a
+ * tree, about 0.3MB:
+ *   "PLC1"  u32 metaLength  meta (JSON: bbox, kinds, features), then the
+ *   points of every part of every feature in order, quantized to 16 bits
+ *   across meta.bbox, as the step from the point before:
+ *     dx lo, dx hi, dy lo, dy hi   (one per point)
+ *   Each feature in meta is { k: index into kinds, parts: [point counts], ...attrs }.
+ */
+function packPlaces(byKind) {
+  let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity;
+  for (const { features } of byKind) {
+    for (const f of features) {
+      for (const part of partsOf(f.geometry)) {
+        for (const [lon, lat] of part) {
+          south = Math.min(south, lat);
+          north = Math.max(north, lat);
+          west = Math.min(west, lon);
+          east = Math.max(east, lon);
+        }
+      }
+    }
+  }
+  const kinds = byKind.map((l) => l.kind);
+  const meta = { source: [], fetched: new Date().toISOString(), bbox: { south, north, west, east }, kinds, features: [] };
+  const xs = [];
+  const ys = [];
+  byKind.forEach(({ layer, features }, k) => {
+    for (const f of features) {
+      if (layer.keep && !layer.keep(f.attributes)) continue;
+      const parts = partsOf(f.geometry).filter((p) => p.length);
+      if (!parts.length) continue;
+      for (const part of parts) {
+        for (const [lon, lat] of part) {
+          xs.push(Math.round(((lon - west) / (east - west)) * 65535));
+          ys.push(Math.round(((lat - south) / (north - south)) * 65535));
+        }
+      }
+      // Attributes the city left empty are left out rather than written as null.
+      const attrs = Object.fromEntries(Object.entries(layer.attrs(f.attributes)).filter(([, v]) => v !== null && v !== ""));
+      meta.features.push({ k, parts: parts.map((p) => p.length), ...attrs });
+    }
+  });
+  const step = (list) => {
+    let prev = 0;
+    return list.map((q) => {
+      const d = (q - prev) & 0xffff;
+      prev = q;
+      return d;
+    });
+  };
+  const counts = Object.fromEntries(kinds.map((kind, k) => [kind, meta.features.filter((f) => f.k === k).length]));
+  return { bytes: withHeader("PLC1", meta, Buffer.concat([planes16(step(xs)), planes16(step(ys))])), counts, points: xs.length };
+}
+
+async function refreshPlaces() {
+  const byKind = [];
+  for (const layer of PLACE_LAYERS) {
+    const features = await fetchFeatures(layer.url, layer.where, layer.fields, SIMPLIFY);
+    byKind.push({ kind: layer.kind, layer, features });
+  }
+  const packed = packPlaces(byKind);
+  const gz = gzipSync(packed.bytes, { level: 9 });
+  await writeAtomic(PLACES_PATH, gz);
+  console.log(
+    `[trees] wrote places (${Object.entries(packed.counts).map(([k, n]) => `${n} ${k}`).join(", ")}; ` +
+      `${packed.points} points) — ${(gz.length / 1e6).toFixed(2)}MB gzipped`,
+  );
+}
+
 /** A u16 column as byte planes: every low byte, then every high byte. */
 function planes16(values) {
   const out = Buffer.alloc(values.length * 2);
@@ -549,6 +875,154 @@ async function readBbox() {
   const buf = gunzipSync(await readFile(OUT_PATH));
   const metaLength = buf.readUInt32LE(4);
   return JSON.parse(buf.subarray(8, 8 + metaLength).toString("utf8")).bbox;
+}
+
+/** Open water, as polygons: lakes, the bays and the channels (the layer's tideflats aren't water). */
+const WATER_POLYGONS = `${ORG}/Waterlines_Channels_proj/FeatureServer/67/query`;
+/** The shoreline, as lines; the ones that close on themselves ring a lake, a pond or an island. */
+const SHORELINE = `${ORG}/Shoreline/FeatureServer/0/query`;
+
+/**
+ * Mark as water every cell the city's water outlines cover — the open-water
+ * polygons, inside the closed shoreline rings (even-odd, so an island's
+ * ring takes its island back out), and along the lakes' and the Ship Canal's
+ * open shorelines — and lay each new stretch flat at its own
+ * level: the low end of the ground under it, which is the water the
+ * elevation did see, rather than the banks blurred over it. A channel is
+ * widened by a cell either side, so a cut a cell wide still reads as water
+ * when the view blends neighbouring cells. Returns how many cells it added.
+ */
+async function burnWater(z, water, w, h, origin, cell) {
+  const polygons = (await fetchFeatures(WATER_POLYGONS, "CCAP LIKE '21%'", "OBJECTID,LC_SIMPLIF", SIMPLIFY)).map((f) => ({
+    rings: f.geometry?.rings ?? [],
+    channel: f.attributes.LC_SIMPLIF === "Channel",
+  }));
+  const rings = [];
+  // The lakes' and the Ship Canal's open shorelines (the closed ones are
+  // rings): drawn as water themselves, they carry the canal through the
+  // Montlake Cut, which no polygon covers.
+  const canal = [];
+  for (const f of await fetchFeatures(SHORELINE, "1=1", "OBJECTID,TYPE", SIMPLIFY)) {
+    for (const path of f.geometry?.paths ?? []) {
+      const [a, b] = [path[0], path[path.length - 1]];
+      if (path.length > 3 && Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6) rings.push(path);
+      else if (/^(LAK|SLK)$/.test(String(f.attributes.TYPE ?? "").trim())) canal.push(path);
+    }
+  }
+
+  // Cells with any of their four quarter-points inside, filled a half-cell row at a time.
+  const cover = (shape) => {
+    const mask = new Uint8Array(w * h);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const ring of shape) {
+      for (const [, lat] of ring) {
+        lo = Math.min(lo, lat);
+        hi = Math.max(hi, lat);
+      }
+    }
+    const r0 = Math.max(0, Math.floor(((origin.north - hi) / cell) * 2));
+    const r1 = Math.min(h * 2 - 1, Math.ceil(((origin.north - lo) / cell) * 2));
+    const xs = [];
+    for (let sr = r0; sr <= r1; sr++) {
+      const lat = origin.north - ((sr + 0.5) * cell) / 2;
+      xs.length = 0;
+      for (const ring of shape) {
+        for (let i = 0; i + 1 < ring.length; i++) {
+          const [x1, y1] = ring[i];
+          const [x2, y2] = ring[i + 1];
+          if (y1 <= lat === y2 <= lat) continue;
+          xs.push(x1 + ((lat - y1) / (y2 - y1)) * (x2 - x1));
+        }
+      }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const c0 = Math.max(0, Math.ceil(((xs[k] - origin.west) / cell) * 2 - 0.5));
+        const c1 = Math.min(w * 2 - 1, Math.floor(((xs[k + 1] - origin.west) / cell) * 2 - 0.5));
+        for (let c = c0; c <= c1; c++) mask[(sr >> 1) * w + (c >> 1)] = 1;
+      }
+    }
+    return mask;
+  };
+  const widen = (mask) => {
+    const out = Uint8Array.from(mask);
+    for (let i = 0; i < w * h; i++) {
+      if (!mask[i]) continue;
+      const x = i % w;
+      if (x > 0) out[i - 1] = 1;
+      if (x < w - 1) out[i + 1] = 1;
+      if (i >= w) out[i - w] = 1;
+      if (i < w * (h - 1)) out[i + w] = 1;
+    }
+    return out;
+  };
+  /** The tenth-percentile height of the new cells: the water's own level, not its banks'. */
+  const levelOf = (cells) => {
+    const zs = cells.map((i) => z[i]).sort((a, b) => a - b);
+    return zs[Math.floor(zs.length * 0.1)];
+  };
+  let added = 0;
+  const lay = (cells) => {
+    if (!cells.length) return;
+    const level = levelOf(cells);
+    for (const i of cells) {
+      z[i] = level;
+      water[i] = 1;
+    }
+    added += cells.length;
+  };
+  const fresh = (mask) => {
+    const cells = [];
+    for (let i = 0; i < w * h; i++) if (mask[i] && !water[i]) cells.push(i);
+    return cells;
+  };
+
+  for (const { rings: shape, channel } of polygons) {
+    if (!shape.length) continue;
+    const mask = cover(shape);
+    lay(fresh(channel ? widen(mask) : mask));
+  }
+  if (canal.length) {
+    // Every cell the lines pass through, a quarter-cell at a time, then a cell either side.
+    const mask = new Uint8Array(w * h);
+    for (const path of canal) {
+      for (let i = 0; i + 1 < path.length; i++) {
+        const [x1, y1] = path[i];
+        const [x2, y2] = path[i + 1];
+        const steps = Math.max(1, Math.ceil((Math.hypot(x2 - x1, y2 - y1) / cell) * 4));
+        for (let t = 0; t <= steps; t++) {
+          const c = Math.floor((x1 + ((x2 - x1) * t) / steps - origin.west) / cell);
+          const r = Math.floor((origin.north - (y1 + ((y2 - y1) * t) / steps)) / cell);
+          if (c >= 0 && r >= 0 && c < w && r < h) mask[r * w + c] = 1;
+        }
+      }
+    }
+    lay(fresh(widen(mask)));
+  }
+  // The shoreline's rings all at once, even-odd; then each lake or pond they
+  // enclose separately, since a pond up on a hill isn't at the Sound's level.
+  if (rings.length) {
+    const mask = cover(rings);
+    const seen = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      if (!mask[i] || seen[i] || water[i]) continue;
+      const cells = [];
+      const stack = [i];
+      seen[i] = 1;
+      while (stack.length) {
+        const j = stack.pop();
+        cells.push(j);
+        const x = j % w;
+        for (const k of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w]) {
+          if (k < 0 || k >= w * h || seen[k] || !mask[k] || water[k]) continue;
+          seen[k] = 1;
+          stack.push(k);
+        }
+      }
+      lay(cells);
+    }
+  }
+  return added;
 }
 
 async function refreshTerrain(trees) {
@@ -623,6 +1097,17 @@ async function refreshTerrain(trees) {
     }
   }
 
+  // The elevation alone loses the narrow water: the Ship Canal, the Fremont
+  // and Montlake Cuts, the Locks, the Duwamish's channels and the small lakes
+  // are a cell or two wide and blur into their banks. The city's own water
+  // outlines put them back.
+  try {
+    const burned = await burnWater(z, water, w, h, { west, north }, CELL_DEG);
+    console.log(`[trees] water outlines added ${burned} cells of water the elevation missed`);
+  } catch (err) {
+    console.warn(`[trees] warning: water outlines failed (${err.message}); the water is the elevation's alone.`);
+  }
+
   // Heights in steps, then each as the change from its neighbour to the west
   // (or above, at the start of a row): hills change slowly, so the differences
   // are small, and gzip does far better on them.
@@ -664,7 +1149,7 @@ async function refreshTerrain(trees) {
 async function main() {
   let bbox;
   const fresh =
-    (await isFresh(OUT_PATH, "TRE2")) &&
+    (await isFresh(OUT_PATH, "TRE3")) &&
     (await isFresh(ADDR_PATH, "TRA1")) &&
     (await isFresh(REMOVED_PATH, "RMV1")) &&
     (await isFresh(CROWNS_PATH, "CRW1"));
@@ -673,7 +1158,17 @@ async function main() {
   } else {
     console.log("[trees] fetching SDOT Trees (Active) from ArcGIS Online...");
     const rows = await fetchAll();
-    const packed = pack(rows);
+    // Parks' own inventory rides along in the same file; without it the street trees still ship.
+    let parkRows = [];
+    try {
+      console.log("[trees] fetching Seattle Parks' tree inventory...");
+      const parks = await fetchParkTrees(rows);
+      parkRows = parks.rows;
+      console.log(`[trees] ${parkRows.length} park trees (${parks.doubles} already street trees, left out)`);
+    } catch (err) {
+      console.warn(`[trees] warning: park-tree fetch failed (${err.message}); street trees only.`);
+    }
+    const packed = pack(rows.concat(parkRows));
     const mapGz = gzipSync(packed.map, { level: 9 });
     const addrGz = gzipSync(packed.addresses, { level: 9 });
     await writeAtomic(OUT_PATH, mapGz);
@@ -712,6 +1207,17 @@ async function main() {
     } catch (err) {
       console.warn(`[trees] warning: crown refresh failed (${err.message}); keeping the old file, or none.`);
     }
+  }
+
+  if (!(await isFresh(PLACES_PATH, "PLC1"))) {
+    try {
+      console.log("[trees] fetching parks, restoration sites, P-Patches and creeks...");
+      await refreshPlaces();
+    } catch (err) {
+      console.warn(`[trees] warning: places refresh failed (${err.message}); keeping the old file, or none.`);
+    }
+  } else {
+    console.log(`[trees] ${PLACES_PATH} is under a week old; keeping it.`);
   }
 
   // The terrain is cut to the trees' bbox, so a new trees file means new terrain.

@@ -1,5 +1,6 @@
 /**
- * Seattle's street trees, as trees.exe reads them: static, pre-gzipped files
+ * Seattle's street trees — and the trees Seattle Parks has inventoried in its
+ * parks, which ride in the same file — as trees.exe reads them: static, pre-gzipped files
  * from this site, written by scripts/content/refresh-trees.mjs (the formats
  * are written up there). They're gzipped on disk rather than left to the
  * server, so they arrive small whatever sits in front of the site, and are
@@ -27,6 +28,8 @@ export type TreeAddresses = {
 
 export type Trees = {
   count: number;
+  /** How many of them are from Parks' inventory rather than the street-tree one. */
+  parkCount: number;
   fetched: string;
   source: string;
   bbox: { south: number; north: number; west: number; east: number };
@@ -39,7 +42,7 @@ export type Trees = {
   year: Uint8Array;
   /** Trunk diameter in inches. */
   diam: Uint8Array;
-  /** Bits 0–1 owner, bit 2 heritage, bit 3 exceptional. */
+  /** Bits 0–1 owner, bit 2 heritage, bit 3 exceptional, bit 4 from Parks' inventory. */
   flags: Uint8Array;
 };
 
@@ -124,10 +127,11 @@ export async function loadTrees(signal?: AbortSignal, onProgress?: Progress): Pr
     source: string;
     fetched: string;
     count: number;
+    parkCount?: number;
     bbox: Trees["bbox"];
     posShift: number;
     species: [string, string, string][];
-  }>(buf, "TRE2");
+  }>(buf, "TRE3");
   const n = meta.count;
   const bytes = new Uint8Array(buf);
   let at = body;
@@ -143,6 +147,7 @@ export async function loadTrees(signal?: AbortSignal, onProgress?: Progress): Pr
 
   return {
     count: n,
+    parkCount: meta.parkCount ?? 0,
     fetched: meta.fetched,
     source: meta.source,
     bbox: meta.bbox,
@@ -178,6 +183,11 @@ export function treeAddress(addresses: TreeAddresses | null, i: number): string 
   const street = addresses.streets[addresses.street[i]] ?? "";
   const house = addresses.house[i];
   return titleCase(house ? `${house} ${street}` : street);
+}
+
+/** A tree from Parks' own inventory, standing in a park: its "address" is the park. */
+export function isParkTree(trees: Trees, i: number): boolean {
+  return (trees.flags[i] & 16) !== 0;
 }
 
 export function treeYear(trees: Trees, i: number): number | null {
