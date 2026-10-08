@@ -10,10 +10,17 @@
  * a file of their own, for the hover line and the tree card.
  */
 
-export const TREES_URL = "/trees/trees.bin.gz";
-export const ADDRESSES_URL = "/trees/addresses.bin.gz";
-export const REMOVED_URL = "/trees/removed.bin.gz";
-export const CROWNS_URL = "/trees/crowns.bin.gz";
+/**
+ * Every file is asked for with this build's stamp on the end (next.config.ts),
+ * so a deploy's page and its data always arrive together, never one of them
+ * out of the browser's cache from the deploy before.
+ */
+export const dataUrl = (path: string) => `${path}?v=${process.env.NEXT_PUBLIC_TREES_DATA ?? ""}`;
+
+export const TREES_URL = dataUrl("/trees/trees.bin.gz");
+export const ADDRESSES_URL = dataUrl("/trees/addresses.bin.gz");
+export const REMOVED_URL = dataUrl("/trees/removed.bin.gz");
+export const CROWNS_URL = dataUrl("/trees/crowns.bin.gz");
 
 export type TreeSpecies = { common: string; scientific: string; genus: string };
 

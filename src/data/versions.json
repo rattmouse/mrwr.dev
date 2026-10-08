@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.5",
+      "version": "7.0.6",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-07",
@@ -32,7 +32,8 @@
         "Added: Sun light in Tilt (trees.exe). Real sun position by hour, hill and tree shadows, night",
         "Changed: season timing tuned to USA-NPN observations (trees.exe). Leaf-out, color, leaf drop",
         "Fixed: Ship Canal water in Tilt (trees.exe). Lake Union joined to the Sound and Lake Washington",
-        "Fixed: tree data failing to load just after an update (trees.exe). Stale cached copy refetched"
+        "Fixed: tree data failing to load just after an update (trees.exe). Stale cached copy refetched",
+        "Fixed: canopy drawn out of place just after an update (trees.exe). Data fetched fresh per deploy"
       ]
     },
     {

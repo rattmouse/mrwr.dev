@@ -13,9 +13,9 @@
  * edges are drawn as lines on top, sharp at any zoom.
  */
 
-import { fetchGzip, Progress, readHeader, Trees } from "@/lib/trees";
+import { dataUrl, fetchGzip, Progress, readHeader, Trees } from "@/lib/trees";
 
-export const PLACES_URL = "/trees/places.bin.gz";
+export const PLACES_URL = dataUrl("/trees/places.bin.gz");
 
 export type PlaceKind = "park" | "restoration" | "garden" | "creek";
 
