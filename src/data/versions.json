@@ -52,6 +52,11 @@
         "Added: UW campus trees (./trees). 8,600 from UW Grounds' inventory, with the Parks layer",
         "Added: Quad cherry bloom dates (./trees). First day in bloom each spring, from bud checks",
         "Added: UW Facilities GIS credit (about.txt)",
+        "Changed: flat map zoom (./trees). Draws and picks only trees on screen, ~4x faster zoomed in",
+        "Changed: zoom and drag (./trees). Slides and stretches the last frame, redraws once it stops",
+        "Changed: moving view (./trees). Coarser ground, no shadows, sparser far-out canopy until still",
+        "Fixed: Tilt wireframe missing when zoomed in close (./trees). Ground cost no longer grows with zoom",
+        "Changed: Tilt ground at half resolution (./trees). About 3x faster per frame, trees still sharp",
         "Changed: broadleaf crowns drawn as ovals to tree height (./trees). Same trunk stub as conifers",
         "Changed: Facing slider north at both ends (./trees). Facing and tilt sliders start at max"
       ]
