@@ -7,7 +7,8 @@
  * inflated here.
  *
  * The map file comes first and is all the map needs; the addresses follow in
- * a file of their own, for the hover line and the tree card.
+ * a file of their own, for the hover line and the tree card, and so do the
+ * sidewalk inspectors' notes on the trees, for the card alone.
  */
 
 /**
@@ -21,6 +22,7 @@ export const TREES_URL = dataUrl("/trees/trees.bin.gz");
 export const ADDRESSES_URL = dataUrl("/trees/addresses.bin.gz");
 export const REMOVED_URL = dataUrl("/trees/removed.bin.gz");
 export const CROWNS_URL = dataUrl("/trees/crowns.bin.gz");
+export const SIDEWALK_URL = dataUrl("/trees/sidewalk.bin.gz");
 
 export type TreeSpecies = { common: string; scientific: string; genus: string };
 
@@ -203,6 +205,52 @@ export async function loadAddresses(signal?: AbortSignal): Promise<TreeAddresses
     streets: meta.streets,
     street: unplane(bytes, body, n),
     house: unplane(bytes, body + n * 2, n),
+  };
+}
+
+/**
+ * What SDOT's sidewalk inspectors put down to a street tree: its roots lifting
+ * slabs, its branches or trunk in the way. Only the trees they blamed for
+ * something are in it.
+ */
+export type TreeSidewalk = {
+  /** Tree index → row. */
+  row: Map<number, number>;
+  /** The worst slab its roots lifted, tenths of an inch, and how many places. */
+  uplift: Uint8Array;
+  uplifts: Uint8Array;
+  /** SIDEWALK_* bits. */
+  flags: Uint8Array;
+  /** Latest inspection − 1900. */
+  year: Uint8Array;
+};
+
+export const SIDEWALK_LOW_BRANCHES = 1;
+export const SIDEWALK_NARROWED = 2;
+export const SIDEWALK_IN_THE_WAY = 4;
+export const SIDEWALK_CRACKED = 8;
+export const SIDEWALK_TILTED = 16;
+export const SIDEWALK_REPAIRED = 32;
+export const SIDEWALK_BY_NEARNESS = 64;
+
+export async function loadSidewalk(signal?: AbortSignal): Promise<TreeSidewalk> {
+  const buf = await fetchGzip(SIDEWALK_URL, "SDW1", signal);
+  const { meta, body } = readHeader<{ count: number }>(buf, "SDW1");
+  const n = meta.count;
+  const bytes = new Uint8Array(buf);
+  const row = new Map<number, number>();
+  let i = 0;
+  for (let k = 0; k < n; k++) {
+    i += bytes[body + k] | (bytes[body + n + k] << 8) | (bytes[body + n * 2 + k] << 16);
+    row.set(i, k);
+  }
+  const at = body + n * 3;
+  return {
+    row,
+    uplift: bytes.slice(at, at + n),
+    uplifts: bytes.slice(at + n, at + n * 2),
+    flags: bytes.slice(at + n * 2, at + n * 3),
+    year: bytes.slice(at + n * 3, at + n * 4),
   };
 }
 

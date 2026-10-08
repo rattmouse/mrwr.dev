@@ -35,6 +35,20 @@
 //   "TRA1"  u32 metaLength  meta (JSON: count, streets)
 //   street lo, street hi, house lo, house hi   meta.streets[street], house 0 = none
 //
+// sidewalk.bin.gz — what SDOT's sidewalk inspectors found at each street tree
+// they blamed for something (roots lifting a slab, branches hanging low, the
+// trunk in the way), for the tree card, about 60KB. Its rows are indexes into
+// trees.bin.gz's order, so it's only ever written alongside it:
+//   "SDW1"  u32 metaLength  meta (JSON: count, ...)
+//   tree b0, b1, b2       the tree's index, 24 bits, as the step from the row before
+//   uplift                the worst slab its roots lifted, tenths of an inch
+//   uplifts               how many places they did, capped at 255
+//   flags                 bit 0 branches low over the sidewalk, bit 1 trunk or
+//                         pit narrowing it, bit 2 in the way (no more said),
+//                         bit 3 slabs cracked, bit 4 slab tilted, bit 5 all of
+//                         it repaired since, bit 6 matched by nearness, not id
+//   year                  latest inspection − 1900
+//
 // It also writes public/trees/terrain.bin.gz — the ground under them, for
 // trees.exe's Tilt view: USGS 3DEP elevation on square-degree cells across
 // the same bbox, with the open water marked, about 310KB. A separate file, and
@@ -47,12 +61,13 @@
 //   water u8[w*h]            1 = open water (lake or Sound)
 //
 // And public/trees/places.bin.gz — the parks, Green Seattle Partnership
-// restoration zones, P-Patch gardens and creeks drawn under the
-// trees (format at packPlaces). Also separate, also best-effort.
+// restoration zones, P-Patch gardens, creeks, the areaways under the
+// sidewalks and Link light rail, drawn under the trees (format at
+// packPlaces). Also separate, also best-effort.
 //
 // Needs Node 18+ (global fetch). No credentials.
 
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -63,6 +78,7 @@ const ADDR_PATH = resolve(ROOT, "public/trees/addresses.bin.gz");
 const REMOVED_PATH = resolve(ROOT, "public/trees/removed.bin.gz");
 const CROWNS_PATH = resolve(ROOT, "public/trees/crowns.bin.gz");
 const PLACES_PATH = resolve(ROOT, "public/trees/places.bin.gz");
+const SIDEWALK_PATH = resolve(ROOT, "public/trees/sidewalk.bin.gz");
 /** Bits of position dropped: 0.4 m east–west, 0.8 m north–south — finer than the city's own placement. */
 const POS_SHIFT = 1;
 /** Terrain heights in half metres: plenty under 2.5× exaggeration, and half the file of decimetres. */
@@ -96,6 +112,7 @@ const LAYER =
   "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/SDOT_Trees_(Active)/FeatureServer/0/query";
 const FIELDS = [
   "OBJECTID",
+  "UNITID",
   "UNITDESC",
   "OWNERSHIP",
   "PLANTED_DATE",
@@ -386,7 +403,7 @@ function pack(rows) {
       owner(r.OWNERSHIP) | (r.HERITAGE === "Y" ? 4 : 0) | (r.EXCEPTIONAL === "Y" ? 8 : 0) | (r.park ? 16 : 0);
     const x = Math.round(((r.SHAPE_LNG - west) / (east - west)) * 65535);
     const y = Math.round(((r.SHAPE_LAT - south) / (north - south)) * 65535);
-    return { x, y, sp, st, house, year, diam, flags };
+    return { x, y, sp, st, house, year, diam, flags, unit: r.park ? null : r.UNITID };
   });
 
   // Block by block: neighbours share a street and run on in house numbers,
@@ -423,6 +440,146 @@ function pack(rows) {
     bbox: meta.bbox,
     parsed,
   };
+}
+
+// --- sidewalk inspections ---------------------------------------------------
+
+const SIDEWALK_LAYER =
+  "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Sidewalk_Observation/FeatureServer/0/query";
+/** Anything an inspector put down to a street tree, and every tree obstruction, named or not. */
+const SIDEWALK_WHERE =
+  "(AFFECTING_SDOT_ASSETID LIKE 'TRE-%' OR OBSTRUCTION_TYPE IN ('TREE','TREEPIT')) AND " +
+  "(OBSERVATION_STATUS IS NULL OR OBSERVATION_STATUS <> 'EXPIRED')";
+const SIDEWALK_FIELDS = [
+  "OBJECTID",
+  "AFFECTING_SDOT_ASSETID",
+  "OBSERVATION_TYPE",
+  "OBSTRUCTION_TYPE",
+  "CLEARANCE_IMPACTED",
+  "HEIGHT_DIFFERENCE_TYPE",
+  "UPLIFT_HEIGHT",
+  "OBSERVATION_STATUS",
+  "INSPECTION_DATE",
+].join(",");
+/** How far an obstruction with no tree id can be from a street tree and still be put down to it, metres. */
+const SIDEWALK_NEAR = 4;
+
+/**
+ * Each inspection onto the street tree it names, or — for a tree obstruction
+ * that names none — the nearest street tree within SIDEWALK_NEAR metres. One
+ * naming a tree no longer in the inventory is dropped.
+ */
+function packSidewalk(features, bbox, street) {
+  const { south, north, west, east } = bbox;
+  const lat = ((south + north) / 2) * (Math.PI / 180);
+  const mPerX = ((east - west) * 111320 * Math.cos(lat)) / 65535;
+  const mPerY = ((north - south) * 110574) / 65535;
+  const byUnit = new Map();
+  const CELL = 10;
+  const grid = new Map();
+  street.forEach((t, i) => {
+    if (!t.unit) return;
+    byUnit.set(t.unit, i);
+    const key = `${Math.floor((t.x * mPerX) / CELL)},${Math.floor((t.y * mPerY) / CELL)}`;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(i);
+  });
+  const nearest = (lon, lat) => {
+    const mx = ((lon - west) / (east - west)) * 65535 * mPerX;
+    const my = ((lat - south) / (north - south)) * 65535 * mPerY;
+    const gx = Math.floor(mx / CELL);
+    const gy = Math.floor(my / CELL);
+    let best = -1;
+    let bestD = SIDEWALK_NEAR * SIDEWALK_NEAR;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const i of grid.get(`${gx + dx},${gy + dy}`) ?? []) {
+          const ex = street[i].x * mPerX - mx;
+          const ey = street[i].y * mPerY - my;
+          const d = ex * ex + ey * ey;
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+      }
+    }
+    return best;
+  };
+
+  const byTree = new Map();
+  let named = 0;
+  let near = 0;
+  let unmatched = 0;
+  for (const { attributes: a, geometry: g } of features) {
+    let i = byUnit.get(a.AFFECTING_SDOT_ASSETID);
+    let byNearness = false;
+    // A tree it names that isn't standing any more (taken down, mostly) isn't the one next to it.
+    const names = String(a.AFFECTING_SDOT_ASSETID ?? "").startsWith("TRE-");
+    if (i === undefined && !names && g && Number.isFinite(g.x)) {
+      const k = nearest(g.x, g.y);
+      if (k >= 0) {
+        i = k;
+        byNearness = true;
+      }
+    }
+    if (i === undefined) {
+      unmatched++;
+      continue;
+    }
+    if (byNearness) near++;
+    else named++;
+    let t = byTree.get(i);
+    if (!t) {
+      // Bit 5 (all repaired) starts set and is cleared by anything still open.
+      t = { i, uplift: 0, uplifts: 0, flags: 32, year: 0 };
+      byTree.set(i, t);
+    }
+    if (byNearness) t.flags |= 64;
+    if (a.OBSERVATION_STATUS !== "CLOSED") t.flags &= ~32;
+    if (a.INSPECTION_DATE) t.year = Math.max(t.year, new Date(a.INSPECTION_DATE).getUTCFullYear() - 1900);
+    switch (a.OBSERVATION_TYPE) {
+      case "HEIGHTDIFF":
+        if (a.HEIGHT_DIFFERENCE_TYPE === "UPLIFT" || a.HEIGHT_DIFFERENCE_TYPE == null) {
+          t.uplifts = Math.min(255, t.uplifts + 1);
+          t.uplift = Math.max(t.uplift, Math.min(255, Math.round((Number(a.UPLIFT_HEIGHT) || 0) * 10)));
+        }
+        break;
+      case "OBSTRUCT": {
+        const c = a.CLEARANCE_IMPACTED;
+        if (c === "VERTICAL" || c === "BOTH") t.flags |= 1;
+        if (c === "HORIZONTAL" || c === "BOTH" || a.OBSTRUCTION_TYPE === "TREEPIT") t.flags |= 2;
+        if (!(t.flags & 3)) t.flags |= 4;
+        break;
+      }
+      case "SURFCOND":
+        t.flags |= 8;
+        break;
+      case "XSLOPE":
+        t.flags |= 16;
+        break;
+    }
+  }
+  const rows = [...byTree.values()].sort((a, b) => a.i - b.i);
+  const n = rows.length;
+  const idx = Buffer.alloc(n * 3);
+  let prev = 0;
+  rows.forEach((t, k) => {
+    const d = t.i - prev;
+    prev = t.i;
+    idx[k] = d & 255;
+    idx[n + k] = (d >>> 8) & 255;
+    idx[n * 2 + k] = (d >>> 16) & 255;
+  });
+  const body = Buffer.concat([
+    idx,
+    Buffer.from(rows.map((t) => t.uplift)),
+    Buffer.from(rows.map((t) => t.uplifts)),
+    Buffer.from(rows.map((t) => t.flags)),
+    Buffer.from(rows.map((t) => t.year)),
+  ]);
+  const meta = { source: "City of Seattle, SDOT Sidewalk Observations", fetched: new Date().toISOString(), count: n };
+  return { bytes: withHeader("SDW1", meta, body), n, named, near, unmatched };
 }
 
 // --- removed street trees --------------------------------------------------
@@ -668,7 +825,7 @@ function packCrowns(rows, bbox, street) {
   return { bytes: withHeader("CRW1", meta, body), n: kept.length, matched, junk };
 }
 
-// --- places: parks, restoration sites, gardens, creeks ------------------------------
+// --- places: parks, restoration sites, gardens, creeks, areaways, light rail ---------
 
 const ORG = "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services";
 /** Shapes simplified to about a metre and a half, which none of the views can tell apart. */
@@ -725,7 +882,83 @@ const PLACE_LAYERS = [
     keep: (a) => CREEK_KEEP.has(a.STRM_FEATYPE_TEXT),
     attrs: (a) => ({ name: a.STRM_FULL_NAME_TEXT || null, piped: a.STRM_FEATYPE_TEXT === "Culvert" ? 1 : 0 }),
   },
+  {
+    kind: "areaway",
+    // SDOT's areaways: the hollow sidewalks, mostly Pioneer Square's, left when
+    // the streets were raised over the old ground floors after the 1889 fire.
+    // Filled-in ones are still on the books, as REMOVED; they're gone.
+    url: `${ORG}/Areaways_CDL/FeatureServer/0/query`,
+    where: "CURRENT_STATUS IS NULL OR CURRENT_STATUS <> 'REMOVED'",
+    fields:
+      "OBJECTID,UNITID,UNITDESC_ASSET,OWNERSHIP,CURRENT_STATUS,ARWFUNCTION,STRWALLTYPE,SDWSUPPORTTYPE," +
+      "ARWWALLMAXHT,ARWWIDTH,ARWWALLLENGTH,STRWALLCONDITION,SDWCONDITION,INSPCOMPDATE,OVERRIDECOMMENT",
+    attrs: (a) => ({
+      id: a.UNITID || null,
+      name: areawayName(a.UNITDESC_ASSET),
+      owner: AREAWAY_OWNERS[a.OWNERSHIP] ?? null,
+      status: a.CURRENT_STATUS === "OUTSVC" ? "out of service" : a.CURRENT_STATUS === "UNDERCONS" ? "under construction" : null,
+      use: a.ARWFUNCTION && a.ARWFUNCTION !== "None" && a.ARWFUNCTION !== "Unknown" ? a.ARWFUNCTION : null,
+      wall: knownMaterial(a.STRWALLTYPE),
+      roof: knownMaterial(a.SDWSUPPORTTYPE),
+      deep: round(Number(a.ARWWALLMAXHT), 1) || null,
+      wide: round(Number(a.ARWWIDTH), 1) || null,
+      long: round(Number(a.ARWWALLLENGTH), 1) || null,
+      wallRating: rated(a.STRWALLCONDITION),
+      roofRating: rated(a.SDWCONDITION),
+      inspected: a.INSPCOMPDATE ? new Date(a.INSPCOMPDATE).getUTCFullYear() : null,
+      filled: /PARTLY FILLED/i.test(a.OVERRIDECOMMENT ?? "") ? 1 : null,
+    }),
+  },
+  {
+    kind: "rail",
+    // Sound Transit's Link track, a line per direction, cut to the city: it
+    // runs on to Tacoma, Lynnwood and Redmond, which would stretch the
+    // quantizing grid for everything else.
+    url: `${ORG}/Sound_Transit_Link_Light_Rail_Alignment/FeatureServer/1/query`,
+    where: "STATUS='COMPLETE'",
+    fields: "OBJECTID,DESCRIPTION,PROFILE",
+    clip: true,
+    attrs: (a) => ({ name: a.DESCRIPTION || null, profile: RAIL_PROFILES[String(a.PROFILE ?? "").toUpperCase()] ?? null }),
+  },
+  {
+    kind: "station",
+    url: `${ORG}/Sound_Transit_Link_Light_Rail_Station_Platform/FeatureServer/2/query`,
+    where: "STATUS='COMPLETE'",
+    fields: "OBJECTID,NAME",
+    clip: true,
+    attrs: (a) => ({ name: a.NAME || null }),
+  },
 ];
+
+/** How the track runs, from Sound Transit's profile codes. */
+const RAIL_PROFILES = {
+  SUBWAY: "tunnel",
+  PORTAL: "portal",
+  "CUT-COVER": "cut and cover",
+  RET_CUT: "cutting",
+  "AT-GRADE": "street level",
+  "AT GRADE": "street level",
+  AERIAL: "elevated",
+  ELEVATED: "elevated",
+};
+
+const AREAWAY_OWNERS = { PRIV: "private", SDOT: "sdot", CNTY: "county", SCL: "light" };
+
+/** "122 S JACKSON ST BETWEEN OCCIDENTAL AND 1ST AVE" → "122 S Jackson St between Occidental and 1st Ave". */
+function areawayName(desc) {
+  const name = parkName(String(desc ?? "").replace(/\s+/g, " ")).replace(/\b(Between|And|At|Of)\b/g, (w) => w.toLowerCase());
+  return name || null;
+}
+
+/** An inspector's material, unless they couldn't see it. */
+function knownMaterial(s) {
+  return s && !/unable to view|^other$/i.test(s) ? s.replace(/^RC /, "") : null;
+}
+
+/** Good, Fair or Poor; "Not Rated" and blanks aren't a rating. */
+function rated(s) {
+  return /^(good|fair|poor)$/i.test(s ?? "") ? s : null;
+}
 
 /** "MARTIN LUTHER KING JR MEMORIAL PARK" → "Martin Luther King Jr Memorial Park"; "NE", "NW" and the like stay capitals. */
 function parkName(name) {
@@ -749,6 +982,64 @@ function partsOf(geometry) {
   if (!geometry) return [];
   if (Number.isFinite(geometry.x)) return [[[geometry.x, geometry.y]]];
   return geometry.rings ?? geometry.paths ?? [];
+}
+
+/**
+ * A feature cut to the trees' bbox: a line's points outside it dropped, the
+ * line broken where it leaves and comes back; a shape kept whole if any of it
+ * is inside. Null when none of it is.
+ */
+function clipToBbox(f, { south, north, west, east }) {
+  const inside = ([lon, lat]) => lon >= west && lon <= east && lat >= south && lat <= north;
+  const g = f.geometry;
+  if (!g) return null;
+  if (g.rings) return g.rings.some((ring) => ring.some(inside)) ? f : null;
+  const paths = [];
+  for (const path of g.paths ?? []) {
+    let run = [];
+    for (const point of path) {
+      if (inside(point)) run.push(point);
+      else {
+        if (run.length > 1) paths.push(run);
+        run = [];
+      }
+    }
+    if (run.length > 1) paths.push(run);
+  }
+  return paths.length ? { ...f, geometry: { paths } } : null;
+}
+
+/**
+ * The platforms don't say which stations are underground; the track does.
+ * A station whose middle is within 60 m of tunnel is a tunnel station.
+ */
+function markUndergroundStations(byKind) {
+  const rail = byKind.find((k) => k.kind === "rail");
+  const stations = byKind.find((k) => k.kind === "station");
+  if (!rail || !stations) return;
+  const segments = [];
+  for (const f of rail.features) {
+    if (f.attributes.PROFILE !== "SUBWAY") continue;
+    for (const path of f.geometry.paths) for (let i = 0; i + 1 < path.length; i++) segments.push([path[i], path[i + 1]]);
+  }
+  const kx = 111320 * Math.cos((47.6 * Math.PI) / 180);
+  const ky = 110574;
+  for (const f of stations.features) {
+    const ring = f.geometry.rings[0];
+    const cx = ring.reduce((n, p) => n + p[0], 0) / ring.length;
+    const cy = ring.reduce((n, p) => n + p[1], 0) / ring.length;
+    let best = Infinity;
+    for (const [a, b] of segments) {
+      const ax = (a[0] - cx) * kx, ay = (a[1] - cy) * ky;
+      const bx = (b[0] - cx) * kx, by = (b[1] - cy) * ky;
+      const dx = bx - ax, dy = by - ay;
+      const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
+      best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+    }
+    f.attributes.UNDERGROUND = best <= 60 ? 1 : 0;
+  }
+  const attrs = stations.layer.attrs;
+  stations.layer = { ...stations.layer, attrs: (a) => ({ ...attrs(a), underground: a.UNDERGROUND || null }) };
 }
 
 /**
@@ -807,11 +1098,14 @@ function packPlaces(byKind) {
 }
 
 async function refreshPlaces() {
+  const bbox = (await readMeta(OUT_PATH)).bbox;
   const byKind = [];
   for (const layer of PLACE_LAYERS) {
-    const features = await fetchFeatures(layer.url, layer.where, layer.fields, SIMPLIFY);
+    let features = await fetchFeatures(layer.url, layer.where, layer.fields, SIMPLIFY);
+    if (layer.clip) features = features.map((f) => clipToBbox(f, bbox)).filter(Boolean);
     byKind.push({ kind: layer.kind, layer, features });
   }
+  markUndergroundStations(byKind);
   const packed = packPlaces(byKind);
   const gz = gzipSync(packed.bytes, { level: 9 });
   await writeAtomic(PLACES_PATH, gz);
@@ -872,9 +1166,92 @@ async function writeAtomic(path, bytes) {
 
 /** The bbox out of a trees file already on disk, for a terrain-only refresh. */
 async function readBbox() {
-  const buf = gunzipSync(await readFile(OUT_PATH));
+  return (await readMeta(OUT_PATH)).bbox;
+}
+
+/**
+ * Every tree's position (street, park and LiDAR crown) as lon/lat, out of the
+ * files already on disk — the same planes src/lib/trees.ts reads back.
+ */
+async function treePoints() {
+  const { bbox } = await readMeta(OUT_PATH);
+  const points = [];
+  for (const path of [OUT_PATH, CROWNS_PATH]) {
+    let buf;
+    try {
+      buf = gunzipSync(await readFile(path));
+    } catch {
+      continue;
+    }
+    const metaLength = buf.readUInt32LE(4);
+    const meta = JSON.parse(buf.subarray(8, 8 + metaLength).toString("utf8"));
+    const n = meta.count;
+    const at = 8 + metaLength;
+    const shift = meta.posShift;
+    const half = shift ? 1 << (shift - 1) : 0;
+    const plane = (k, i) => buf[at + k * n * 2 + i] | (buf[at + k * n * 2 + n + i] << 8);
+    let qx = 0;
+    let qy = 0;
+    for (let i = 0; i < n; i++) {
+      qx = (qx + plane(0, i)) & 0xffff;
+      qy = (qy + plane(1, i)) & 0xffff;
+      const x = Math.min(65535, (qx << shift) + half) / 65535;
+      const y = Math.min(65535, (qy << shift) + half) / 65535;
+      points.push([bbox.west + x * (bbox.east - bbox.west), bbox.south + y * (bbox.north - bbox.south)]);
+    }
+  }
+  return points;
+}
+
+/** A places file from before a kind was added is refetched, however new it is. */
+async function hasEveryPlaceKind() {
+  try {
+    const { kinds } = await readMeta(PLACES_PATH);
+    return PLACE_LAYERS.every((l) => kinds.includes(l.kind));
+  } catch {
+    return false;
+  }
+}
+
+async function readMeta(path) {
+  const buf = gunzipSync(await readFile(path));
   const metaLength = buf.readUInt32LE(4);
-  return JSON.parse(buf.subarray(8, 8 + metaLength).toString("utf8")).bbox;
+  return JSON.parse(buf.subarray(8, 8 + metaLength).toString("utf8"));
+}
+
+/**
+ * Trees don't grow in lakes: a water cell with a tree in it is really the
+ * bank, which the outlines' cell-sized steps (and the widened channels)
+ * pushed out over the shore. Hand those back to the land at the ground's own
+ * height, working in from the land a ring at a time, so a stray crown out in
+ * the middle of a lake can't punch a hole in it. Returns how many cells.
+ */
+function dryShore(z, ground, water, w, h, origin, cell, points) {
+  const treed = new Uint8Array(w * h);
+  for (const [lon, lat] of points) {
+    const c = Math.floor((lon - origin.west) / cell);
+    const r = Math.floor((origin.north - lat) / cell);
+    if (c >= 0 && r >= 0 && c < w && r < h) treed[r * w + c] = 1;
+  }
+  let dried = 0;
+  for (let changed = true; changed; ) {
+    changed = false;
+    const ring = [];
+    for (let i = 0; i < w * h; i++) {
+      if (!water[i] || !treed[i]) continue;
+      const x = i % w;
+      if ((x > 0 && !water[i - 1]) || (x < w - 1 && !water[i + 1]) || (i >= w && !water[i - w]) || (i < w * (h - 1) && !water[i + w])) {
+        ring.push(i);
+      }
+    }
+    for (const i of ring) {
+      water[i] = 0;
+      z[i] = ground[i];
+      dried++;
+      changed = true;
+    }
+  }
+  return dried;
 }
 
 /** Open water, as polygons: lakes, the bays and the channels (the layer's tideflats aren't water). */
@@ -956,20 +1333,54 @@ async function burnWater(z, water, w, h, origin, cell) {
     }
     return out;
   };
-  /** The tenth-percentile height of the new cells: the water's own level, not its banks'. */
+  const neighbours = (i) => {
+    const x = i % w;
+    return [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < w * (h - 1) ? i + w : -1];
+  };
+  /**
+   * The level a stretch of new water lies at: the one water it opens onto,
+   * if it touches just one — a lake's fringe is the lake's height — or else
+   * (a canal joining two levels, or water on its own) the tenth-percentile
+   * height under it: the water's own level, not its banks'.
+   */
   const levelOf = (cells) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const i of cells) {
+      for (const k of neighbours(i)) {
+        if (k < 0 || !water[k]) continue;
+        lo = Math.min(lo, z[k]);
+        hi = Math.max(hi, z[k]);
+      }
+    }
+    // Touching no water at all, lo and hi are still the infinities, and their middle is NaN.
+    if (lo <= hi && hi - lo <= 1) return (lo + hi) / 2;
     const zs = cells.map((i) => z[i]).sort((a, b) => a - b);
     return zs[Math.floor(zs.length * 0.1)];
   };
   let added = 0;
+  /** Each connected stretch of `cells` at its own level, so Green Lake's rim isn't laid at Lake Union's. */
   const lay = (cells) => {
-    if (!cells.length) return;
-    const level = levelOf(cells);
-    for (const i of cells) {
-      z[i] = level;
-      water[i] = 1;
+    const pending = new Set(cells);
+    for (const start of cells) {
+      if (!pending.has(start)) continue;
+      pending.delete(start);
+      const part = [start];
+      for (let n = 0; n < part.length; n++) {
+        for (const k of neighbours(part[n])) {
+          if (pending.has(k)) {
+            pending.delete(k);
+            part.push(k);
+          }
+        }
+      }
+      const level = levelOf(part);
+      for (const i of part) {
+        z[i] = level;
+        water[i] = 1;
+      }
+      added += part.length;
     }
-    added += cells.length;
   };
   const fresh = (mask) => {
     const cells = [];
@@ -1097,6 +1508,7 @@ async function refreshTerrain(trees) {
     }
   }
 
+  const ground = Float32Array.from(z);
   // The elevation alone loses the narrow water: the Ship Canal, the Fremont
   // and Montlake Cuts, the Locks, the Duwamish's channels and the small lakes
   // are a cell or two wide and blur into their banks. The city's own water
@@ -1106,6 +1518,12 @@ async function refreshTerrain(trees) {
     console.log(`[trees] water outlines added ${burned} cells of water the elevation missed`);
   } catch (err) {
     console.warn(`[trees] warning: water outlines failed (${err.message}); the water is the elevation's alone.`);
+  }
+  try {
+    const dried = dryShore(z, ground, water, w, h, { west, north }, CELL_DEG, await treePoints());
+    console.log(`[trees] gave ${dried} cells of shore with trees on them back to the land`);
+  } catch (err) {
+    console.warn(`[trees] warning: couldn't read the trees back (${err.message}); some may stand in the water.`);
   }
 
   // Heights in steps, then each as the change from its neighbour to the west
@@ -1152,7 +1570,8 @@ async function main() {
     (await isFresh(OUT_PATH, "TRE3")) &&
     (await isFresh(ADDR_PATH, "TRA1")) &&
     (await isFresh(REMOVED_PATH, "RMV1")) &&
-    (await isFresh(CROWNS_PATH, "CRW1"));
+    (await isFresh(CROWNS_PATH, "CRW1")) &&
+    (await isFresh(SIDEWALK_PATH, "SDW1"));
   if (fresh) {
     console.log(`[trees] ${OUT_PATH} and the rest are under a week old; keeping them (--force to refetch).`);
   } else {
@@ -1179,7 +1598,25 @@ async function main() {
         `map ${(mapGz.length / 1e6).toFixed(2)}MB, addresses ${(addrGz.length / 1e6).toFixed(2)}MB gzipped`,
     );
 
-    // The extras are best-effort: trees.exe draws without either.
+    // The extras are best-effort: trees.exe draws without any of them.
+    try {
+      console.log("[trees] fetching SDOT's sidewalk inspections...");
+      const sidewalk = packSidewalk(
+        await fetchFeatures(SIDEWALK_LAYER, SIDEWALK_WHERE, SIDEWALK_FIELDS, ""),
+        packed.bbox,
+        packed.parsed,
+      );
+      const gz = gzipSync(sidewalk.bytes, { level: 9 });
+      await writeAtomic(SIDEWALK_PATH, gz);
+      console.log(
+        `[trees] wrote sidewalk notes for ${sidewalk.n} trees (${sidewalk.named} inspections by tree id, ` +
+          `${sidewalk.near} by nearness, ${sidewalk.unmatched} matched to none) — ${(gz.length / 1e6).toFixed(2)}MB gzipped`,
+      );
+    } catch (err) {
+      // Its rows are indexes into the trees just written: an old file would pin them on the wrong trees.
+      await rm(SIDEWALK_PATH, { force: true });
+      console.warn(`[trees] warning: sidewalk refresh failed (${err.message}); the tree cards go without.`);
+    }
     try {
       console.log("[trees] fetching removed street trees...");
       const removed = packRemoved(
@@ -1209,9 +1646,9 @@ async function main() {
     }
   }
 
-  if (!(await isFresh(PLACES_PATH, "PLC1"))) {
+  if (!(await isFresh(PLACES_PATH, "PLC1")) || !(await hasEveryPlaceKind())) {
     try {
-      console.log("[trees] fetching parks, restoration sites, P-Patches and creeks...");
+      console.log("[trees] fetching parks, restoration sites, P-Patches, creeks, areaways and light rail...");
       await refreshPlaces();
     } catch (err) {
       console.warn(`[trees] warning: places refresh failed (${err.message}); keeping the old file, or none.`);

@@ -9,18 +9,27 @@ import {
   loadAddresses,
   loadCrowns,
   loadRemoved,
+  loadSidewalk,
   loadTrees,
   RemovedTrees,
+  SIDEWALK_BY_NEARNESS,
+  SIDEWALK_CRACKED,
+  SIDEWALK_IN_THE_WAY,
+  SIDEWALK_LOW_BRANCHES,
+  SIDEWALK_NARROWED,
+  SIDEWALK_REPAIRED,
+  SIDEWALK_TILTED,
   treeAddress,
   TreeAddresses,
   treeOwner,
+  TreeSidewalk,
   treeYear,
   Trees,
 } from "@/lib/trees";
 import { dayLabel, doy, isConifer, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { loadTerrain, Terrain } from "@/lib/terrain";
 import { loadPlaces, parkAt, Place, placeAt, Places, RESTORATION_PHASES, treesInside } from "@/lib/places";
-import { drapePlaces, drawFlatPlaces, outlinePlace } from "@/lib/placesDraw";
+import { areawayAtScreen, drapePlaces, drawFlatPlaces, outlinePlace } from "@/lib/placesDraw";
 import { clockLabel, Light, lightFrom, seattleInstant, sunPosition, sunTimes } from "@/lib/sun";
 import {
   DEPTH_SLACK,
@@ -47,7 +56,6 @@ import {
   TiltView,
   TreeForms,
   treeForms,
-  treeScreen,
   crownOutline,
 } from "@/lib/treesTilt";
 
@@ -70,7 +78,8 @@ import {
  * (treesTilt.ts); every coloring works in both.
  *
  * Under the trees, when the toolbar asks: the parks with their restoration
- * zones and P-Patch gardens, and the creeks (places.ts), which
+ * zones and P-Patch gardens, the creeks, and the areaways under the
+ * sidewalks (places.ts), which
  * can be hovered and clicked like a tree. And in Tilt, the Sun: the hills and
  * trees lit, and shadowed, as they would be at the toolbar's hour on the day
  * shown (sun.ts).
@@ -83,7 +92,7 @@ const GHOST: RGB = [30, 42, 34];
 /** A draw slot with nothing to draw in Season or Type. */
 const NO_KEY = 0xffff;
 /** The picked tree's ring, and the picked place's outline. */
-const PICKED: RGB = [255, 255, 0];
+const PICKED: RGB = [0, 255, 102];
 /** A removed street tree, in the year it came down. */
 const FELLED: RGB = [236, 64, 48];
 /** The LiDAR trees in the Species view: they have no species, so they stay in the background. */
@@ -414,11 +423,15 @@ export type TreesWindowProps = {
   parks: boolean;
   /** Creeks. */
   water: boolean;
+  /** The areaways under the sidewalks. */
+  underground: boolean;
   /** Light Tilt by the sun at `minutes` past midnight, Seattle time, instead of from the map's north-west. */
   sun: boolean;
   minutes: number;
   /** The Today button: the sun's hour back to now, as the day goes back to today. */
   onNow: () => void;
+  /** Controls laid over the map's bottom-right corner (Tilt's sliders, Reset). */
+  overlay?: React.ReactNode;
 };
 
 export default function TreesWindow({
@@ -434,9 +447,11 @@ export default function TreesWindow({
   canopy,
   parks,
   water,
+  underground,
   sun,
   minutes,
   onNow,
+  overlay,
 }: TreesWindowProps) {
   const [trees, setTrees] = useState<Trees | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -475,6 +490,7 @@ export default function TreesWindow({
   const [treesProgress, setTreesProgress] = useState<number | null>(null);
   const [addresses, setAddresses] = useState<TreeAddresses | null>(null);
   const [removed, setRemoved] = useState<RemovedTrees | null>(null);
+  const [sidewalk, setSidewalk] = useState<TreeSidewalk | null>(null);
   // Set a moment after the map is up: the ground starts coming down then, so
   // Tilt is usually ready before it's asked for.
   const [prefetchGround, setPrefetchGround] = useState(false);
@@ -488,6 +504,10 @@ export default function TreesWindow({
         // card, so they follow on their own.
         loadAddresses(abort.signal)
           .then(setAddresses)
+          .catch(() => {});
+        // What the sidewalk inspectors blamed on which trees, for the card alone.
+        loadSidewalk(abort.signal)
+          .then(setSidewalk)
           .catch(() => {});
         // The trees that have come down, for the Planted timeline.
         loadRemoved(abort.signal)
@@ -527,7 +547,7 @@ export default function TreesWindow({
     [terrain, trees, prepared],
   );
 
-  // The parks, gardens and creeks: small, so they follow the trees straight in.
+  // The parks, gardens, creeks and areaways: small, so they follow the trees straight in.
   const [places, setPlaces] = useState<Places | null>(null);
   useEffect(() => {
     if (!trees || !prepared) return;
@@ -537,10 +557,10 @@ export default function TreesWindow({
       .catch(() => {});
     return () => abort.abort();
   }, [trees, prepared]);
-  const showPlaces = places !== null && (parks || water);
+  const showPlaces = places !== null && (parks || water || underground);
   const placeShown = useCallback(
-    (p: Place) => (p.kind === "creek" ? water : parks),
-    [parks, water],
+    (p: Place) => (p.kind === "creek" ? water : p.kind === "areaway" ? underground : parks),
+    [parks, water, underground],
   );
 
   // The sun, on the day the Season view shows (today in the others) at the
@@ -834,7 +854,7 @@ export default function TreesWindow({
       const stride = movingRef.current ? 2 : 1;
       const key =
         `${W}x${H} ${tiltView.S} ${v.cx} ${v.cy} ${pitch} ${heading} ${ground ? "g" : "-"} ${stride} ` +
-        `${sunKey ?? "map"} ${showPlaces ? `${parks} ${water}` : "-"}`;
+        `${sunKey ?? "map"} ${showPlaces ? `${parks} ${water} ${underground}` : "-"}`;
       let layer = groundLayerRef.current;
       if (!layer || layer.key !== key) {
         if (!layer || layer.buf.length !== W * H) {
@@ -842,7 +862,7 @@ export default function TreesWindow({
         }
         const overlay = places && parks ? places.overlay : null;
         renderGround(layer.buf, layer.depth, tiltView, litGround, prepared.widthM, prepared.heightM, pack(BG), stride, overlay);
-        if (showPlaces && places) drapePlaces(layer.buf, layer.depth, tiltView, litGround, places, { parks, water }, light ? 0.3 + 0.7 * light.day : 1);
+        if (showPlaces && places) drapePlaces(layer.buf, layer.depth, tiltView, litGround, places, { parks, water, underground }, light ? 0.3 + 0.7 * light.day : 1);
         layer.key = key;
         layer.W = W;
         groundLayerRef.current = layer;
@@ -975,11 +995,11 @@ export default function TreesWindow({
       const ox = W / 2 - v.cx * s;
       const oy = H / 2 + v.cy * s;
       const stride = movingRef.current ? 2 : 1;
-      const key = `${W}x${H} ${s} ${ox} ${oy} ${parks} ${water} ${stride}`;
+      const key = `${W}x${H} ${s} ${ox} ${oy} ${parks} ${water} ${underground} ${stride}`;
       let layer = flatLayerRef.current;
       if (!layer || layer.key !== key) {
         if (!layer || layer.buf.length !== W * H) layer = { key, buf: new Uint32Array(W * H) };
-        drawFlatPlaces(layer.buf, W, H, s, ox, oy, places, { parks, water }, pack(BG), stride);
+        drawFlatPlaces(layer.buf, W, H, s, ox, oy, places, { parks, water, underground }, pack(BG), stride);
         layer.key = key;
         flatLayerRef.current = layer;
       }
@@ -1136,7 +1156,7 @@ export default function TreesWindow({
         ctx.stroke();
       };
       if (hover !== null && hover !== selected) ring(hover, "rgba(255,255,255,0.75)", 1);
-      if (selected !== null) ring(selected, "#ffff00", 2);
+      if (selected !== null) ring(selected, `rgb(${PICKED.join(",")})`, 2);
 
       // Scale bar: the roundest distance that fits in about 90px.
       const target = 90 / v.s;
@@ -1212,6 +1232,7 @@ export default function TreesWindow({
     street,
     parks,
     water,
+    underground,
     selectedPlace,
     light,
     sunKey,
@@ -1332,6 +1353,22 @@ export default function TreesWindow({
     [scaleLimits, requestDraw, turn, squash],
   );
 
+  /** The view slid by (dx, dy) canvas pixels: the ground that was there comes to the middle. */
+  const panBy = useCallback(
+    (dx: number, dy: number) => {
+      const v = viewRef.current;
+      if (!v) return;
+      const { w, h } = sizeRef.current;
+      viewRef.current = viewWith(toWorld(w / 2 + dx, h / 2 + dy, v), w / 2, h / 2, v.s);
+      fittedRef.current = false;
+      moved();
+      requestDraw();
+    },
+    // toWorld and viewWith change with turn and squash.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [moved, requestDraw, turn, squash],
+  );
+
   // --- picking --------------------------------------------------------------
 
   const pick = useCallback(
@@ -1340,7 +1377,11 @@ export default function TreesWindow({
       if (!trees || !prepared || !v) return null;
       const layer = groundLayerRef.current;
       if (tilt && scene && sceneGround && layer) {
-        // Nearest crown on screen that isn't behind a hill; the nearer tree wins a tie.
+        // The crown under the pointer, as drawn — a conifer's tall cone, or a
+        // ball — or failing that the nearest, if it's close; the nearer tree
+        // wins a tie, as it's drawn over the other. Measured to the shape's
+        // edge rather than its centre, so a cone stood up tall by a low tilt
+        // can be picked anywhere along it.
         const { w, h, dpr } = sizeRef.current;
         const view: TiltView = makeTiltView(Math.round(w * dpr), Math.round(h * dpr), v.s * dpr, v.cx, v.cy, pitch, heading);
         let best = -1;
@@ -1351,33 +1392,46 @@ export default function TreesWindow({
         // on, allowing for hills and trees rising into view — then only those
         // near it across: a million checks a mouse move is too many.
         const pxd = px * dpr;
+        const pyd = py * dpr;
         const ss = view.S * view.sin;
         const rise = ((ground?.zMax ?? 0) * EXAG + scene.tallest * 1.4 * TREE_SCALE) * view.S * view.cos;
-        const vFar = view.cv + (view.H / 2 - py * dpr + 60 * dpr) / ss;
-        const vNear = view.cv + (view.H / 2 - py * dpr - 60 * dpr - rise) / ss;
+        const vFar = view.cv + (view.H / 2 - pyd + 60 * dpr) / ss;
+        const vNear = view.cv + (view.H / 2 - pyd - 60 * dpr - rise) / ss;
         const sorted = order;
         const kFrom = sorted ? firstAtMost(sorted.depth, vFar) : 0;
         const kTo = sorted ? firstAtMost(sorted.depth, vNear) : mx.length;
+        // The ground right under the pointer: a tree further off than it is behind a hill there.
+        const ix = Math.round(pxd);
+        const iy = Math.round(pyd);
+        const groundAt = ix >= 0 && iy >= 0 && ix < layer.W && iy * layer.W + ix < layer.depth.length ? layer.depth[iy * layer.W + ix] : Infinity;
         for (let k = kFrom; k < kTo; k++) {
           const i = sorted ? sorted.order[k] : k;
           const sx = view.W / 2 + (view.ux * mx[i] + view.uy * my[i] - view.cu) * view.S;
-          if (sx - pxd > 60 * dpr || pxd - sx > 60 * dpr) continue;
-          const at = treeScreen(view, mx[i], my[i], sceneGround[i], forms.height[i], forms.crown[i]);
-          const dx = at.x / dpr - px;
-          const dy = at.y / dpr - py;
-          if (dy > 60 || dy < -60) continue;
-          const reach = Math.max(9, forms.crown[i] * TREE_SCALE * v.s);
-          const d = dx * dx + dy * dy;
-          if (d > reach * reach || !isLive(i)) continue;
-          const ix = Math.round(at.x);
-          const iy = Math.round(at.y);
-          if (ix >= 0 && iy >= 0 && ix < layer.W && iy * layer.W + ix < layer.depth.length) {
-            if (at.v - DEPTH_SLACK > layer.depth[iy * layer.W + ix]) continue;
+          const across = Math.max(60, forms.crown[i] * TREE_SCALE * v.s) * dpr;
+          if (sx - pxd > across || pxd - sx > across) continue;
+          const o = crownOutline(view, mx[i], my[i], sceneGround[i], forms.height[i], forms.crown[i], forms.shape[i]);
+          // How far outside the shape the pointer is, in CSS pixels (0 inside), and how big the shape is.
+          let d: number;
+          let size: number;
+          if (o.shape === "cone") {
+            const y = Math.max(o.top, Math.min(o.bottom, pyd));
+            const half = (o.half * (y - o.top)) / Math.max(1, o.bottom - o.top);
+            const ex = Math.max(0, Math.abs(pxd - o.x) - half);
+            const ey = pyd - y;
+            d = Math.sqrt(ex * ex + ey * ey) / dpr;
+            size = Math.max(o.half, (o.bottom - o.top) / 2) / dpr;
+          } else {
+            d = Math.max(0, Math.hypot(pxd - o.x, pyd - o.y) - o.r) / dpr;
+            size = o.r / dpr;
           }
-          if (d < bestD - 4 || (d <= bestD + 4 && at.v < bestV)) {
+          // A little to spare, and a small tree still 9 pixels' worth to aim at.
+          if (d > Math.max(3, 9 - size) || !isLive(i)) continue;
+          const at = view.vx * mx[i] + view.vy * my[i];
+          if (at - DEPTH_SLACK > groundAt) continue;
+          if (d < bestD - 0.5 || (d <= bestD + 0.5 && at < bestV)) {
             best = i;
             bestD = d;
-            bestV = at.v;
+            bestV = at;
           }
         }
         return best >= 0 ? best : null;
@@ -1434,6 +1488,12 @@ export default function TreesWindow({
         const ix = Math.floor(px * dpr);
         const iy = Math.floor(py * dpr);
         if (!layer || ix < 0 || iy < 0 || ix >= W || iy >= H) return null;
+        // The areaways go down below the pavement, where the ground under the pixel isn't theirs.
+        if (underground) {
+          const view = makeTiltView(W, H, v.s * dpr, v.cx, v.cy, pitch, heading);
+          const pit = areawayAtScreen(view, litGround, layer.depth, places, ix + 0.5, iy + 0.5);
+          if (pit) return pit;
+        }
         const depthAt = layer.depth[iy * layer.W + ix];
         if (!Number.isFinite(depthAt)) return null;
         const [cu] = rot(heading, v.cx, v.cy);
@@ -1443,11 +1503,11 @@ export default function TreesWindow({
         at = toWorld(px, py, v);
       }
       if (at.x < 0 || at.y < 0 || at.x > prepared.widthM || at.y > prepared.heightM) return null;
-      return placeAt(places, { parks, water }, at.x, at.y, reach);
+      return placeAt(places, { parks, water, underground }, at.x, at.y, reach);
     },
     // toWorld changes with turn and squash.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [places, showPlaces, prepared, tilt, heading, parks, water, turn, squash],
+    [places, showPlaces, prepared, tilt, pitch, heading, parks, water, underground, litGround, turn, squash],
   );
 
   // --- pointer handling -----------------------------------------------------
@@ -1628,6 +1688,49 @@ export default function TreesWindow({
     return () => window.removeEventListener("keydown", onKey);
   }, [active, togglePlay, zoomAt, tilt, onTurn]);
 
+  // WASD slide the map while held, up, left, down and right on the screen
+  // whichever way Tilt faces, at most of the window a second.
+  useEffect(() => {
+    if (!active) return;
+    const held = new Set<string>();
+    let raf = 0;
+    let last = 0;
+    const step = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const { w, h } = sizeRef.current;
+      const speed = Math.min(w, h) * 0.8 * dt;
+      const dx = (held.has("d") ? 1 : 0) - (held.has("a") ? 1 : 0);
+      const dy = (held.has("s") ? 1 : 0) - (held.has("w") ? 1 : 0);
+      if (dx || dy) panBy((dx * speed) / Math.hypot(dx, dy), (dy * speed) / Math.hypot(dx, dy));
+      raf = held.size ? requestAnimationFrame(step) : 0;
+    };
+    const onDown = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "w" && k !== "a" && k !== "s" && k !== "d") return;
+      e.preventDefault();
+      held.add(k);
+      if (!raf) {
+        last = performance.now();
+        raf = requestAnimationFrame(step);
+      }
+    };
+    const onUp = (e: KeyboardEvent) => held.delete(e.key.toLowerCase());
+    const onBlur = () => held.clear();
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [active, panBy]);
+
   // --- readouts -------------------------------------------------------------
 
   const seasonNotes = useMemo(() => {
@@ -1731,6 +1834,11 @@ export default function TreesWindow({
     const notes: string[] = [];
     if ((flags & 12) !== 0) notes.push(flags & 4 ? "Heritage tree" : "Exceptional tree");
     if (inPark) notes.push("From Seattle Parks' own inventory of the trees in its parks.");
+    const walk = sidewalk ? sidewalkRows(sidewalk, i) : null;
+    if (walk) {
+      rows.push(...walk.rows);
+      notes.push(walk.note);
+    }
     notes.push(count <= 1 ? "The only one the city has inventoried." : `One of ${fmt(count)} the city has inventoried.`);
     return {
       kind: inPark ? "Park tree" : "Street tree",
@@ -1751,6 +1859,7 @@ export default function TreesWindow({
       get("Address") ?? get("Park"),
       get("Height"),
       get("Trunk"),
+      get("Roots") ? `roots ${get("Roots")}` : null,
       get("Removed") ? `removed ${get("Removed")}` : null,
     ];
     return parts.filter((p) => p && p !== "…" && p !== "not measured" && p !== "not recorded").join(" · ");
@@ -1844,6 +1953,11 @@ export default function TreesWindow({
         ) : wantCrowns && trees ? (
           <LoadingPanel label="Loading the city's other 850,000 trees" progress={crownsProgress} corner />
         ) : null}
+        {overlay && (
+          <div style={{ position: "absolute", right: 6, bottom: 6, zIndex: 2 }} onPointerDown={(e) => e.stopPropagation()}>
+            {overlay}
+          </div>
+        )}
         {selectedCard && <TreeCard card={selectedCard} onClose={() => setSelected(null)} />}
         {!selectedCard && selectedPlaceCard && <TreeCard card={selectedPlaceCard} onClose={() => setSelectedPlace(null)} />}
 
@@ -2197,6 +2311,34 @@ function YearHistogram({
   );
 }
 
+/** What the sidewalk inspectors put down to tree `i`, as card rows and a note saying where it's from; null for nothing. */
+function sidewalkRows(sw: TreeSidewalk, i: number): { rows: [string, string][]; note: string } | null {
+  const k = sw.row.get(i);
+  if (k === undefined) return null;
+  const f = sw.flags[k];
+  const rows: [string, string][] = [];
+  if (sw.uplifts[k]) {
+    const inches = sw.uplift[k] / 10;
+    const places = sw.uplifts[k] > 1 ? ` (${sw.uplifts[k]} places)` : "";
+    rows.push(["Roots", inches ? `lifted the sidewalk ${inches.toFixed(1)} in${places}` : `lifted the sidewalk${places}`]);
+  }
+  const problems = [
+    f & SIDEWALK_LOW_BRANCHES ? "branches hang low over it" : null,
+    f & SIDEWALK_NARROWED ? "trunk or pit narrows it" : null,
+    f & SIDEWALK_IN_THE_WAY ? "the tree is in the way" : null,
+    f & SIDEWALK_CRACKED ? "slabs cracked" : null,
+    f & SIDEWALK_TILTED ? "slab tilted" : null,
+  ].filter(Boolean);
+  if (problems.length) rows.push(["Sidewalk", problems.join("; ")]);
+  if (!rows.length) return null;
+  const year = sw.year[k] ? ` in ${1900 + sw.year[k]}` : "";
+  const note =
+    `From SDOT's sidewalk inspections${year}` +
+    (f & SIDEWALK_REPAIRED ? ", since repaired." : ".") +
+    (f & SIDEWALK_BY_NEARNESS ? " The inspector named no tree; this is the nearest." : "");
+  return { rows, note };
+}
+
 /** The scientific name, or the genus, or — for a record with neither — saying so. */
 function speciesLabel(sp: { scientific: string; genus: string }): string {
   const ok = (s: string) => s !== "" && !/^unknown$|error/i.test(s);
@@ -2211,7 +2353,7 @@ function compass(deg: number): string {
 const acresLabel = (acres: number | undefined) =>
   acres === undefined ? null : `${acres < 10 ? acres.toFixed(1) : fmt(Math.round(acres))} acres`;
 
-/** A park, restoration zone, garden or creek, in a line for the status bar. */
+/** A park, restoration zone, garden, creek or areaway, in a line for the status bar. */
 function describePlace(p: Place): string {
   switch (p.kind) {
     case "park":
@@ -2226,6 +2368,12 @@ function describePlace(p: Place): string {
         .join(" · ");
     case "garden":
       return [`${p.name ?? "Community"} P-Patch`, p.address, p.plots ? `${p.plots} plots` : null].filter(Boolean).join(" · ");
+    case "areaway":
+      return ["Areaway", p.name, p.deep ? `${feet(p.deep)} ft down` : null, p.status].filter(Boolean).join(" · ");
+    case "rail":
+      return [railLine(p), p.profile].filter(Boolean).join(" · ");
+    case "station":
+      return [p.name ?? "Link station", p.underground ? "underground" : null].filter(Boolean).join(" · ");
     default:
       return `${p.name ?? "Unnamed creek"}${p.piped ? " · piped here" : ""}`;
   }
@@ -2271,6 +2419,44 @@ function placeCard(p: Place, trees: number): CardInfo {
         rows,
         notes: ["A community garden in the city's P-Patch program."],
       };
+    case "areaway":
+      add("Number", p.id);
+      add("Status", p.status);
+      add("Used for", p.use);
+      add("Depth", p.deep ? `up to ${feet(p.deep)} ft` : null);
+      add("Size", p.wide && p.long ? `${feet(p.wide)} × ${feet(p.long)} ft` : p.long ? `${feet(p.long)} ft long` : null);
+      add("Street wall", [p.wall, p.wallRating?.toLowerCase()].filter(Boolean).join(", "));
+      add("Sidewalk", [p.roof, p.roofRating?.toLowerCase()].filter(Boolean).join(", "));
+      add("Inspected", p.inspected);
+      add("Owner", p.owner ? AREAWAY_OWNER_LABEL[p.owner] : null);
+      return {
+        kind: "Areaway",
+        title: p.name ?? "Areaway",
+        rows,
+        notes: [
+          "A hollow cavern under the sidewalk. After the 1889 fire the streets were raised a story or more on walls along the curb; the old sidewalks between them and the buildings were roofed over, and the purple glass in some of those roofs once lit them.",
+          ...(p.filled ? ["Partly filled in since."] : []),
+        ],
+      };
+    case "rail":
+      add("Track", p.profile);
+      add("Project", p.name);
+      return {
+        kind: "Light rail",
+        title: railLine(p),
+        rows,
+        notes: [
+          "Sound Transit's Link light rail, dashed where it runs in a tunnel. How deep the tunnels go isn't in the data, so they're drawn along the ground over them.",
+        ],
+      };
+    case "station":
+      add("Platform", p.underground ? "underground" : "above ground");
+      return {
+        kind: "Link station",
+        title: p.name ?? "Link station",
+        rows,
+        notes: ["A Sound Transit Link light rail station: its platform's outline."],
+      };
     default:
       add("Here", p.piped ? "through a pipe" : "open to the sky");
       return {
@@ -2281,6 +2467,23 @@ function placeCard(p: Place, trees: number): CardInfo {
       };
   }
 }
+
+/** Feet to a tenth at most: SDOT's measurements come with float noise on the end. */
+const feet = (n: number) => String(Math.round(n * 10) / 10);
+
+/** Which Link line a stretch of track carries, from the project that built it. */
+function railLine(p: Place): string {
+  if (p.name === "OMF") return "Link maintenance yard";
+  if (p.name === "East Link") return "Link 2 Line";
+  return "Link 1 Line";
+}
+
+const AREAWAY_OWNER_LABEL = {
+  private: "The building next to it",
+  sdot: "Seattle Department of Transportation",
+  county: "King County",
+  light: "Seattle City Light",
+} as const;
 
 const OWNER_LABEL = {
   private: "The property owner next to it",

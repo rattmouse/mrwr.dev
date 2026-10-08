@@ -52,7 +52,7 @@ function file(content: string, program?: ProgramWindowId, special?: Special): Fs
 /** The real programs this desktop has, as files sitting in the guest's home dir. */
 const PROGRAM_FILES = WINDOW_IDS.flatMap((id) => {
   const def = programDef(id);
-  return isProgramWindow(id) && def.shell ? [{ file: def.title, id, blurb: def.shell.blurb }] : [];
+  return isProgramWindow(id) && def.shell ? [{ file: def.shell.file ?? def.title, id, blurb: def.shell.blurb }] : [];
 });
 
 /**
