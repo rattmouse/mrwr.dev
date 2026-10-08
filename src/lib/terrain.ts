@@ -21,7 +21,7 @@ export type Terrain = {
 };
 
 export async function loadTerrain(signal?: AbortSignal, onProgress?: Progress): Promise<Terrain> {
-  const buf = await fetchGzip(TERRAIN_URL, signal, onProgress);
+  const buf = await fetchGzip(TERRAIN_URL, "TER2", signal, onProgress);
   const { meta, body } = readHeader<{ w: number; h: number; bbox: Terrain["bbox"]; zStep: number }>(buf, "TER2");
   const { w, h, zStep } = meta;
   const n = w * h;

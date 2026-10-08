@@ -84,7 +84,7 @@ export async function loadPlaces(
   signal?: AbortSignal,
   onProgress?: Progress,
 ): Promise<Places> {
-  const buf = await fetchGzip(PLACES_URL, signal, onProgress);
+  const buf = await fetchGzip(PLACES_URL, "PLC1", signal, onProgress);
   const { meta, body } = readHeader<Meta>(buf, "PLC1");
   const bytes = new Uint8Array(buf);
   const total = meta.features.reduce((n, f) => n + f.parts.reduce((a, b) => a + b, 0), 0);
