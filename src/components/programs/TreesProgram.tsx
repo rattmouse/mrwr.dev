@@ -3,51 +3,46 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
-import FileMenu from "@/components/windows/FileMenu";
-import KnobSlider from "@/components/common/KnobSlider";
+import { Dial, Selector } from "@/components/common/Dial";
 import { Glyph } from "@/components/common/MediaGlyphs";
 import TreesWindow, { TreesMode } from "@/components/windows/TreesWindow";
 import { ProgramProps, windowFrame } from "@/components/programs/programFrame";
 import { Heading, headingName, PITCH_DEFAULT, PITCH_MAX, PITCH_MIN } from "@/lib/treesTilt";
 import { clockLabel, seattleMinutesNow } from "@/lib/sun";
 
-/**
- * File > Open: how the trees are colored, named like the program's own
- * command-line flags, each with its own coloring of the tree icon.
- */
-const MODES: { id: TreesMode; label: string; title: string; icon: string }[] = [
-  { id: "season", label: "-s, --season", title: "Every tree as it looks on a day of the year", icon: "../w95_tree_season.ico" },
-  { id: "species", label: "-t, --type", title: "The commonest kinds of tree, by color", icon: "../w95_tree_type.ico" },
-  { id: "planted", label: "-a, --age", title: "The trees standing by a given year, newest lit up", icon: "../w95_tree_age.ico" },
-];
+/** The Open dial: how the trees are colored, each marked by its own coloring of the tree icon. */
+const MODES: { id: TreesMode; label: string; title: string; mark: React.ReactNode }[] = (
+  [
+    ["season", "Season", "Every tree as it looks on a day of the year", "../w95_tree_season.ico"],
+    ["species", "Type", "The commonest kinds of tree, by color", "../w95_tree_type.ico"],
+    ["planted", "Age", "The trees standing by a given year, newest lit up", "../w95_tree_age.ico"],
+  ] as const
+).map(([id, label, title, icon]) => ({
+  id,
+  label,
+  title: `${label}: ${title}`,
+  mark: <img src={icon} alt="" width={16} height={16} style={{ display: "block", imageRendering: "pixelated" }} />,
+}));
 
-/** File > Show: straight down, from an angle on the hills, and that lit by the sun. */
-const VIEWS: { label: string; title: string; tilt: boolean; sun: boolean }[] = [
+/** The Show dial: straight down, from an angle on the hills, and that lit by the sun — which runs hot. */
+const VIEWS: { label: string; title: string; tilt: boolean; sun: boolean; hot?: boolean }[] = [
   { label: "2D", title: "Straight down", tilt: false, sun: false },
   { label: "2.5D", title: "The city from an angle, standing on its hills", tilt: true, sun: false },
   {
     label: "2.5D+",
-    title: "The city from an angle, its hills and trees lit by the sun at the hour on the time slider, on the day shown",
+    title:
+      "Overdrive: 2.5D with the hills and every tree lit and shadowed by the sun at the Sun dial's hour, on the day shown. Heavy — expect it to run slowly",
     tilt: true,
     sun: true,
+    hot: true,
   },
 ];
-
-/** A sun on the media glyphs' 12px grid, for the time-of-day slider's knob: the time itself is in the status line. */
-function SunIcon() {
-  return (
-    <Glyph>
-      <path d="M4 4h4v4H4zM5 3h2v1H5zM5 8h2v1H5zM3 5h1v2H3zM8 5h1v2H8z" fill="#c08000" />
-      <path d="M5 0h2v2H5zM5 10h2v2H5zM0 5h2v2H0zM10 5h2v2h-2zM1 1h2v2H1zM9 1h2v2H9zM1 9h2v2H1zM9 9h2v2H9z" fill="#c08000" />
-    </Glyph>
-  );
-}
 
 /** Pixel rectangles [x, y, w, h] on the 12px glyph grid, as one path. */
 const rects = (list: [number, number, number, number][]) => list.map(([x, y, w, h]) => `M${x} ${y}h${w}v${h}h${-w}z`).join("");
 
 /**
- * The layer buttons' icons, for when the toolbar is too narrow for their
+ * The layer buttons' icons, for when the panel is too narrow for their
  * names: a street tree by the curb, a clump of canopy, a park bench, water,
  * and a pit under the pavement.
  */
@@ -68,8 +63,14 @@ const LAYER_ICONS: Record<string, string> = {
   Underground: rects([[0, 2, 12, 1], [2, 3, 1, 8], [9, 3, 1, 8], [3, 10, 6, 1], [4, 5, 1, 1], [7, 7, 1, 1], [5, 8, 1, 1]]),
 };
 
-/** The toolbar's buttons are Sounds' (strudel.cc's): raised, bold, pressed in while on. */
+/** The panel's buttons are Sounds' (strudel.cc's): raised, bold, pressed in while on. */
 const BOLD: React.CSSProperties = { fontWeight: "bold" };
+
+/** The Open and Show knobs' boxes, the same so the two line up down the window's left edge. */
+const SELECTOR_WIDTH = 92;
+
+/** The least room between two layer buttons, pixels. */
+const LAYER_GAP = 2;
 
 /** Degrees Q and E turn Tilt by. */
 const TURN_STEP = 15;
@@ -81,10 +82,8 @@ export default function TreesProgram(props: ProgramProps) {
   const [mode, setMode] = useState<TreesMode>("season");
   const [tilt, setTilt] = useState(false);
   const [pitch, setPitch] = useState(PITCH_DEFAULT);
-  // Which way Tilt faces, degrees clockwise from north: the slider, or Q and E a step at a time.
-  // The slider runs 0–360, north at both ends, and starts at the right one.
-  const [heading, setHeading] = useState<Heading>(360);
-  const facing = heading % 360;
+  // Which way Tilt faces, degrees clockwise from north: the Rotate dial, or Q and E a step at a time.
+  const [heading, setHeading] = useState<Heading>(0);
   const turn = useCallback((step: 1 | -1) => setHeading((h) => ((h % 360) + step * TURN_STEP + 360) % 360), []);
   // Bumped to put the whole city back in view.
   const [fitSignal, setFitSignal] = useState(0);
@@ -99,30 +98,33 @@ export default function TreesProgram(props: ProgramProps) {
   const [sun, setSun] = useState(false);
   const [minutes, setMinutes] = useState(nowMinutes);
 
-  const gap = <span aria-hidden style={{ display: "inline-block", width: 6, flex: "0 0 auto" }} />;
+  const divider = <span aria-hidden style={{ alignSelf: "stretch", width: 0, margin: "4px 0", borderLeft: "1px solid #808080", borderRight: "1px solid #fff" }} />;
 
-  // The layer buttons go to icons when the toolbar is too narrow for File and
-  // all their names on one line. Their width with names is measured whenever
-  // they're showing them, and the toolbar's width watched against it.
-  const fileRef = useRef<HTMLSpanElement>(null);
+  // The layer buttons spread out over whatever the panel leaves right of
+  // Reset: with their names when they fit there, as icons when they don't, and
+  // wrapped onto a line under the rest only when even the icons don't fit —
+  // still icons there, or the names would fit that line and jump back up top.
+  // Their width with names is measured whenever they're showing them, and
+  // the room watched against it.
   const layersRef = useRef<HTMLSpanElement>(null);
   const namedWidth = useRef(0);
   const [compact, setCompact] = useState(false);
   useLayoutEffect(() => {
-    const layers = layersRef.current;
-    const bar = layers?.parentElement;
-    if (!layers || !bar) return;
+    const room = layersRef.current;
+    if (!room) return;
     const check = () => {
-      if (!compact) namedWidth.current = layers.scrollWidth;
-      const style = getComputedStyle(bar);
-      const room = bar.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      // File, the 6px gap after it and the toolbar's 2px gaps either side of that.
-      const need = (fileRef.current?.offsetWidth ?? 0) + 6 + 4 + namedWidth.current;
-      setCompact(need > room);
+      if (!compact) {
+        const buttons = Array.from(room.children as HTMLCollectionOf<HTMLElement>);
+        namedWidth.current = buttons.reduce((w, b) => w + b.offsetWidth, 0) + LAYER_GAP * (buttons.length - 1);
+      }
+      const first = room.parentElement?.firstElementChild as HTMLElement | null;
+      // Below the whole of the first knob, not just lower: the row centres the shorter buttons on it.
+      const wrapped = !!first && room.offsetTop >= first.offsetTop + first.offsetHeight;
+      setCompact((compact && wrapped) || namedWidth.current > room.clientWidth);
     };
     check();
     const observer = new ResizeObserver(check);
-    observer.observe(bar);
+    observer.observe(room);
     return () => observer.disconnect();
   }, [compact]);
   // What's drawn: toggle buttons, pressed in while on.
@@ -158,110 +160,110 @@ export default function TreesProgram(props: ProgramProps) {
     },
   ];
 
-  // Over the map's bottom-right corner, one under another: in Tilt, with the
-  // Sun on, the hour (its time is in the status line, so the knob carries a
-  // sun), which way it faces (the compass letter) and how far it leans (the
-  // angle on the knob); and under them, in both views, Reset.
-  const corner = (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-      {tilt && sun && (
-        <KnobSlider
-          length={140}
-          min={0}
-          max={1425}
-          step={15}
-          value={minutes}
-          onChange={setMinutes}
-          knob={<SunIcon />}
-          label="Time of day"
-          title={`${clockLabel(minutes)}, Seattle time`}
-        />
-      )}
-      {tilt && (
-        <KnobSlider
-          length={140}
-          min={0}
-          max={360}
-          step={5}
-          value={heading}
-          onChange={setHeading}
-          knob={headingName(facing).charAt(0)}
-          label="Facing"
-          title={`Facing ${facing}° — Q and E turn it ${TURN_STEP}° at a time`}
-        />
-      )}
-      {tilt && (
-        <KnobSlider
-          length={140}
-          min={PITCH_MIN}
-          max={PITCH_MAX}
-          value={pitch}
-          onChange={setPitch}
-          knob={`${pitch}°`}
-          knobWidth={28}
-          label="Tilt angle"
-          title={`Looking down from ${pitch}° — lower to see the hills and trees stand up`}
-        />
-      )}
+  const view = VIEWS.findIndex((v) => v.tilt === tilt && (!tilt || v.sun === sun));
+  const overdrive = tilt && sun;
+
+  // How the trees are colored: beside the view's own controls, the day or year
+  // slider or the Type legend.
+  const modeKnob = (
+    <>
+      <Selector
+        label="Open"
+        width={SELECTOR_WIDTH}
+        options={MODES}
+        index={MODES.findIndex((m) => m.id === mode)}
+        onChange={(k) => setMode(MODES[k].id)}
+      />
+      {divider}
+    </>
+  );
+
+  // Under the map: what's shown, then Tilt's three dials — which way it faces
+  // (the pointer is the bearing), how far it leans, and with the sun on, the
+  // hour — and Reset with them; then the layers. 2.5D+ is printed red: it runs hot.
+  const panel = (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        columnGap: 10,
+        rowGap: 4,
+        paddingTop: 2,
+      }}
+    >
+      <Selector
+        label="Show"
+        width={SELECTOR_WIDTH}
+        options={VIEWS}
+        index={view < 0 ? 0 : view}
+        onChange={(k) => {
+          setTilt(VIEWS[k].tilt);
+          setSun(VIEWS[k].sun);
+        }}
+      />
+      {divider}
+      <Dial
+        label="Rotate"
+        min={0}
+        max={360}
+        step={5}
+        endless
+        value={heading}
+        onChange={setHeading}
+        defaultValue={0}
+        disabled={!tilt}
+        readout={`${headingName(heading)} ${heading}°`}
+        title={tilt ? `Facing ${heading}° — Q and E turn it ${TURN_STEP}° at a time` : "Rotate: 2.5D only"}
+      />
+      <Dial
+        label="Tilt"
+        min={PITCH_MIN}
+        max={PITCH_MAX}
+        value={pitch}
+        onChange={setPitch}
+        defaultValue={PITCH_DEFAULT}
+        disabled={!tilt}
+        readout={`${pitch}°`}
+        title={tilt ? `Looking down from ${pitch}° — lower to see the hills and trees stand up` : "Tilt: 2.5D only"}
+      />
+      <Dial
+        label="Sun"
+        min={0}
+        max={1425}
+        step={15}
+        value={minutes}
+        onChange={setMinutes}
+        disabled={!overdrive}
+        readout={clockLabel(minutes)}
+        title={overdrive ? `${clockLabel(minutes)}, Seattle time` : "Sun: 2.5D+ only"}
+      />
       <Button
         size="sm"
-        style={{ ...BOLD, marginTop: tilt ? 2 : 0 }}
-        title="Show the whole city, and put the sliders back: the angle, facing north, the sun to now, the day and year to today"
+        style={BOLD}
+        title="Show the whole city, and put the dials back: the angle, facing north, the sun to now, the day and year to today"
         onClick={() => {
           setPitch(PITCH_DEFAULT);
-          setHeading(360);
+          setHeading(0);
           setMinutes(nowMinutes());
           setFitSignal((n) => n + 1);
         }}
       >
         Reset
       </Button>
-    </div>
-  );
-
-  const toolbar = (
-    <>
-      <span ref={fileRef} style={{ display: "inline-flex" }}>
-        <FileMenu
-          items={[
-            {
-              label: "Open",
-              items: MODES.map((m) => ({
-                label: (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <img
-                      src={m.icon}
-                      alt=""
-                      aria-hidden
-                      width={16}
-                      height={16}
-                      style={{ display: "inline-block", imageRendering: "pixelated" }}
-                    />
-                    <span>{m.label}</span>
-                  </span>
-                ),
-                title: m.title,
-                checked: mode === m.id,
-                onClick: () => setMode(m.id),
-              })),
-            },
-            {
-              label: "Show",
-              items: VIEWS.map((v) => ({
-                label: v.label,
-                title: v.title,
-                checked: tilt === v.tilt && (!tilt || sun === v.sun),
-                onClick: () => {
-                  setTilt(v.tilt);
-                  setSun(v.sun);
-                },
-              })),
-            },
-          ]}
-        />
-      </span>
-      {gap}
-      <span ref={layersRef} style={{ display: "inline-flex", gap: 2, flex: "0 0 auto" }}>
+      {divider}
+      {/* What's drawn, in whatever's left of the row: toggle buttons, pressed in while on. */}
+      <span
+        ref={layersRef}
+        style={{
+          flex: "1 1 0",
+          minWidth: compact ? "min-content" : 0,
+          display: "flex",
+          justifyContent: "space-evenly",
+          gap: LAYER_GAP,
+        }}
+      >
         {LAYERS.map((l) => (
           <Button
             key={l.label}
@@ -285,16 +287,16 @@ export default function TreesProgram(props: ProgramProps) {
           </Button>
         ))}
       </span>
-    </>
+    </div>
   );
 
   return (
-    <DesktopWindow {...windowFrame("trees", props)} toolbar={toolbar}>
+    <DesktopWindow {...windowFrame("trees", props)}>
       <TreesWindow
         mode={mode}
         tilt={tilt}
         pitch={pitch}
-        heading={facing}
+        heading={heading}
         onTurn={turn}
         active={props.active ?? true}
         paused={props.layout === "minimized"}
@@ -302,7 +304,8 @@ export default function TreesProgram(props: ProgramProps) {
         street={street}
         canopy={canopy}
         onNow={() => setMinutes(nowMinutes())}
-        overlay={corner}
+        controls={panel}
+        modeKnob={modeKnob}
         parks={parks}
         water={water}
         underground={underground}

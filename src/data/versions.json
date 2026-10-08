@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.11",
+      "version": "7.0.12",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
@@ -58,7 +58,13 @@
         "Fixed: Tilt wireframe missing when zoomed in close (./trees). Ground cost no longer grows with zoom",
         "Changed: Tilt ground at half resolution (./trees). About 3x faster per frame, trees still sharp",
         "Changed: broadleaf crowns drawn as ovals to tree height (./trees). Same trunk stub as conifers",
-        "Changed: Facing slider north at both ends (./trees). Facing and tilt sliders start at max"
+        "Changed: Facing slider north at both ends (./trees). Facing and tilt sliders start at max",
+        "Removed: File menu (./trees). Open and Show replaced by selector knobs",
+        "Added: view knob beside the day, year or type controls (./trees). Season, type, age icons",
+        "Added: control panel under the map (./trees). Show knob, rotate, tilt and sun knobs, Reset",
+        "Changed: layer buttons moved from toolbar to control panel (./trees). Spaced evenly",
+        "Changed: Age histogram drawn behind the year slider (./trees)",
+        "Changed: 2.5D+ marked red on the Show knob (./trees). The slow, sunlit view"
       ]
     },
     {
