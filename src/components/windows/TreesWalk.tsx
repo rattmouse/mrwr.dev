@@ -8,6 +8,7 @@ import { dayLabel, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeaso
 import { loadTerrain, Terrain } from "@/lib/terrain";
 import { loadPlaces, Places } from "@/lib/places";
 import { groundZ, makeGround, treeForms } from "@/lib/treesTilt";
+import { walkerChannel, WalkerMessage } from "@/lib/treesWalker";
 import {
   EYE,
   PITCH_LIMIT,
@@ -30,8 +31,12 @@ import {
  * with the cubicle's own controls — WASD or the arrows or the stick, drag to
  * look. Esc, or the button, goes back in.
  *
- * `light` is Hard's: gravity turned right down, and Space to jump clean over
- * the trees.
+ * Space jumps. Medium's day leaves you as you are: Earth's gravity, a jump
+ * of half a metre, a sprint a person could keep up. `light` is Hard's:
+ * gravity turned right down, a jump clean over the trees, and faster legs.
+ *
+ * Wherever you are, trees.exe hears about it (treesWalker.ts) and draws you
+ * on its map.
  *
  * It owns the whole cubicle window while it's up, and loads its own copy of
  * the trees: trees.exe's is in the iframe on the desk, a frame away.
@@ -51,9 +56,6 @@ const MOVE_KEYS = new Set([
   "ShiftLeft",
   "ShiftRight",
 ]);
-/** Metres a second: walking, and with Shift held. */
-const WALK = 4.5;
-const RUN = 22;
 /** Radians per pixel dragged, and a second on the arrow keys — the cubicle's. */
 const LOOK = 0.0045;
 const TURN = 2;
@@ -64,9 +66,17 @@ const MAX_WIDTH = 560;
 const DROP_MS = 2400;
 const DROP_BACK = 300;
 const DROP_UP = 175;
-/** Hard's weight: metres a second squared, and how fast a jump leaves the ground — some fifty metres up. */
-const LIGHT_GRAVITY = 2.4;
-const LIGHT_JUMP = 16;
+/**
+ * How you move: metres a second squared down, metres a second up off the
+ * ground when you jump, and metres a second walking and with Shift held.
+ * Medium's is a person's: a jump of half a metre, a sprint of eight. Hard's
+ * jump goes some fifty metres up.
+ */
+type Body = { gravity: number; jump: number; walk: number; run: number };
+const NORMAL: Body = { gravity: 9.81, jump: 3.1, walk: 4.5, run: 8 };
+const LIGHT: Body = { gravity: 2.4, jump: 16, walk: 6.5, run: 22 };
+/** How often trees.exe is told where you are. */
+const TELL_MS = 100;
 /** The year goes round as trees.exe's Season view plays it: about thirty seconds a turn. */
 const DAYS_PER_SECOND = 12;
 
@@ -173,7 +183,7 @@ export default function TreesWalk({
   onLeave: () => void;
   /** Where to come down. */
   landing: Landing;
-  /** Low gravity, and Space to jump. */
+  /** Hard's low gravity, high jump and fast legs. */
   light?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +212,10 @@ export default function TreesWalk({
   }, []);
 
   const world = useMemo(() => (data ? buildWorld(data, crowns) : null), [data, crowns]);
+  const dataRef = useRef(data);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
   const worldRef = useRef(world);
   useEffect(() => {
     worldRef.current = world;
@@ -283,7 +297,7 @@ export default function TreesWalk({
         onLeave();
         return;
       }
-      if (event.code === "Space" && lightRef.current) {
+      if (event.code === "Space") {
         event.preventDefault();
         jumpRef.current = true;
         return;
@@ -383,8 +397,19 @@ export default function TreesWalk({
     let day = todayDoy();
     let paintedDay = -1;
     let paintedWorld: Scene | null = null;
-    /** Metres a second upward; only ever not zero with `light` on. */
+    /** Metres a second upward. */
     let rise = 0;
+    /** Stood on the ground last frame, so a slope down is walked, not fallen off. */
+    let grounded = true;
+    const channel = walkerChannel();
+    const bbox = () => dataRef.current?.trees.bbox ?? null;
+    let told = 0;
+    /** Where trees.exe last put you down by dragging you across its map, not yet stepped to. */
+    let moveTo: { lat: number; lon: number } | null = null;
+    if (channel)
+      channel.onmessage = (event: MessageEvent<WalkerMessage>) => {
+        if (event.data?.type === "move") moveTo = event.data;
+      };
     let shown: string | null = null;
 
     const loop = (now: number) => {
@@ -413,8 +438,18 @@ export default function TreesWalk({
           setLanded(true);
         }
       } else {
+        const box = bbox();
+        if (moveTo && box) {
+          // Picked up and put down elsewhere: as high off the ground there as you were here.
+          const lift = cam.z - groundAt(w, cam.x, cam.y);
+          cam.x = clamp(((moveTo.lon - box.west) / (box.east - box.west)) * w.widthM, 1, w.widthM - 1);
+          cam.y = clamp(((moveTo.lat - box.south) / (box.north - box.south)) * w.heightM, 1, w.heightM - 1);
+          cam.z = groundAt(w, cam.x, cam.y) + lift;
+        }
+        moveTo = null;
+        const body = lightRef.current ? LIGHT : NORMAL;
         cam.yaw += ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0)) * TURN * dt;
-        const airborne = cam.z > groundAt(w, cam.x, cam.y) + EYE + 0.05;
+        const airborne = !grounded;
         let side = (held("KeyD") ? 1 : 0) - (held("KeyA") ? 1 : 0);
         let ahead = (held("KeyW", "ArrowUp") ? 1 : 0) - (held("KeyS", "ArrowDown") ? 1 : 0);
         const push = stickRef.current;
@@ -424,7 +459,7 @@ export default function TreesWalk({
         }
         const amount = Math.hypot(side, ahead);
         if (amount > 1e-3) {
-          const speed = (held("ShiftLeft", "ShiftRight") ? RUN : WALK) * Math.min(1, amount) * dt;
+          const speed = (held("ShiftLeft", "ShiftRight") ? body.run : body.walk) * Math.min(1, amount) * dt;
           const sx = side / amount;
           const sa = ahead / amount;
           const dx = (Math.sin(cam.yaw) * sa + Math.cos(cam.yaw) * sx) * speed;
@@ -442,16 +477,26 @@ export default function TreesWalk({
           bob = airborne ? 0 : bob + dt * (held("ShiftLeft", "ShiftRight") ? 11 : 7.5);
         } else bob = 0;
         const floor = groundAt(w, cam.x, cam.y) + EYE;
-        if (lightRef.current) {
-          if (jumpRef.current && !airborne) rise = LIGHT_JUMP;
-          rise -= LIGHT_GRAVITY * dt;
-          cam.z += rise * dt;
-          if (cam.z <= floor) {
-            cam.z = floor;
-            rise = 0;
-          }
-        } else cam.z = floor;
+        if (jumpRef.current && grounded) {
+          rise = body.jump;
+          grounded = false;
+        }
         jumpRef.current = false;
+        if (grounded && floor < cam.z) {
+          // Downhill: kept on your feet, unless it drops away faster than a cliff would let you walk it.
+          const fall = cam.z - floor;
+          if (fall <= Math.max(0.3, body.run * dt * 1.5)) cam.z = floor;
+          else grounded = false;
+        }
+        if (!grounded) {
+          rise -= body.gravity * dt;
+          cam.z += rise * dt;
+        }
+        if (cam.z <= floor) {
+          cam.z = floor;
+          rise = 0;
+          grounded = true;
+        }
         eye = { ...cam, z: cam.z + (bob ? Math.sin(bob) * 0.04 : 0) };
       }
 
@@ -463,6 +508,21 @@ export default function TreesWalk({
         paintedDay = today;
         paintedWorld = w;
         setDate(dayLabel(today));
+      }
+
+      // trees.exe, wherever it's open, puts you on its map.
+      const box = bbox();
+      if (channel && box && !dropRef.current && now - told >= TELL_MS) {
+        told = now;
+        const ground = groundAt(w, cam.x, cam.y);
+        channel.postMessage({
+          type: "at",
+          lat: box.south + (cam.y / w.heightM) * (box.north - box.south),
+          lon: box.west + (cam.x / w.widthM) * (box.east - box.west),
+          z: cam.z - EYE,
+          ground,
+          yaw: cam.yaw,
+        });
       }
 
       renderWalk(frame, eye, w, placesRef.current);
@@ -480,6 +540,8 @@ export default function TreesWalk({
     return () => {
       cancelAnimationFrame(raf);
       observer.disconnect();
+      channel?.postMessage({ type: "gone" });
+      channel?.close();
     };
   }, []);
 
@@ -589,18 +651,16 @@ export default function TreesWalk({
             <br />
             {light ? "You feel very light" : "It smells like rain"}
             <br />
-            {light ? "Space to jump, Shift to run" : "Shift to run"}
+            Space to jump, Shift to run
           </div>
-          {light && (
-            // For a touch screen, with no Space bar.
-            <Button
-              onPointerDown={() => (jumpRef.current = true)}
-              size="sm"
-              style={{ position: "absolute", right: 8, bottom: 40, fontSize: 11 }}
-            >
-              Jump (Space)
-            </Button>
-          )}
+          {/* For a touch screen, with no Space bar. */}
+          <Button
+            onPointerDown={() => (jumpRef.current = true)}
+            size="sm"
+            style={{ position: "absolute", right: 8, bottom: 40, fontSize: 11 }}
+          >
+            Jump (Space)
+          </Button>
           <Button onClick={onLeave} size="sm" style={{ position: "absolute", right: 8, bottom: 8, fontSize: 11 }}>
             Back to the office (Esc)
           </Button>

@@ -64,6 +64,8 @@ import {
   treeForms,
   crownOutline,
 } from "@/lib/treesTilt";
+import { GUYS_SHEET, GuySheet, guyBounds, loadGuys, tintGuys } from "@/lib/guys";
+import { WALKER_STALE_MS, WalkerAt, walkerChannel, WalkerMessage } from "@/lib/treesWalker";
 
 /**
  * trees.exe's map: every street tree in Seattle as a dot, with no basemap —
@@ -517,6 +519,17 @@ export default function TreesWindow({
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const imageRef = useRef<{ img: ImageData; buf: Uint32Array } | null>(null);
   const frameRef = useRef(0);
+  /** Whoever is out walking the city from cubicles.exe (TreesWalk), and when they last said where. */
+  const walkerRef = useRef<{ at: WalkerAt; t: number } | null>(null);
+  /** The painted guys to draw the walker with, once the sheet is in, and which of them it is. */
+  const guysRef = useRef<GuySheet | null>(null);
+  const walkerPoseRef = useRef(0);
+  /** Where the figure was last drawn, CSS pixels: its box to grab, and the ground under its feet. */
+  const walkerHitRef = useRef<{ x0: number; y0: number; x1: number; y1: number; gx: number; gy: number } | null>(null);
+  const walkerChannelRef = useRef<BroadcastChannel | null>(null);
+  /** The figure being dragged: which pointer, and how far the pointer is from the ground under its feet. */
+  const walkerDragRef = useRef<{ id: number; dx: number; dy: number } | null>(null);
+  const [overWalker, setOverWalker] = useState(false);
 
   // How far each download has got, 0–1, for the progress panel; null while
   // the size isn't known yet.
@@ -1270,6 +1283,65 @@ export default function TreesWindow({
       if (hover !== null && hover !== selected) ring(hover, "rgba(255,255,255,0.75)", 1);
       if (selected !== null) ring(selected, `rgb(${PICKED.join(",")})`, 2);
 
+      // The walker, out from cubicles.exe: a figure where they stand — in 2.5D at their height, plumbed to the ground.
+      const walker = walkerRef.current;
+      walkerHitRef.current = null;
+      if (walker && performance.now() - walker.t < WALKER_STALE_MS) {
+        const { south, north, west, east } = trees.bbox;
+        const at = walker.at;
+        const mx = ((at.lon - west) / (east - west)) * prepared.widthM;
+        const my = ((at.lat - south) / (north - south)) * prepared.heightM;
+        let fx: number;
+        let fy: number;
+        let gy: number;
+        if (tiltView) {
+          const u = tiltView.ux * mx + tiltView.uy * my;
+          const vv = tiltView.vx * mx + tiltView.vy * my;
+          fx = (tiltView.W / 2 + (u - tiltView.cu) * tiltView.S) / dpr;
+          const across = tiltView.H / 2 - (vv - tiltView.cv) * tiltView.S * tiltView.sin;
+          const up = tiltView.S * tiltView.cos * EXAG;
+          fy = (across - at.z * up) / dpr;
+          gy = (across - at.ground * up) / dpr;
+        } else {
+          fx = w / 2 + (mx - v.cx) * v.s;
+          fy = gy = h / 2 - (my - v.cy) * v.s;
+        }
+        if (fx > -30 && fx < w + 30 && fy > -10 && fy < h + 50) {
+          ctx.save();
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          // Off the ground: a plumb line down to it, and a shadow where it lands.
+          if (gy - fy > 2) {
+            ctx.setLineDash([2, 3]);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = "rgba(255,255,255,0.7)";
+            ctx.beginPath();
+            ctx.moveTo(fx + 0.5, fy);
+            ctx.lineTo(fx + 0.5, gy);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.ellipse(fx, gy, 4, 1.6, 0, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(0,0,0,0.45)";
+            ctx.fill();
+          }
+          // One of the painted guys (guys.ts), feet at (fx, fy): red, on a dark edge so he shows on any ground.
+          const sheet = guysRef.current;
+          if (sheet) {
+            const b = guyBounds(walkerPoseRef.current);
+            const gh = 36;
+            const gw = (b.w / b.h) * gh;
+            walkerHitRef.current = { x0: fx - gw / 2 - 3, y0: fy - gh - 3, x1: fx + gw / 2 + 3, y1: fy + 3, gx: fx, gy };
+            const edge = tintGuys(sheet, "rgba(0,0,0,0.85)");
+            for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+              ctx.drawImage(edge, b.x, b.y, b.w, b.h, fx - gw / 2 + ox, fy - gh + oy, gw, gh);
+            }
+            ctx.drawImage(tintGuys(sheet, "#ff3b30"), b.x, b.y, b.w, b.h, fx - gw / 2, fy - gh, gw, gh);
+          }
+          ctx.restore();
+        }
+      }
+
       // Scale bar: the roundest distance that fits in about 90px.
       const target = 90 / v.s;
       const pow = Math.pow(10, Math.floor(Math.log10(target)));
@@ -1391,6 +1463,39 @@ export default function TreesWindow({
   useEffect(() => {
     requestDraw();
   }, [draw, requestDraw]);
+
+  // Hear from the walker, and redraw as they move — or once more when they've gone quiet.
+  useEffect(() => {
+    const channel = walkerChannel();
+    if (!channel) return;
+    walkerChannelRef.current = channel;
+    let stale = 0;
+    channel.onmessage = (event: MessageEvent<WalkerMessage>) => {
+      const message = event.data;
+      // Another trees.exe moving the walker: theirs will come back as an "at" like any other.
+      if (message?.type === "move") return;
+      window.clearTimeout(stale);
+      if (message?.type === "at") {
+        if (!walkerRef.current) walkerPoseRef.current = Math.floor(Math.random() * GUYS_SHEET.count);
+        if (!guysRef.current)
+          loadGuys().then((sheet) => {
+            guysRef.current = sheet;
+            requestDraw();
+          });
+        // Mid-drag, the figure stays under the pointer; the walker's own word on where it is lags behind.
+        const held = walkerDragRef.current && walkerRef.current;
+        const at = held ? { ...message, lat: held.at.lat, lon: held.at.lon } : message;
+        walkerRef.current = { at, t: performance.now() };
+        stale = window.setTimeout(requestDraw, WALKER_STALE_MS + 50);
+      } else walkerRef.current = null;
+      requestDraw();
+    };
+    return () => {
+      window.clearTimeout(stale);
+      walkerChannelRef.current = null;
+      channel.close();
+    };
+  }, [requestDraw]);
 
   // Forget the frame as well as cancelling it, or the next requestDraw takes
   // it for one still on its way and never asks again.
@@ -1673,10 +1778,55 @@ export default function TreesWindow({
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
+  /** Is (px, py) on the walker's figure? */
+  const onWalker = (px: number, py: number) => {
+    const hit = walkerHitRef.current;
+    return !!hit && px >= hit.x0 && px <= hit.x1 && py >= hit.y0 && py <= hit.y1;
+  };
+
+  /**
+   * Put the walker down under (px, py): the ground there in 2.5D, the map
+   * there flat. Only where they stand — how high is the walk's business.
+   */
+  const dropWalker = (px: number, py: number) => {
+    const v = viewRef.current;
+    const walker = walkerRef.current;
+    if (!v || !walker || !trees || !prepared) return;
+    let at: { x: number; y: number };
+    if (tilt) {
+      const layer = groundLayerRef.current;
+      const { w, h, dpr } = sizeRef.current;
+      const W = Math.round(w * dpr);
+      const H = Math.round(h * dpr);
+      const ix = Math.floor(px * dpr);
+      const iy = Math.floor(py * dpr);
+      if (!layer || ix < 0 || iy < 0 || ix >= W || iy >= H) return;
+      const depthAt = layer.depth[iy * layer.W + ix];
+      if (!Number.isFinite(depthAt)) return;
+      const [cu] = rot(heading, v.cx, v.cy);
+      const [x, y] = unrot(heading, cu + (ix + 0.5 - W / 2) / (v.s * dpr), depthAt);
+      at = { x, y };
+    } else at = toWorld(px, py, v);
+    const x = Math.min(Math.max(at.x, 1), prepared.widthM - 1);
+    const y = Math.min(Math.max(at.y, 1), prepared.heightM - 1);
+    const { south, north, west, east } = trees.bbox;
+    const lat = south + (y / prepared.heightM) * (north - south);
+    const lon = west + (x / prepared.widthM) * (east - west);
+    walkerRef.current = { at: { ...walker.at, lat, lon }, t: performance.now() };
+    walkerChannelRef.current?.postMessage({ type: "move", lat, lon });
+    requestDraw();
+  };
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 || !viewRef.current) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
+    // Grabbing the walker drags them, not the map.
+    const hit = walkerHitRef.current;
+    if (pointers.current.size === 0 && hit && onWalker(p.x, p.y)) {
+      walkerDragRef.current = { id: e.pointerId, dx: hit.gx - p.x, dy: hit.gy - p.y };
+      return;
+    }
     pointers.current.set(e.pointerId, p);
     const pts = [...pointers.current.values()];
     if (pts.length === 1) {
@@ -1695,6 +1845,11 @@ export default function TreesWindow({
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const p = local(e);
+    const drag = walkerDragRef.current;
+    if (drag) {
+      if (drag.id === e.pointerId) dropWalker(p.x + drag.dx, p.y + drag.dy);
+      return;
+    }
     const g = gesture.current;
     if (g && pointers.current.has(e.pointerId)) {
       pointers.current.set(e.pointerId, p);
@@ -1731,6 +1886,9 @@ export default function TreesWindow({
       return;
     }
     if (e.pointerType !== "mouse") return;
+    const over = onWalker(p.x, p.y);
+    if (over !== overWalker) setOverWalker(over);
+    if (over) return;
     cancelAnimationFrame(hoverFrame.current);
     hoverFrame.current = requestAnimationFrame(() => {
       const tree = pick(p.x, p.y);
@@ -1740,6 +1898,10 @@ export default function TreesWindow({
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (walkerDragRef.current?.id === e.pointerId) {
+      walkerDragRef.current = null;
+      return;
+    }
     const g = gesture.current;
     pointers.current.delete(e.pointerId);
     if (pointers.current.size > 0) {
@@ -2106,7 +2268,7 @@ export default function TreesWindow({
             width: "100%",
             height: "100%",
             touchAction: "none",
-            cursor: hover !== null || hoverPlace !== null ? "pointer" : "grab",
+            cursor: overWalker ? "move" : hover !== null || hoverPlace !== null ? "pointer" : "grab",
           }}
         />
         {error ? (
