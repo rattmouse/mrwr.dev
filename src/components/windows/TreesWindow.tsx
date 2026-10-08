@@ -33,6 +33,7 @@ import {
 } from "@/lib/trees";
 import { dayLabel, doy, isConifer, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { loadTerrain, Terrain } from "@/lib/terrain";
+import { buildGrid, gridSpan } from "@/lib/treesGrid";
 import { loadPlaces, parkAt, Place, placeAt, Places, RESTORATION_PHASES, treesInside } from "@/lib/places";
 import { areawayAtScreen, drapePlaces, drawFlatPlaces, outlinePlace } from "@/lib/placesDraw";
 import { clockLabel, Light, lightFrom, seattleInstant, sunPosition, sunTimes } from "@/lib/sun";
@@ -176,6 +177,15 @@ type Prepared = {
   crown: Float32Array;
   /** Biggest first, so small trees draw on top of the big ones around them. */
   order: Uint32Array;
+  /** The street trees' positions, crowns and what colors them, laid out in that order for the flat map to walk. */
+  byOrder: {
+    mx: Float32Array;
+    my: Float32Array;
+    crown: Float32Array;
+    species16: Uint16Array;
+    year: Uint8Array;
+    flags: Uint8Array;
+  };
   speciesCount: Int32Array;
   phen: ReturnType<typeof phenology>[];
   groups: { key: string; label: string; color: string; count: number }[];
@@ -210,6 +220,23 @@ function prepare(trees: Trees): Prepared {
   for (let i = 0; i < n; i++) start[255 - trees.diam[i] + 1]++;
   for (let b = 0; b < 256; b++) start[b + 1] += start[b];
   for (let i = 0; i < n; i++) order[start[255 - trees.diam[i]]++] = i;
+  const byOrder = {
+    mx: new Float32Array(n),
+    my: new Float32Array(n),
+    crown: new Float32Array(n),
+    species16: new Uint16Array(n),
+    year: new Uint8Array(n),
+    flags: new Uint8Array(n),
+  };
+  for (let k = 0; k < n; k++) {
+    const i = order[k];
+    byOrder.mx[k] = mx[i];
+    byOrder.my[k] = my[i];
+    byOrder.crown[k] = crown[i];
+    byOrder.species16[k] = trees.species16[i];
+    byOrder.year[k] = trees.year[i];
+    byOrder.flags[k] = trees.flags[i];
+  }
 
   const speciesCount = new Int32Array(trees.species.length);
   for (let i = 0; i < n; i++) speciesCount[trees.species16[i]]++;
@@ -256,6 +283,7 @@ function prepare(trees: Trees): Prepared {
     heightM,
     crown,
     order,
+    byOrder,
     speciesCount,
     phen: trees.species.map(phenology),
     groups,
@@ -624,6 +652,11 @@ export default function TreesWindow({
     () => (prepared && streetForms ? buildScene(prepared, streetForms, removedPrep, shownCrowns, crowns) : null),
     [prepared, streetForms, removedPrep, shownCrowns, crowns],
   );
+  // Which ~100 m cell each tree is in, so the flat map draws and picks only those on screen.
+  const grid = useMemo(
+    () => (scene && prepared ? buildGrid(scene.mx, scene.my, scene.forms.crown, prepared.widthM, prepared.heightM) : null),
+    [scene, prepared],
+  );
   // Each tree's ground height, for standing it on its hill.
   const sceneGround = useMemo(() => {
     if (!scene || !tilt) return null;
@@ -782,6 +815,11 @@ export default function TreesWindow({
   // diorama or switching between Flat and Tilt then fits the city again,
   // where after a pan or zoom it keeps your place.
   const fittedRef = useRef(true);
+  // What the last full frame showed, and while a zoom is under way, a copy of
+  // it to stretch rather than draw the city again for every step of the wheel.
+  type Shown = { view: View; W: number; H: number; tilt: boolean; pitch: number; heading: Heading };
+  const shownRef = useRef<Shown | null>(null);
+  const stretchRef = useRef<(Shown & { snap: HTMLCanvasElement }) | null>(null);
   // Set while the view is being dragged or zoomed, and for a moment after.
   const movingRef = useRef(false);
   const settleRef = useRef(0);
@@ -790,6 +828,7 @@ export default function TreesWindow({
     const { w, h } = sizeRef.current;
     if (!prepared || !w || !h) return;
     fittedRef.current = true;
+    stretchRef.current = null;
     const cx = prepared.widthM / 2;
     const cy = prepared.heightM / 2;
     if (!tilt) {
@@ -859,10 +898,42 @@ export default function TreesWindow({
     const { img, buf } = image;
     let tiltView: TiltView | null = null;
 
-    if (tilt && trees && prepared && scene && sceneGround && packed && v && speciesPalette && crownLook) {
+    // Mid-zoom or mid-drag, the last full frame slid and scaled to the new
+    // view instead of a new one: blurry, but next to free, and the real frame
+    // follows once it settles.
+    const st = stretchRef.current;
+    let stretched = false;
+    let k = 1;
+    let ax = 0;
+    let ay = 0;
+    if (st && v && st.W === W && st.H === H && st.tilt === tilt && st.pitch === pitch && st.heading === heading) {
+      k = v.s / st.view.s;
+      // Where the old view's centre lands in the new one; everything else scales about it.
+      const [ou, ov] = rot(turn, st.view.cx, st.view.cy);
+      const [nu, nv] = rot(turn, v.cx, v.cy);
+      ax = w / 2 + (ou - nu) * v.s;
+      ay = h / 2 - (ov - nv) * v.s * squash;
+      // Once it leaves too much of the screen empty, or has blown up too far
+      // to read, a fresh (rough) frame instead, for the next steps to carry on from.
+      const across = Math.max(0, Math.min(w, ax + (k * w) / 2) - Math.max(0, ax - (k * w) / 2));
+      const down = Math.max(0, Math.min(h, ay + (k * h) / 2) - Math.max(0, ay - (k * h) / 2));
+      stretched = (across * down) / (w * h) >= 0.8 && k <= 3;
+      if (!stretched) stretchRef.current = null;
+    }
+    if (st && v && stretched) {
+      ctx.fillStyle = `rgb(${BG.join(",")})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.setTransform(k, 0, 0, k, (ax - (k * w) / 2) * dpr, (ay - (k * h) / 2) * dpr);
+      ctx.drawImage(st.snap, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (tilt) tiltView = makeTiltView(W, H, v.s * dpr, v.cx, v.cy, pitch, heading);
+    } else if (tilt && trees && prepared && scene && sceneGround && packed && v && speciesPalette && crownLook) {
       tiltView = makeTiltView(W, H, v.s * dpr, v.cx, v.cy, pitch, heading);
-      // Rough while the view is moving, sharp once it settles.
-      const stride = movingRef.current ? 2 : 1;
+      // Two CSS pixels per ground sample, at any pixel ratio: a soft ground
+      // for a quick one — it was most of what a frame cost. The trees stay sharp.
+      // While the view moves, three, and no shadows.
+      const rough = movingRef.current;
+      const stride = Math.max(1, Math.round((rough ? 3 : 2) * dpr));
       const key =
         `${W}x${H} ${tiltView.S} ${v.cx} ${v.cy} ${pitch} ${heading} ${ground ? "g" : "-"} ${stride} ` +
         `${sunKey ?? "map"} ${showPlaces ? `${parks} ${water} ${underground}` : "-"}`;
@@ -886,7 +957,7 @@ export default function TreesWindow({
       let lit = MAP_LIGHT;
       if (light) {
         let mask: Uint8Array | null = null;
-        if (light.altitude > 1) {
+        if (light.altitude > 1 && !rough) {
           if (!shadowMaskRef.current || shadowMaskRef.current.length !== W * H) shadowMaskRef.current = new Uint8Array(W * H);
           mask = shadowMaskRef.current;
           resetShadowMask(mask, layer.depth);
@@ -902,7 +973,7 @@ export default function TreesWindow({
       const canopyPx = 3.5 * tiltView.S;
       // About one sampled tree per 0.7 px of crown: as many as the pixels can show.
       let thin = canopyPx < 0.7 ? Math.min(8, Math.round(0.7 / canopyPx)) : 1;
-      if (movingRef.current && canopyPx < 1.5) thin = Math.max(2, thin * 2);
+      if (rough && canopyPx < 1.5) thin = Math.max(2, thin * 2);
       let sub: Uint32Array | null = null;
       if (thin > 1) {
         const cache = thinnedRef.current;
@@ -1019,58 +1090,69 @@ export default function TreesWindow({
       buf.fill(pack(BG));
     }
 
-    if (!tilt && trees && prepared && v && speciesPalette) {
+    if (!stretched && !tilt && trees && prepared && scene && grid && v && speciesPalette) {
       const s = v.s * dpr;
       const ox = W / 2 - v.cx * s;
       const oy = H / 2 + v.cy * s;
+      // Only the cells on screen, grown by the widest crown (or the 80 px a
+      // crown is capped at) so one just off the edge still draws its rim.
+      const pad = Math.min(80 / s, grid.reach);
+      const [c0, r0, c1, r1] = gridSpan(grid, -ox / s - pad, (oy - H) / s - pad, (W - ox) / s + pad, oy / s + pad);
+      const { cols, start, items } = grid;
       // The LiDAR's trees first, underneath: the street trees are the ones with
-      // names, so they stay on top.
-      if (shownCrowns && scene && crownLook) {
+      // names, so they stay on top. Half of them while the view moves, if
+      // they're small enough that the gaps don't show.
+      const sparse = movingRef.current && 3.5 * s < 1.5;
+      if (shownCrowns && crownLook) {
         const at = scene.nS + scene.nR;
         const radius = scene.forms.crown;
-        for (let c = 0; c < shownCrowns.count; c++) {
-          const i = at + c;
-          const color = shownCrowns.conifer[c] ? crownLook.conifer : crownLook.broad;
-          if (!color) continue;
-          const sx = scene.mx[i] * s + ox;
-          const sy = oy - scene.my[i] * s;
-          const rr = Math.min(80, radius[i] * s);
-          if (sx + rr < 0 || sx - rr >= W || sy + rr < 0 || sy - rr >= H) continue;
-          if (rr < 1.25) {
-            if (sx >= 0 && sy >= 0 && sx < W && sy < H) buf[(sy | 0) * W + (sx | 0)] = color;
-            continue;
-          }
-          const y0 = Math.max(0, Math.ceil(sy - rr));
-          const y1 = Math.min(H - 1, Math.floor(sy + rr));
-          for (let py = y0; py <= y1; py++) {
-            const dy = py + 0.5 - sy;
-            const half = Math.sqrt(Math.max(0, rr * rr - dy * dy));
-            const x0 = Math.max(0, Math.ceil(sx - half - 0.5));
-            const x1 = Math.min(W - 1, Math.floor(sx + half - 0.5));
-            if (x1 >= x0) buf.fill(color, py * W + x0, py * W + x1 + 1);
+        for (let row = r0; row <= r1; row++) {
+          for (let cell = row * cols + c0, last = row * cols + c1; cell <= last; cell++) {
+            for (let j = start[cell], end = start[cell + 1]; j < end; j++) {
+              const i = items[j];
+              if (i < at || (sparse && i & 1)) continue;
+              const color = shownCrowns.conifer[i - at] ? crownLook.conifer : crownLook.broad;
+              if (!color) continue;
+              const sx = scene.mx[i] * s + ox;
+              const sy = oy - scene.my[i] * s;
+              const rr = Math.min(80, radius[i] * s);
+              if (sx + rr < 0 || sx - rr >= W || sy + rr < 0 || sy - rr >= H) continue;
+              if (rr < 1.25) {
+                if (sx >= 0 && sy >= 0 && sx < W && sy < H) buf[(sy | 0) * W + (sx | 0)] = color;
+                continue;
+              }
+              const y0 = Math.max(0, Math.ceil(sy - rr));
+              const y1 = Math.min(H - 1, Math.floor(sy + rr));
+              for (let py = y0; py <= y1; py++) {
+                const dy = py + 0.5 - sy;
+                const half = Math.sqrt(Math.max(0, rr * rr - dy * dy));
+                const x0 = Math.max(0, Math.ceil(sx - half - 0.5));
+                const x1 = Math.min(W - 1, Math.floor(sx + half - 0.5));
+                if (x1 >= x0) buf.fill(color, py * W + x0, py * W + x1 + 1);
+              }
+            }
           }
         }
       }
-      const { mx, my, crown, order } = prepared;
-      const sp16 = trees.species16;
-      const yr = trees.year;
-      const fl = trees.flags;
+      // The street trees keep their biggest-first order, laid out in it so the
+      // pass reads straight through memory; at a quarter of a million that,
+      // more than the trees off screen, is what it costs.
+      const { mx, my, crown, species16: sp16, year: yr, flags: fl } = prepared.byOrder;
       const planted = mode === "planted";
-      const n = order.length;
+      const n = mx.length;
       for (let k = 0; k < n; k++) {
-        const i = order[k];
-        if (!(fl[i] & GROUNDS_TREE ? parks : street)) continue;
+        if (!(fl[k] & GROUNDS_TREE ? parks : street)) continue;
         let color: number;
         if (planted) {
-          const y = yr[i];
+          const y = yr[k];
           if (!y) continue;
           color = yearPalette[y];
         } else {
-          color = speciesPalette[sp16[i]];
+          color = speciesPalette[sp16[k]];
         }
-        const sx = mx[i] * s + ox;
-        const sy = oy - my[i] * s;
-        const r = crown[i] * s;
+        const sx = mx[k] * s + ox;
+        const sy = oy - my[k] * s;
+        const r = crown[k] * s;
         if (r < 1.25) {
           if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
           buf[(sy | 0) * W + (sx | 0)] = color;
@@ -1091,32 +1173,43 @@ export default function TreesWindow({
       }
       // The trees that have come down, on the timeline: standing until their year, red in it.
       if (planted && removedPrep && street) {
-        for (let r = 0; r < removedPrep.n; r++) {
-          const color = removedColor(removedPrep, r, year, agePalette);
-          if (!color) continue;
-          const sx = removedPrep.mx[r] * s + ox;
-          const sy = oy - removedPrep.my[r] * s;
-          const rr = Math.min(80, Math.max(0.5, removedPrep.dot[r] * s));
-          if (sx + rr < 0 || sx - rr >= W || sy + rr < 0 || sy - rr >= H) continue;
-          if (rr < 1.25) {
-            if (sx >= 0 && sy >= 0 && sx < W && sy < H) buf[(sy | 0) * W + (sx | 0)] = color;
-            continue;
-          }
-          const y0 = Math.max(0, Math.ceil(sy - rr));
-          const y1 = Math.min(H - 1, Math.floor(sy + rr));
-          for (let py = y0; py <= y1; py++) {
-            const dy = py + 0.5 - sy;
-            const half = Math.sqrt(Math.max(0, rr * rr - dy * dy));
-            const x0 = Math.max(0, Math.ceil(sx - half - 0.5));
-            const x1 = Math.min(W - 1, Math.floor(sx + half - 0.5));
-            if (x1 >= x0) buf.fill(color, py * W + x0, py * W + x1 + 1);
+        const { nS, nR } = scene;
+        for (let row = r0; row <= r1; row++) {
+          for (let cell = row * cols + c0, last = row * cols + c1; cell <= last; cell++) {
+            for (let j = start[cell], end = start[cell + 1]; j < end; j++) {
+              const r = items[j] - nS;
+              if (r < 0) continue;
+              if (r >= nR) break;
+              const color = removedColor(removedPrep, r, year, agePalette);
+              if (!color) continue;
+              const sx = removedPrep.mx[r] * s + ox;
+              const sy = oy - removedPrep.my[r] * s;
+              const rr = Math.min(80, Math.max(0.5, removedPrep.dot[r] * s));
+              if (sx + rr < 0 || sx - rr >= W || sy + rr < 0 || sy - rr >= H) continue;
+              if (rr < 1.25) {
+                if (sx >= 0 && sy >= 0 && sx < W && sy < H) buf[(sy | 0) * W + (sx | 0)] = color;
+                continue;
+              }
+              const y0 = Math.max(0, Math.ceil(sy - rr));
+              const y1 = Math.min(H - 1, Math.floor(sy + rr));
+              for (let py = y0; py <= y1; py++) {
+                const dy = py + 0.5 - sy;
+                const half = Math.sqrt(Math.max(0, rr * rr - dy * dy));
+                const x0 = Math.max(0, Math.ceil(sx - half - 0.5));
+                const x1 = Math.min(W - 1, Math.floor(sx + half - 0.5));
+                if (x1 >= x0) buf.fill(color, py * W + x0, py * W + x1 + 1);
+              }
+            }
           }
         }
       }
       // The picked place over the dots, or a park's edge is lost among its trees.
       if (selectedPlace) outlinePlace(buf, W, H, selectedPlace, pack(PICKED), { s, ox, oy }, null);
     }
-    ctx.putImageData(img, 0, 0);
+    if (!stretched) {
+      ctx.putImageData(img, 0, 0);
+      shownRef.current = v ? { view: { ...v }, W, H, tilt, pitch, heading } : null;
+    }
 
     if (trees && prepared && v) {
       ctx.save();
@@ -1220,6 +1313,7 @@ export default function TreesWindow({
     trees,
     prepared,
     scene,
+    grid,
     removedPrep,
     shownCrowns,
     crownLook,
@@ -1248,6 +1342,8 @@ export default function TreesWindow({
     light,
     sunKey,
     litGround,
+    turn,
+    squash,
   ]);
 
   // The frame always runs the latest draw, so one asked for before the data
@@ -1266,9 +1362,23 @@ export default function TreesWindow({
     window.clearTimeout(settleRef.current);
     settleRef.current = window.setTimeout(() => {
       movingRef.current = false;
+      stretchRef.current = null;
       requestDraw();
     }, 160);
   }, [requestDraw]);
+
+  /** A zoom or a drag is starting: keep the frame on screen to stretch until it settles. */
+  const beginStretch = useCallback(() => {
+    if (stretchRef.current) return;
+    const shown = shownRef.current;
+    const image = imageRef.current;
+    if (!shown || !image || image.img.width !== shown.W || image.img.height !== shown.H) return;
+    const snap = document.createElement("canvas");
+    snap.width = shown.W;
+    snap.height = shown.H;
+    snap.getContext("2d")?.putImageData(image.img, 0, 0);
+    stretchRef.current = { ...shown, snap };
+  }, []);
 
   useEffect(() => {
     requestDraw();
@@ -1354,6 +1464,7 @@ export default function TreesWindow({
       if (!v) return;
       const [lo, hi] = scaleLimits();
       const s = Math.min(hi, Math.max(lo, v.s * factor));
+      beginStretch();
       viewRef.current = viewWith(toWorld(px, py, v), px, py, s);
       fittedRef.current = false;
       moved();
@@ -1361,7 +1472,7 @@ export default function TreesWindow({
     },
     // toWorld and viewWith change with turn and squash.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scaleLimits, requestDraw, turn, squash],
+    [scaleLimits, requestDraw, beginStretch, turn, squash],
   );
 
   /** The view slid by (dx, dy) canvas pixels: the ground that was there comes to the middle. */
@@ -1370,6 +1481,7 @@ export default function TreesWindow({
       const v = viewRef.current;
       if (!v) return;
       const { w, h } = sizeRef.current;
+      beginStretch();
       viewRef.current = viewWith(toWorld(w / 2 + dx, h / 2 + dy, v), w / 2, h / 2, v.s);
       fittedRef.current = false;
       moved();
@@ -1377,7 +1489,7 @@ export default function TreesWindow({
     },
     // toWorld and viewWith change with turn and squash.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [moved, requestDraw, turn, squash],
+    [moved, requestDraw, beginStretch, turn, squash],
   );
 
   // --- picking --------------------------------------------------------------
@@ -1464,23 +1576,36 @@ export default function TreesWindow({
           bestD = d;
         }
       };
-      for (let i = 0; i < trees.count; i++) consider(i, mx[i], my[i], crown[i]);
-      if (mode === "planted" && removedPrep && scene) {
-        for (let r = 0; r < removedPrep.n; r++) consider(scene.nS + r, removedPrep.mx[r], removedPrep.my[r], removedPrep.dot[r]);
+      if (!scene || !grid) return null;
+      // Only the cells within the 120 px anything can be picked from.
+      const far = 120 / v.s;
+      const [c0, r0, c1, r1] = gridSpan(grid, at.x - far, at.y - far, at.x + far, at.y + far);
+      const { cols, start, items } = grid;
+      const { nS, nR } = scene;
+      const near = (from: number, to: number, each: (i: number) => void) => {
+        for (let row = r0; row <= r1; row++) {
+          for (let cell = row * cols + c0, last = row * cols + c1; cell <= last; cell++) {
+            for (let j = start[cell], end = start[cell + 1]; j < end; j++) {
+              const i = items[j];
+              if (i >= to) break;
+              if (i >= from) each(i);
+            }
+          }
+        }
+      };
+      near(0, nS, (i) => consider(i, mx[i], my[i], crown[i]));
+      if (mode === "planted" && removedPrep) {
+        near(nS, nS + nR, (i) => consider(i, removedPrep.mx[i - nS], removedPrep.my[i - nS], removedPrep.dot[i - nS]));
       }
       // A street tree under the pointer wins over the canopy around it.
-      if (best < 0 && shownCrowns && scene && mode !== "planted") {
-        const at0 = scene.nS + scene.nR;
-        for (let c = 0; c < shownCrowns.count; c++) {
-          const i = at0 + c;
-          consider(i, scene.mx[i], scene.my[i], scene.forms.crown[i]);
-        }
+      if (best < 0 && shownCrowns && mode !== "planted") {
+        near(nS + nR, scene.mx.length, (i) => consider(i, scene.mx[i], scene.my[i], scene.forms.crown[i]));
       }
       return best >= 0 ? best : null;
     },
     // toWorld changes with turn and squash.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [trees, prepared, scene, order, ground, removedPrep, shownCrowns, isLive, mode, tilt, pitch, heading, sceneGround, turn, squash],
+    [trees, prepared, scene, grid, order, ground, removedPrep, shownCrowns, isLive, mode, tilt, pitch, heading, sceneGround, turn, squash],
   );
 
   /** The place under a spot on the canvas, where there's no tree: in Tilt, on the ground actually drawn there. */
@@ -1574,6 +1699,7 @@ export default function TreesWindow({
         if (v) {
           const [lo, hi] = scaleLimits();
           const s = Math.min(hi, Math.max(lo, v.s * (dist / Math.max(1, g.pinch.dist))));
+          beginStretch();
           viewRef.current = viewWith(toWorld(g.pinch.midX, g.pinch.midY, v), midX, midY, s);
         }
         g.pinch = { dist, midX, midY };
@@ -1587,6 +1713,7 @@ export default function TreesWindow({
       if (!g.moved && dx * dx + dy * dy > 16) g.moved = true;
       if (g.moved) {
         // The ground that was under the pointer stays under it.
+        beginStretch();
         viewRef.current = viewWith(toWorld(g.startX, g.startY, g.view), p.x, p.y, g.view.s);
         fittedRef.current = false;
         moved();

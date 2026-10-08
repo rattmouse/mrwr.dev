@@ -357,12 +357,42 @@ export function tiltView(
   };
 }
 
+/** Blocks of 4×4 terrain cells, for the tallest each holds. */
+const PEAK_SHIFT = 2;
+const peakCache = new WeakMap<Float32Array, { w: number; max: Float32Array }>();
+
+/**
+ * The tallest ground in each block, as the ground layer samples it: a point in
+ * a cell reads the cells right of and below it too, so each cell counts toward
+ * its own block and those left of and above it.
+ */
+function peaksOf(g: Ground): { w: number; max: Float32Array } {
+  const cached = peakCache.get(g.z);
+  if (cached) return cached;
+  const pw = (g.w >> PEAK_SHIFT) + 1;
+  const ph = (g.h >> PEAK_SHIFT) + 1;
+  const max = new Float32Array(pw * ph).fill(-Infinity);
+  for (let y = 0; y < g.h; y++) {
+    for (let x = 0; x < g.w; x++) {
+      const z = g.z[y * g.w + x];
+      for (let yy = Math.max(0, y - 1); yy <= y; yy++) {
+        for (let xx = Math.max(0, x - 1); xx <= x; xx++) {
+          const b = (yy >> PEAK_SHIFT) * pw + (xx >> PEAK_SHIFT);
+          if (z > max[b]) max[b] = z;
+        }
+      }
+    }
+  }
+  const out = { w: pw, max };
+  peakCache.set(g.z, out);
+  return out;
+}
+
 /**
  * The ground layer: colors into `buf`, and into `depth` how far away (in v)
  * each pixel's ground is — Infinity where there's none. Without terrain it's a
- * flat slab at sea level. `stride` 2 walks every other column, doubled, two
- * pixels of depth at a time: a quarter of the work, for while the view is
- * being dragged about.
+ * flat slab at sea level. `stride` n walks every nth column, widened to n,
+ * n pixels of depth at a time: 1/n² of the work, for a coarser ground.
  */
 export function renderGround(
   buf: Uint32Array,
@@ -372,7 +402,7 @@ export function renderGround(
   widthM: number,
   heightM: number,
   bg: number,
-  stride: 1 | 2 = 1,
+  stride = 1,
   /** Parks and restoration zones, tinted into the ground. */
   overlay: Overlay | null = null,
 ) {
@@ -383,9 +413,10 @@ export function renderGround(
   const sc = S * view.cos * EXAG;
   const vBottom = cv - H / 2 / ss;
   const vTop = cv + H / 2 / ss;
-  // Hills in front of the bottom edge can rise into view; look that far
-  // forward, but not so far that a close zoom walks kilometres per column.
-  const reach = Math.min(((g ? g.zMax : 0) + SLAB) * sc, H * 1.5) / ss;
+  // Hills in front of the bottom edge can rise into view; look as far forward
+  // as the tallest could. Close in that's a long way — a hill stands many
+  // screens tall — but the walk skips ground that can't show a block at a time.
+  const reach = (((g ? g.zMax : 0) + SLAB) * sc) / ss;
   const vStart = vBottom - reach;
   const dv = stride / ss;
   const slabPx = SLAB * sc;
@@ -395,6 +426,12 @@ export function renderGround(
   const gz = g ? g.z : new Float32Array(0);
   const gc = g ? g.color : new Uint32Array(0);
   const gwire = g ? g.wire : new Uint32Array(0);
+  const peak = g ? peaksOf(g) : null;
+  const pw = peak ? peak.w : 0;
+  const pz = peak ? peak.max : new Float32Array(0);
+  // How fast the walk crosses grid cells, per metre further away.
+  const dfx = g ? g.ax * vx : 0;
+  const dfy = g ? g.ay * vy : 0;
   const zCeil = g ? g.zMax : 0;
   // The wireframe runs along the grid's cell lines — every one, or every
   // other, every fourth… far out, or halving and quartering the cells close
@@ -412,8 +449,8 @@ export function renderGround(
   const halfY = g ? (Math.abs(g.ay * uy) / S / every) * stride * 0.5 : 0;
 
   for (let x = 0; x < W; x += stride) {
-    const u = cu + (x + 0.5 - W / 2) / S;
-    const twin = stride === 2 && x + 1 < W;
+    const u = cu + (x + stride * 0.5 - W / 2) / S;
+    const span = Math.min(stride, W - x);
     let yb = H;
     let inside = false;
     // Where the step before sat in lines and on screen, to catch a line crossed between the two.
@@ -421,21 +458,42 @@ export function renderGround(
     let lastY = NaN;
     let lastTop = NaN;
     // Down the column the world point moves in a straight line, away from the viewer.
-    let mx = ux * u + vx * vStart;
-    let my = uy * u + vy * vStart;
+    const mx0 = ux * u + vx * vStart;
+    const my0 = uy * u + vy * vStart;
     const stepX = vx * dv;
     const stepY = vy * dv;
-    for (let k = 0; k <= steps; k++, mx += stepX, my += stepY) {
+    // Only the steps on the city: a close view's long walk can start well off it.
+    let kFrom = 0;
+    let kTo = steps;
+    for (const [p0, dp, lim] of [
+      [mx0, stepX, widthM],
+      [my0, stepY, heightM],
+    ]) {
+      if (dp === 0) {
+        if (p0 < 0 || p0 > lim) kTo = -1;
+        continue;
+      }
+      const a = -p0 / dp;
+      const b = (lim - p0) / dp;
+      kFrom = Math.max(kFrom, Math.ceil(Math.min(a, b)));
+      kTo = Math.min(kTo, Math.floor(Math.max(a, b)));
+    }
+    for (let k = kFrom; k <= kTo; k++) {
+      const mx = mx0 + k * stepX;
+      const my = my0 + k * stepY;
       if (mx < 0 || my < 0 || mx > widthM || my > heightM) {
         inside = false;
         continue;
       }
       const v = vStart + k * dv;
       const yGround = H / 2 - (v - cv) * ss;
-      // Nothing here can rise above what's already drawn in front of it.
-      if (yGround - zCeil * sc >= yb) {
+      // Nothing anywhere can rise above what's already drawn in front of it
+      // for this many more pixels of depth: on to there.
+      const clear = yGround - zCeil * sc - yb;
+      if (clear >= 0) {
         inside = true;
         lastX = NaN;
+        k += Math.floor(clear / ss / dv);
         continue;
       }
       // Inlined groundZ and blend: this loop runs for every pixel of depth in
@@ -452,6 +510,22 @@ export function renderGround(
         else if (fx > gw - 1.001) fx = gw - 1.001;
         if (fy < 0) fy = 0;
         else if (fy > gh - 1.001) fy = gh - 1.001;
+        // Likewise for the hills in this block alone: on to where they could
+        // show, or out of the block, whichever comes first.
+        const bx = (fx | 0) >> PEAK_SHIFT;
+        const by = (fy | 0) >> PEAK_SHIFT;
+        const lift = yGround - pz[by * pw + bx] * sc - yb;
+        if (lift >= 0) {
+          inside = true;
+          lastX = NaN;
+          let jump = lift / ss;
+          if (dfx > 0) jump = Math.min(jump, (((bx + 1) << PEAK_SHIFT) - fx) / dfx);
+          else if (dfx < 0) jump = Math.min(jump, (fx - (bx << PEAK_SHIFT)) / -dfx);
+          if (dfy > 0) jump = Math.min(jump, (((by + 1) << PEAK_SHIFT) - fy) / dfy);
+          else if (dfy < 0) jump = Math.min(jump, (fy - (by << PEAK_SHIFT)) / -dfy);
+          k += Math.floor(jump / dv);
+          continue;
+        }
         const x0 = fx | 0;
         const y0g = fy | 0;
         tx = fx - x0;
@@ -545,11 +619,9 @@ export function renderGround(
       for (let y = y0; y < yEnd; y++) {
         const p = y * W + x;
         const c = y < faceFrom ? (onLine || y === yLine ? color : fill) : wet ? SIDE_WATER : SIDE;
-        buf[p] = c;
-        depth[p] = v;
-        if (twin) {
-          buf[p + 1] = c;
-          depth[p + 1] = v;
+        for (let t = 0; t < span; t++) {
+          buf[p + t] = c;
+          depth[p + t] = v;
         }
       }
       yb = y0;
