@@ -1761,6 +1761,22 @@ export default function DocumentWindow({
                 <h1>web app created by Matt Rouse</h1>
                 <ul>
                   <li>
+                    - built with{" "}
+                    <Anchor href="https://nextjs.org/" target="_blank">
+                      Next.js
+                    </Anchor>{" "}
+                    &{" "}
+                    <Anchor href="https://react.dev/" target="_blank">
+                      React
+                    </Anchor>
+                  </li>
+                  <li>
+                    - deployed on{" "}
+                    <Anchor href="https://www.digitalocean.com/" target="_blank">
+                      DigitalOcean
+                    </Anchor>
+                  </li>
+                  <li>
                     - ui created with{" "}
                     <Anchor href="https://react95.io/" target="_blank">
                       react95
@@ -1779,19 +1795,21 @@ export default function DocumentWindow({
                     </Anchor>
                   </li>
                   <li>
-                    - built with{" "}
-                    <Anchor href="https://nextjs.org/" target="_blank">
-                      Next.js
-                    </Anchor>{" "}
-                    &{" "}
-                    <Anchor href="https://react.dev/" target="_blank">
-                      React
+                    - trees from{" "}
+                    <Anchor href="https://data-seattlecitygis.opendata.arcgis.com/" target="_blank">
+                      Seattle GeoData
                     </Anchor>
                   </li>
                   <li>
-                    - deployed on{" "}
-                    <Anchor href="https://www.digitalocean.com/" target="_blank">
-                      DigitalOcean
+                    - elevation from{" "}
+                    <Anchor href="https://www.usgs.gov/3d-elevation-program" target="_blank">
+                      USGS 3DEP
+                    </Anchor>
+                  </li>
+                  <li>
+                    - seasons tuned to{" "}
+                    <Anchor href="https://www.usanpn.org/" target="_blank">
+                      USA-NPN
                     </Anchor>
                   </li>
                   <li>

@@ -26,8 +26,11 @@ export type ProgramDef = {
   size: { width?: number; height: number };
   /** Its Start menu entry, listed in the order this file gives. */
   menu?: { label: string; folder: MenuFolder };
-  /** bash.exe lists it in the guest's home dir, by its title, with this blurb. */
-  shell?: { blurb: string };
+  /**
+   * bash.exe lists it in the guest's home dir with this blurb, by its title or,
+   * where the title isn't a file name, by `file`.
+   */
+  shell?: { blurb: string; file?: string };
 };
 
 export const PROGRAMS = {
@@ -134,11 +137,11 @@ export const PROGRAMS = {
   },
   trees: {
     kind: "program",
-    title: "trees.exe",
+    title: "./trees",
     icon: "../w95_tree.ico",
     size: { width: 460, height: 560 },
     menu: { label: "Map", folder: "tools" },
-    shell: { blurb: "every street tree in Seattle, through the year." },
+    shell: { blurb: "every street tree in Seattle, through the year.", file: "trees.exe" },
   },
   cubicles: {
     kind: "program",

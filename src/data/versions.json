@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.6",
+      "version": "7.0.7",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-07",
@@ -33,7 +33,22 @@
         "Changed: season timing tuned to USA-NPN observations (trees.exe). Leaf-out, color, leaf drop",
         "Fixed: Ship Canal water in Tilt (trees.exe). Lake Union joined to the Sound and Lake Washington",
         "Fixed: tree data failing to load just after an update (trees.exe). Stale cached copy refetched",
-        "Fixed: canopy drawn out of place just after an update (trees.exe). Data fetched fresh per deploy"
+        "Fixed: canopy drawn out of place just after an update (trees.exe). Data fetched fresh per deploy",
+        "Changed: Tilt ground drawn as a dark green wireframe (trees.exe)",
+        "Fixed: lake shores sunk below water level in Tilt (trees.exe). Green Lake rim at its own level",
+        "Fixed: shoreline trees standing in water in Tilt (trees.exe). Treed shore cells kept as land",
+        "Fixed: conifers hard to pick at low tilt (trees.exe). Whole cone selectable, not its centre",
+        "Changed: parks drawn solid green, P-Patches light green (trees.exe). Flat and Tilt",
+        "Changed: selection highlight green instead of yellow (trees.exe)",
+        "Added: Underground layer, SDOT areaways (trees.exe). Pits as deep as measured, purple glass color",
+        "Added: Link light rail track and stations (trees.exe). Underground layer, tunnels dashed",
+        "Added: sidewalk inspection notes on the tree card (trees.exe). Root uplift, low branches, cracks",
+        "Added: WASD pans the map (trees.exe). Screen-relative, held for continuous movement",
+        "Changed: layers back to toggle buttons on the toolbar (trees.exe). Icons in narrow windows",
+        "Changed: tree views moved to File > Open as -s, -t, -a (trees.exe). Own icon each",
+        "Changed: map views moved to File > Show as 2D, 2.5D, 2.5D+ (trees.exe). Were Flat, Tilt and Sun",
+        "Changed: sliders and Reset moved onto the map, bottom right (trees.exe). Values on the knobs",
+        "Changed: window and taskbar title ./trees (trees.exe)"
       ]
     },
     {

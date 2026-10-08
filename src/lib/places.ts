@@ -1,7 +1,9 @@
 /**
  * Everything trees.exe draws under the trees that isn't a tree: Seattle's
  * parks, Green Seattle Partnership's forest-restoration zones inside them,
- * P-Patch community gardens and creeks. One static, gzipped
+ * P-Patch community gardens, creeks, the areaways — the hollow sidewalks of
+ * Pioneer Square and downtown — and Link light rail's track and stations.
+ * One static, gzipped
  * file written by scripts/content/refresh-trees.mjs (the format is written up
  * at packPlaces there), laid out here on the trees' own metres.
  *
@@ -17,7 +19,7 @@ import { dataUrl, fetchGzip, Progress, readHeader, Trees } from "@/lib/trees";
 
 export const PLACES_URL = dataUrl("/trees/places.bin.gz");
 
-export type PlaceKind = "park" | "restoration" | "garden" | "creek";
+export type PlaceKind = "park" | "restoration" | "garden" | "creek" | "areaway" | "rail" | "station";
 
 export type Place = {
   kind: PlaceKind;
@@ -41,6 +43,29 @@ export type Place = {
   sqft?: number;
   /** Creek: 1 where it runs through a pipe. */
   piped?: number;
+  /** Areaway: SDOT's id (name is its location), and who owns it. */
+  id?: string;
+  owner?: "private" | "sdot" | "county" | "light";
+  /** "out of service" or "under construction"; absent when in service. */
+  status?: string;
+  use?: string;
+  /** What the street-side wall is built of, and what holds the sidewalk up over it. */
+  wall?: string;
+  roof?: string;
+  /** Feet: the wall's tallest, the space's width, and the wall's length. */
+  deep?: number;
+  wide?: number;
+  long?: number;
+  /** Good, Fair or Poor at the last inspection, and its year. */
+  wallRating?: string;
+  roofRating?: string;
+  inspected?: number;
+  /** 1 where part of it has been filled in. */
+  filled?: number;
+  /** Rail: how the track runs here — "tunnel", "elevated", "street level", "cutting", ... */
+  profile?: string;
+  /** Station: 1 where its platform is down in a tunnel. */
+  underground?: number;
 };
 
 export type Overlay = {
@@ -245,12 +270,12 @@ function distanceToLine(place: Place, mx: number, my: number, within: number): n
 
 /**
  * The place under a world point, `reach` metres being a few pixels at the
- * current zoom: a garden or a creek near enough first, as they're small, then
- * the restoration zone, then the park.
+ * current zoom: a garden, creek, areaway, track or station near enough
+ * first, as they're small, then the restoration zone, then the park.
  */
 export function placeAt(
   places: Places,
-  show: { parks: boolean; water: boolean },
+  show: { parks: boolean; water: boolean; underground: boolean },
   mx: number,
   my: number,
   reach: number,
@@ -266,6 +291,19 @@ export function placeAt(
       }
     } else if (p.kind === "creek" && show.water) {
       const d = distanceToLine(p, mx, my, reach);
+      if (d <= reach && d < bestD) {
+        best = p;
+        bestD = d;
+      }
+    } else if (p.kind === "rail" && show.underground) {
+      const d = distanceToLine(p, mx, my, reach);
+      if (d <= reach && d < bestD) {
+        best = p;
+        bestD = d;
+      }
+    } else if ((p.kind === "areaway" || p.kind === "station") && show.underground) {
+      // A strip a few metres wide, or a platform: inside it, or near enough its edge at this zoom.
+      const d = inside(p, mx, my) ? 0 : distanceToLine(p, mx, my, reach);
       if (d <= reach && d < bestD) {
         best = p;
         bestD = d;

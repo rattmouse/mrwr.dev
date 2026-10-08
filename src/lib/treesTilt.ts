@@ -55,8 +55,15 @@ export type Ground = {
   z: Float32Array;
   /** A packed color per cell: land lit from the north-west (or by the sun), or exactly WATER. */
   color: Uint32Array;
+  /** The Tilt view's wireframe line over each land cell, lit the same way. */
+  wire: Uint32Array;
   /** What WATER cells are drawn as: WATER itself, or darker, by night. */
   waterColor: number;
+  /** What the land between the wireframe's lines is drawn as. */
+  fillColor: number;
+  /** Parks, and the restoration zones in them, drawn solid in their own greens. */
+  parkColor: number;
+  restorationColor: number;
   /** Cells the hills shade from the sun, when it's the sun lighting them; else null. */
   shadow: Uint8Array | null;
   zMax: number;
@@ -68,7 +75,16 @@ export type Ground = {
 };
 
 export const WATER = pack(26, 50, 84);
-const SIDE = pack(46, 37, 30);
+const SIDE = pack(9, 14, 10);
+/** The land is a wireframe: dark green lines over near-black ground, so it still hides what's behind a hill. */
+const WIRE: [number, number, number] = [22, 76, 34];
+const FILL: [number, number, number] = [9, 14, 10];
+const PARK: [number, number, number] = [46, 98, 44];
+const RESTORATION: [number, number, number] = [74, 104, 34];
+/** A slope's light, squeezed for the wireframe: a line on a slope facing away still has to show. */
+const wireShade = (shade: number) => 0.55 + 0.45 * shade;
+/** The fewest device pixels between the wireframe's lines: closer, and it skips to every other one; further, and it splits each cell. */
+const WIRE_GAP = 3;
 const SIDE_WATER = pack(18, 32, 52);
 const FLAT_LAND = pack(60, 68, 52);
 
@@ -104,6 +120,7 @@ export function makeGround(
   const color = new Uint32Array(w * h);
   const slopes = slopesOf(t, cellW, cellH);
   const { nx, ny, inv, k: height } = slopes;
+  const wire = new Uint32Array(w * h);
   if (!light) {
     for (let i = 0; i < w * h; i++) {
       if (water[i]) {
@@ -114,8 +131,26 @@ export function makeGround(
       const shade = Math.max(0.5, Math.min(1.45, 0.92 + (ny[i] - nx[i]) * 1.6));
       const k = height[i];
       color[i] = pack((52 + k * 30) * shade, (62 + k * 18) * shade, (44 + k * 6) * shade);
+      const lit = wireShade(shade);
+      wire[i] = pack(WIRE[0] * lit, WIRE[1] * lit, WIRE[2] * lit);
     }
-    return { w, h, z, color, waterColor: WATER, shadow: null, zMax: t.zMax, ax, bx, ay, by };
+    return {
+      w,
+      h,
+      z,
+      color,
+      wire,
+      waterColor: WATER,
+      fillColor: pack(...FILL),
+      parkColor: pack(...PARK),
+      restorationColor: pack(...RESTORATION),
+      shadow: null,
+      zMax: t.zMax,
+      ax,
+      bx,
+      ay,
+      by,
+    };
   }
 
   const shadow = light.altitude > 0 ? castShadows(z, w, h, cellW, cellH, light) : null;
@@ -141,9 +176,15 @@ export function makeGround(
     const g = (62 + k * 18) * shade * keep + ng;
     const b = (44 + k * 6) * shade * keep + nb;
     color[i] = ((255 << 24) | ((b + 0.5) << 16) | ((g + 0.5) << 8) | (r + 0.5)) >>> 0;
+    const lit = wireShade(shade) * keep;
+    wire[i] = pack(WIRE[0] * lit + nr, WIRE[1] * lit + ng, WIRE[2] * lit + nb);
   }
   const waterColor = pack(26 * dim * keep + nr, 50 * dim * keep + ng, 84 * dim * keep + nb);
-  return { w, h, z, color, waterColor, shadow, zMax: t.zMax, ax, bx, ay, by };
+  const toned = (c: [number, number, number]) => pack(c[0] * dim * keep + nr, c[1] * dim * keep + ng, c[2] * dim * keep + nb);
+  const fillColor = toned(FILL);
+  const parkColor = toned(PARK);
+  const restorationColor = toned(RESTORATION);
+  return { w, h, z, color, wire, waterColor, fillColor, parkColor, restorationColor, shadow, zMax: t.zMax, ax, bx, ay, by };
 }
 
 type Slopes = { cellW: number; cellH: number; nx: Float32Array; ny: Float32Array; inv: Float32Array; k: Float32Array };
@@ -353,13 +394,32 @@ export function renderGround(
   const gh = g ? g.h : 0;
   const gz = g ? g.z : new Float32Array(0);
   const gc = g ? g.color : new Uint32Array(0);
+  const gwire = g ? g.wire : new Uint32Array(0);
   const zCeil = g ? g.zMax : 0;
+  // The wireframe runs along the grid's cell lines — every one, or every
+  // other, every fourth… far out, or halving and quartering the cells close
+  // in — whichever keeps them about WIRE_GAP to twice that apart at this zoom,
+  // foreshortened as they are by the angle.
+  let every = 1;
+  if (g) {
+    const cellPx = (S / Math.max(Math.abs(g.ax), Math.abs(g.ay))) * view.sin;
+    while (every * cellPx < WIRE_GAP && every < 1 << 12) every *= 2;
+    while (every * cellPx >= WIRE_GAP * 2 && every > 1 / 64) every /= 2;
+  }
+  // How far, in lines, a column spans across: a line running up the screen is
+  // on a column when it falls within half of that.
+  const halfX = g ? (Math.abs(g.ax * ux) / S / every) * stride * 0.5 : 0;
+  const halfY = g ? (Math.abs(g.ay * uy) / S / every) * stride * 0.5 : 0;
 
   for (let x = 0; x < W; x += stride) {
     const u = cu + (x + 0.5 - W / 2) / S;
     const twin = stride === 2 && x + 1 < W;
     let yb = H;
     let inside = false;
+    // Where the step before sat in lines and on screen, to catch a line crossed between the two.
+    let lastX = NaN;
+    let lastY = NaN;
+    let lastTop = NaN;
     // Down the column the world point moves in a straight line, away from the viewer.
     let mx = ux * u + vx * vStart;
     let my = uy * u + vy * vStart;
@@ -375,12 +435,12 @@ export function renderGround(
       // Nothing here can rise above what's already drawn in front of it.
       if (yGround - zCeil * sc >= yb) {
         inside = true;
+        lastX = NaN;
         continue;
       }
       // Inlined groundZ and blend: this loop runs for every pixel of depth in
       // every column, and the calls were most of its cost.
       let z = 0;
-      let color = FLAT_LAND;
       let wet = false;
       let ci = 0;
       let tx = 0;
@@ -415,38 +475,76 @@ export function renderGround(
         }
       }
       const yTop = yGround - z * sc;
+      // On a line running up the screen (the whole span), or crossing one
+      // that runs across it since the step before (one pixel, where it fell).
+      let onLine = false;
+      let yLine = -1;
+      if (g && !wet) {
+        const lx = (g.ax * mx + g.bx) / every;
+        const ly = (g.ay * my + g.by) / every;
+        const ex = lx - Math.round(lx);
+        const ey = ly - Math.round(ly);
+        onLine = (ex < 0 ? -ex : ex) < halfX || (ey < 0 ? -ey : ey) < halfY;
+        if (!onLine && lastX === lastX) {
+          let t = -1;
+          const fx = Math.floor(lx);
+          const fy = Math.floor(ly);
+          // The line crossed is the higher of the two floors, whichever way the step went.
+          const px = Math.floor(lastX);
+          const py = Math.floor(lastY);
+          if (fx !== px) t = (Math.max(fx, px) - lastX) / (lx - lastX);
+          if (fy !== py) t = Math.max(t, (Math.max(fy, py) - lastY) / (ly - lastY));
+          if (t >= 0) yLine = Math.round(lastTop + (yTop - lastTop) * Math.min(1, t));
+        }
+        lastX = lx;
+        lastY = ly;
+        lastTop = yTop;
+      } else lastX = NaN;
       if (yTop >= yb) {
         inside = true;
         continue;
       }
+      let color = FLAT_LAND;
+      let fill = FLAT_LAND;
       if (g) {
-        if (wet) color = g.waterColor;
+        if (wet) color = fill = g.waterColor;
         else {
-          const a = gc[ci];
-          const b = gc[ci + 1];
-          const c = gc[ci + gw];
-          const d = gc[ci + gw + 1];
-          const wa = (1 - tx) * (1 - ty);
-          const wb = tx * (1 - ty);
-          const wc = (1 - tx) * ty;
-          const wd = tx * ty;
-          const r = (a & 255) * wa + (b & 255) * wb + (c & 255) * wc + (d & 255) * wd;
-          const gg = ((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd;
-          const bb = ((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd;
+          // The line's color blended from the land cells around, leaving the water out.
+          const wa = gc[ci] === WATER ? 0 : (1 - tx) * (1 - ty);
+          const wb = gc[ci + 1] === WATER ? 0 : tx * (1 - ty);
+          const wc = gc[ci + gw] === WATER ? 0 : (1 - tx) * ty;
+          const wd = gc[ci + gw + 1] === WATER ? 0 : tx * ty;
+          const sum = wa + wb + wc + wd || 1;
+          const a = gwire[ci];
+          const b = gwire[ci + 1];
+          const c = gwire[ci + gw];
+          const d = gwire[ci + gw + 1];
+          const r = ((a & 255) * wa + (b & 255) * wb + (c & 255) * wc + (d & 255) * wd) / sum;
+          const gg = (((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd) / sum;
+          const bb = (((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd) / sum;
           color = ((255 << 24) | ((bb + 0.5) << 16) | ((gg + 0.5) << 8) | (r + 0.5)) >>> 0;
+          fill = g.fillColor;
         }
       }
       if (overlay && !wet) {
         const o = overlayAt(overlay, mx, my);
-        if (o) color = placeTint(color, o);
+        if (o && g) {
+          // Solid park green, its wireframe a lighter line of the same so the hills still read.
+          fill = o & OVERLAY_RESTORATION ? g.restorationColor : g.parkColor;
+          color = shadeColor(fill, 1.3);
+        } else if (o) {
+          color = placeTint(color, o);
+          fill = placeTint(fill, o);
+        }
       }
       // The front edge of the slab shows its side, down to the slab's base.
       const yEnd = inside ? yb : Math.min(yb, Math.ceil(yGround + slabPx));
       const y0 = Math.max(0, Math.floor(yTop));
       const faceFrom = inside ? yEnd : Math.min(yEnd, y0 + 2);
+      if (yLine >= 0) yLine = Math.max(y0, Math.min(yEnd - 1, yLine));
       for (let y = y0; y < yEnd; y++) {
         const p = y * W + x;
-        const c = y < faceFrom ? color : wet ? SIDE_WATER : SIDE;
+        const c = y < faceFrom ? (onLine || y === yLine ? color : fill) : wet ? SIDE_WATER : SIDE;
         buf[p] = c;
         depth[p] = v;
         if (twin) {
