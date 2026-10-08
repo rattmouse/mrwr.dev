@@ -1801,6 +1801,12 @@ export default function DocumentWindow({
                     </Anchor>
                   </li>
                   <li>
+                    - campus from{" "}
+                    <Anchor href="https://facilities.uw.edu/services/space/gis-maps" target="_blank">
+                      UW Facilities GIS
+                    </Anchor>
+                  </li>
+                  <li>
                     - elevation from{" "}
                     <Anchor href="https://www.usgs.gov/3d-elevation-program" target="_blank">
                       USGS 3DEP

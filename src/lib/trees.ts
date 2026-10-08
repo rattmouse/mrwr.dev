@@ -1,6 +1,6 @@
 /**
  * Seattle's street trees — and the trees Seattle Parks has inventoried in its
- * parks, which ride in the same file — as trees.exe reads them: static, pre-gzipped files
+ * parks, and UW Grounds on its campus, which ride in the same file — as trees.exe reads them: static, pre-gzipped files
  * from this site, written by scripts/content/refresh-trees.mjs (the formats
  * are written up there). They're gzipped on disk rather than left to the
  * server, so they arrive small whatever sits in front of the site, and are
@@ -23,6 +23,7 @@ export const ADDRESSES_URL = dataUrl("/trees/addresses.bin.gz");
 export const REMOVED_URL = dataUrl("/trees/removed.bin.gz");
 export const CROWNS_URL = dataUrl("/trees/crowns.bin.gz");
 export const SIDEWALK_URL = dataUrl("/trees/sidewalk.bin.gz");
+export const UW_URL = dataUrl("/trees/uw.bin.gz");
 
 export type TreeSpecies = { common: string; scientific: string; genus: string };
 
@@ -39,6 +40,8 @@ export type Trees = {
   count: number;
   /** How many of them are from Parks' inventory rather than the street-tree one. */
   parkCount: number;
+  /** How many are from UW's campus inventory. */
+  uwCount: number;
   fetched: string;
   source: string;
   bbox: { south: number; north: number; west: number; east: number };
@@ -51,7 +54,7 @@ export type Trees = {
   year: Uint8Array;
   /** Trunk diameter in inches. */
   diam: Uint8Array;
-  /** Bits 0–1 owner, bit 2 heritage, bit 3 exceptional, bit 4 from Parks' inventory. */
+  /** Bits 0–1 owner, bit 2 heritage, bit 3 exceptional, bit 4 from Parks' inventory, bit 5 from UW's. */
   flags: Uint8Array;
 };
 
@@ -163,6 +166,7 @@ export async function loadTrees(signal?: AbortSignal, onProgress?: Progress): Pr
     fetched: string;
     count: number;
     parkCount?: number;
+    uwCount?: number;
     bbox: Trees["bbox"];
     posShift: number;
     species: [string, string, string][];
@@ -183,6 +187,7 @@ export async function loadTrees(signal?: AbortSignal, onProgress?: Progress): Pr
   return {
     count: n,
     parkCount: meta.parkCount ?? 0,
+    uwCount: meta.uwCount ?? 0,
     fetched: meta.fetched,
     source: meta.source,
     bbox: meta.bbox,
@@ -254,6 +259,56 @@ export async function loadSidewalk(signal?: AbortSignal): Promise<TreeSidewalk> 
   };
 }
 
+/**
+ * What UW Grounds knows about a campus tree beyond what trees.bin.gz carries:
+ * its tag, its measured height, and for the Quad cherries their bloom record.
+ */
+export type UwTrees = {
+  /** Tree index → row. */
+  row: Map<number, number>;
+  tag: Uint16Array;
+  /** Feet; 0 when not measured. */
+  height: Uint8Array;
+  /** Year last measured − 1900; 0 when it was over ten years ago. */
+  measured: Uint8Array;
+  /** Row → the cherry's bloom record. */
+  cherries: Map<number, CherryBloom>;
+};
+
+export type CherryBloom = {
+  /** The last stage UW Grounds wrote down, and the day. */
+  stage: string | null;
+  seen: string | null;
+  /** Year → the first day ("YYYY-MM-DD") it was seen in bloom. */
+  blooms: Record<string, string>;
+};
+
+export async function loadUw(signal?: AbortSignal): Promise<UwTrees> {
+  const buf = await fetchGzip(UW_URL, "UWT1", signal);
+  const { meta, body } = readHeader<{
+    count: number;
+    cherries: [number, string | null, string | null, Record<string, string>][];
+  }>(buf, "UWT1");
+  const n = meta.count;
+  const bytes = new Uint8Array(buf);
+  const row = new Map<number, number>();
+  let i = 0;
+  for (let k = 0; k < n; k++) {
+    i += bytes[body + k] | (bytes[body + n + k] << 8) | (bytes[body + n * 2 + k] << 16);
+    row.set(i, k);
+  }
+  const at = body + n * 3;
+  const cherries = new Map<number, CherryBloom>();
+  for (const [k, stage, seen, blooms] of meta.cherries) cherries.set(k, { stage, seen, blooms });
+  return {
+    row,
+    tag: unplane(bytes, at, n),
+    height: bytes.slice(at + n * 2, at + n * 3),
+    measured: bytes.slice(at + n * 3, at + n * 4),
+    cherries,
+  };
+}
+
 export function treeOwner(trees: Trees, i: number): TreeOwner {
   return (["private", "sdot", "parks", "other"] as const)[trees.flags[i] & 3];
 }
@@ -270,6 +325,14 @@ export function treeAddress(addresses: TreeAddresses | null, i: number): string 
 export function isParkTree(trees: Trees, i: number): boolean {
   return (trees.flags[i] & 16) !== 0;
 }
+
+/** A tree from UW's campus inventory. */
+export function isUwTree(trees: Trees, i: number): boolean {
+  return (trees.flags[i] & 32) !== 0;
+}
+
+/** Flags bits for the trees that come from a grounds crew's own inventory — Parks' or UW's — and show with the Parks layer. */
+export const GROUNDS_TREE = 16 | 32;
 
 export function treeYear(trees: Trees, i: number): number | null {
   const y = trees.year[i];
