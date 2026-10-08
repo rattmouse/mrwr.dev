@@ -51,12 +51,38 @@ export type Progress = (fraction: number | null) => void;
 
 /**
  * Fetch one of the gzipped files, reporting progress as it comes in, and hand
- * back the inflated bytes. A server that has already decoded it (or sent it
- * with a Content-Encoding) hands over the raw file, which gzip's magic number
- * tells apart.
+ * back the inflated bytes, which should open with `magic`. A server that has
+ * already decoded it (or sent it with a Content-Encoding) hands over the raw
+ * file, which gzip's magic number tells apart.
+ *
+ * The files sit at the same URLs from one deploy to the next and are cached
+ * for an hour, so just after a deploy that changes a format the browser can
+ * still be holding the old one: the wrong magic means one more fetch, past
+ * the cache, before giving up.
  */
-export async function fetchGzip(url: string, signal?: AbortSignal, onProgress?: Progress): Promise<ArrayBuffer> {
-  const res = await fetch(url, { signal });
+export async function fetchGzip(
+  url: string,
+  magic: string,
+  signal?: AbortSignal,
+  onProgress?: Progress,
+): Promise<ArrayBuffer> {
+  const buf = await fetchGzipOnce(url, "default", signal, onProgress);
+  if (magicOf(buf) === magic) return buf;
+  return fetchGzipOnce(url, "reload", signal, onProgress);
+}
+
+function magicOf(buf: ArrayBuffer): string {
+  const b = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+  return String.fromCharCode(...b);
+}
+
+async function fetchGzipOnce(
+  url: string,
+  cache: RequestCache,
+  signal?: AbortSignal,
+  onProgress?: Progress,
+): Promise<ArrayBuffer> {
+  const res = await fetch(url, { signal, cache });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const total = Number(res.headers.get("Content-Length")) || 0;
   let raw: Uint8Array;
@@ -122,7 +148,7 @@ function positions(bytes: Uint8Array, at: number, n: number, shift: number): { x
 }
 
 export async function loadTrees(signal?: AbortSignal, onProgress?: Progress): Promise<Trees> {
-  const buf = await fetchGzip(TREES_URL, signal, onProgress);
+  const buf = await fetchGzip(TREES_URL, "TRE3", signal, onProgress);
   const { meta, body } = readHeader<{
     source: string;
     fetched: string;
@@ -162,7 +188,7 @@ export async function loadTrees(signal?: AbortSignal, onProgress?: Progress): Pr
 }
 
 export async function loadAddresses(signal?: AbortSignal): Promise<TreeAddresses> {
-  const buf = await fetchGzip(ADDRESSES_URL, signal);
+  const buf = await fetchGzip(ADDRESSES_URL, "TRA1", signal);
   const { meta, body } = readHeader<{ count: number; streets: string[] }>(buf, "TRA1");
   const n = meta.count;
   const bytes = new Uint8Array(buf);
@@ -227,7 +253,7 @@ export type RemovedTrees = {
 };
 
 export async function loadRemoved(signal?: AbortSignal): Promise<RemovedTrees> {
-  const buf = await fetchGzip(REMOVED_URL, signal);
+  const buf = await fetchGzip(REMOVED_URL, "RMV1", signal);
   const { meta, body } = readHeader<{
     source: string;
     fetched: string;
@@ -288,7 +314,7 @@ export type Crowns = {
 };
 
 export async function loadCrowns(signal?: AbortSignal, onProgress?: Progress): Promise<Crowns> {
-  const buf = await fetchGzip(CROWNS_URL, signal, onProgress);
+  const buf = await fetchGzip(CROWNS_URL, "CRW1", signal, onProgress);
   const { meta, body } = readHeader<{
     source: string;
     fetched: string;
