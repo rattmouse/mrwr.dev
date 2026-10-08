@@ -43,109 +43,30 @@ function SunIcon() {
   );
 }
 
+/** Pixel rectangles [x, y, w, h] on the 12px glyph grid, as one path. */
+const rects = (list: [number, number, number, number][]) => list.map(([x, y, w, h]) => `M${x} ${y}h${w}v${h}h${-w}z`).join("");
+
 /**
  * The layer buttons' icons, for when the toolbar is too narrow for their
- * names, drawn 20×12 — wider than a glyph, as the buttons have the room: "#"
- * solid, "+" half-tone, "." clear. Street trees by a sidewalk and road; a
- * stand of canopy, the back row half-toned; a park tree and bench; water;
- * and the ground cut away, an areaway and a rail tunnel hollow in it.
+ * names: a street tree by the curb, a clump of canopy, a park bench, water,
+ * and a pit under the pavement.
  */
-const LAYER_ART: Record<string, string[]> = {
-  Street: [
-    "..###.......###.....",
-    ".#+++#.....#+++#....",
-    "#+++++#...#+++++#...",
-    "#+++++#...#+++++#...",
-    "#+++++#...#+++++#...",
-    ".#+++#.....#+++#....",
-    "..#.#.......#.#.....",
-    "...#.........#......",
-    "...#.........#......",
-    "####################",
-    "++++++++++++++++++++",
-    ".###...####...###...",
-  ],
-  Canopy: [
-    "....++++...++++.....",
-    "...++++++.++++++....",
-    "...++++++.++++++....",
-    ".####+++####+++####.",
-    "######++######+#####",
-    "####################",
-    "####################",
-    ".####..######..####.",
-    "..##....####....##..",
-    "..##.....##.....##..",
-    "..##.....##.....##..",
-    "####################",
-  ],
-  Parks: [
-    "..###...............",
-    ".#+++#..............",
-    "#+++++#.##########..",
-    "#+++++#.#........#..",
-    "#+++++#.##########..",
-    ".#+++#..#........#..",
-    "..#.#..############.",
-    "...#...############.",
-    "...#....#........#..",
-    "...#....#........#..",
-    "..+#+.+.#.+...+..#+.",
-    "++++++++++++++++++++",
-  ],
-  Water: [
-    "....................",
-    ".##....##....##....#",
-    "#..#..#..#..#..#..#.",
-    "....##....##....##..",
-    "....................",
-    ".++....++....++....+",
-    "+..+..+..+..+..+..+.",
-    "....++....++....++..",
-    "....................",
-    ".##....##....##....#",
-    "#..#..#..#..#..#..#.",
-    "....##....##....##..",
-  ],
-  Underground: [
-    "....................",
-    "....................",
-    "####################",
-    "+#......#++++####+++",
-    "+#......#+++#....#++",
-    "+#......#++#......#+",
-    "+#......#++#......#+",
-    "+#......#++#......#+",
-    "+########++#.####.#+",
-    "++++++++++++#....#++",
-    "+++++++++++++####+++",
-    "++++++++++++++++++++",
-  ],
+const LAYER_ICONS: Record<string, string> = {
+  Street: "M4 1h4v1h1v1h1v3H9v1H3V6H2V3h1V2h1z" + rects([[5, 7, 2, 3], [0, 10, 12, 1]]),
+  Canopy:
+    "M1 4h4v1h1v3H0V5h1zM7 4h4v1h1v3H6V5h1zM4 1h4v1h1v3H3V2h1z" + rects([[2, 8, 1, 3], [9, 8, 1, 3], [5, 5, 2, 6]]),
+  Parks: rects([[1, 2, 10, 2], [0, 5, 12, 2], [1, 7, 1, 4], [10, 7, 1, 4], [2, 4, 1, 1], [9, 4, 1, 1]]),
+  Water: rects(
+    [1, 5, 9].flatMap((y): [number, number, number, number][] => [
+      [0, y + 1, 2, 1],
+      [2, y, 3, 1],
+      [5, y + 1, 3, 1],
+      [8, y, 3, 1],
+      [11, y + 1, 1, 1],
+    ]),
+  ),
+  Underground: rects([[0, 2, 12, 1], [2, 3, 1, 8], [9, 3, 1, 8], [3, 10, 6, 1], [4, 5, 1, 1], [7, 7, 1, 1], [5, 8, 1, 1]]),
 };
-
-/** One kind of pixel in a piece of LAYER_ART, as a path of row runs. */
-function artPath(rows: string[], ch: string): string {
-  let d = "";
-  rows.forEach((row, y) => {
-    for (let x = 0; x < row.length; x++) {
-      if (row[x] !== ch) continue;
-      const from = x;
-      while (row[x + 1] === ch) x++;
-      d += `M${from} ${y}h${x + 1 - from}v1h${from - x - 1}z`;
-    }
-  });
-  return d;
-}
-
-function LayerIcon({ name }: { name: string }) {
-  const rows = LAYER_ART[name];
-  return (
-    <svg width={20} height={12} viewBox="0 0 20 12" aria-hidden shapeRendering="crispEdges" style={{ display: "block" }}>
-      <path d={artPath(rows, "+")} fill="currentColor" fillOpacity={0.45} />
-      <path d={artPath(rows, "#")} fill="currentColor" />
-    </svg>
-  );
-}
 
 /** The toolbar's buttons are Sounds' (strudel.cc's): raised, bold, pressed in while on. */
 const BOLD: React.CSSProperties = { fontWeight: "bold" };
@@ -343,7 +264,8 @@ export default function TreesProgram(props: ProgramProps) {
           <Button
             key={l.label}
             size="sm"
-            style={compact ? { ...BOLD, padding: "0 4px" } : BOLD}
+            square={compact}
+            style={BOLD}
             active={l.on}
             aria-pressed={l.on}
             aria-label={l.label}
@@ -351,7 +273,13 @@ export default function TreesProgram(props: ProgramProps) {
             title={compact ? `${l.label}: ${l.title}` : l.title}
             onClick={() => l.set((on) => !on)}
           >
-            {compact ? <LayerIcon name={l.label} /> : l.label}
+            {compact ? (
+              <Glyph>
+                <path d={LAYER_ICONS[l.label]} fill="currentColor" />
+              </Glyph>
+            ) : (
+              l.label
+            )}
           </Button>
         ))}
       </span>
