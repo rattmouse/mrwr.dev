@@ -6,6 +6,7 @@ import { Joystick } from "@/components/windows/MpkPanel";
 import { Crowns, loadCrowns, loadTrees, Trees } from "@/lib/trees";
 import { dayLabel, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { loadTerrain, Terrain } from "@/lib/terrain";
+import { loadPlaces, Places } from "@/lib/places";
 import { groundZ, makeGround, treeForms } from "@/lib/treesTilt";
 import {
   EYE,
@@ -23,7 +24,9 @@ import {
  * Behind the doors down cubicles.exe's hallway, once a day worked on Medium or
  * Hard has opened them: you, out of the office and stood among Seattle's
  * trees, at one of DROP_INS, as they look today — and then through the year.
- * The same data trees.exe draws, from eye height (treesWalk.ts), walked about
+ * The same data trees.exe draws, every layer of it — street, park and campus
+ * trees, the LiDAR canopy, parks, creeks, gardens, track and areaways on the
+ * wireframe ground — from eye height (treesWalk.ts), walked about
  * with the cubicle's own controls — WASD or the arrows or the stick, drag to
  * look. Esc, or the button, goes back in.
  *
@@ -203,6 +206,21 @@ export default function TreesWalk({
   useEffect(() => {
     worldRef.current = world;
   }, [world]);
+
+  // The parks, creeks, gardens, track and areaways: small, so they follow the trees straight in.
+  const placesRef = useRef<Places | null>(null);
+  const widthM = world?.widthM ?? 0;
+  const heightM = world?.heightM ?? 0;
+  useEffect(() => {
+    if (!data || !widthM) return;
+    const abort = new AbortController();
+    loadPlaces(data.trees, widthM, heightM, abort.signal)
+      .then((loaded) => {
+        placesRef.current = loaded;
+      })
+      .catch(() => {});
+    return () => abort.abort();
+  }, [data, widthM, heightM]);
 
   const camRef = useRef<WalkCamera | null>(null);
   const dropRef = useRef<{ from: WalkCamera; t: number } | null>(null);
@@ -447,7 +465,7 @@ export default function TreesWalk({
         setDate(dayLabel(today));
       }
 
-      renderWalk(frame, eye, w);
+      renderWalk(frame, eye, w, placesRef.current);
       ctx.putImageData(image, 0, 0);
 
       // Whatever tree the crosshair is on.

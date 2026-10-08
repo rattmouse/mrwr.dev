@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.9",
+      "version": "7.0.10",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
@@ -56,7 +56,9 @@
         "Changed: zoom and drag (./trees). Slides and stretches the last frame, redraws once it stops",
         "Changed: moving view (./trees). Coarser ground, no shadows, sparser far-out canopy until still",
         "Fixed: Tilt wireframe missing when zoomed in close (./trees). Ground cost no longer grows with zoom",
-        "Changed: Tilt ground at half resolution (./trees). About 3x faster per frame, trees still sharp"
+        "Changed: Tilt ground at half resolution (./trees). About 3x faster per frame, trees still sharp",
+        "Changed: broadleaf crowns drawn as ovals to tree height (./trees). Same trunk stub as conifers",
+        "Changed: Facing slider north at both ends (./trees). Facing and tilt sliders start at max"
       ]
     },
     {
