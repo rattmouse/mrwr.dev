@@ -5,6 +5,7 @@ import { Button, ProgressBar, Slider, Window, WindowContent, WindowHeader } from
 import { PauseIcon, PlayIcon } from "@/components/common/MediaGlyphs";
 import {
   Crowns,
+  isParkTree,
   loadAddresses,
   loadCrowns,
   loadRemoved,
@@ -18,6 +19,9 @@ import {
 } from "@/lib/trees";
 import { dayLabel, doy, isConifer, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { loadTerrain, Terrain } from "@/lib/terrain";
+import { loadPlaces, parkAt, Place, placeAt, Places, RESTORATION_PHASES, treesInside } from "@/lib/places";
+import { drapePlaces, drawFlatPlaces, outlinePlace } from "@/lib/placesDraw";
+import { clockLabel, Light, lightFrom, seattleInstant, sunPosition, sunTimes } from "@/lib/sun";
 import {
   DEPTH_SLACK,
   drawTiltTrees,
@@ -25,7 +29,10 @@ import {
   Ground,
   groundZ,
   makeGround,
+  MAP_LIGHT,
   renderGround,
+  resetShadowMask,
+  treeLight,
   Heading,
   rot,
   firstAtMost,
@@ -41,6 +48,7 @@ import {
   TreeForms,
   treeForms,
   treeScreen,
+  crownOutline,
 } from "@/lib/treesTilt";
 
 /**
@@ -58,14 +66,24 @@ import {
  * pan, wheel or pinch to zoom, click a tree for its details.
  *
  * Tilt stands the same trees on their hills, seen from an angle the
- * toolbar's slider sets and facing any of the eight compass points
+ * toolbar's slider sets and facing whichever way its other slider turns it
  * (treesTilt.ts); every coloring works in both.
+ *
+ * Under the trees, when the toolbar asks: the parks with their restoration
+ * zones and P-Patch gardens, and the creeks (places.ts), which
+ * can be hovered and clicked like a tree. And in Tilt, the Sun: the hills and
+ * trees lit, and shadowed, as they would be at the toolbar's hour on the day
+ * shown (sun.ts).
  */
 
 export type TreesMode = "season" | "planted" | "species";
 
 const BG: RGB = [14, 20, 16];
 const GHOST: RGB = [30, 42, 34];
+/** A draw slot with nothing to draw in Season or Type. */
+const NO_KEY = 0xffff;
+/** The picked tree's ring, and the picked place's outline. */
+const PICKED: RGB = [255, 255, 0];
 /** A removed street tree, in the year it came down. */
 const FELLED: RGB = [236, 64, 48];
 /** The LiDAR trees in the Species view: they have no species, so they stay in the background. */
@@ -378,18 +396,29 @@ export type TreesWindowProps = {
   tilt: boolean;
   /** Degrees above the horizon Tilt looks down from; the toolbar's slider. */
   pitch: number;
-  /** Which of the eight compass points Tilt faces, in degrees; the flat map is always north-up. */
+  /** Which way Tilt faces, degrees clockwise from north; the flat map is always north-up. */
   heading: Heading;
-  /** Q and E turn Tilt an eighth left or right. */
+  /** Q and E turn Tilt a step left or right. */
   onTurn: (step: 1 | -1) => void;
   /** The focused window takes Space, Escape and +/−. */
   active: boolean;
   /** Minimized: stop any playback. */
   paused: boolean;
-  /** Bumped by the toolbar's Fit button. */
+  /** Bumped by the toolbar's Reset button: the whole city in view, and the day and year back to today. */
   fitSignal: number;
+  /** Draw the street trees (and the ones taken down, on the Age timeline). */
+  street: boolean;
   /** Draw the LiDAR's other trees, under the street trees. */
   canopy: boolean;
+  /** Parks, restoration zones and P-Patch gardens under the trees, and the trees Parks has inventoried in them. */
+  parks: boolean;
+  /** Creeks. */
+  water: boolean;
+  /** Light Tilt by the sun at `minutes` past midnight, Seattle time, instead of from the map's north-west. */
+  sun: boolean;
+  minutes: number;
+  /** The Today button: the sun's hour back to now, as the day goes back to today. */
+  onNow: () => void;
 };
 
 export default function TreesWindow({
@@ -401,7 +430,13 @@ export default function TreesWindow({
   active,
   paused,
   fitSignal,
+  street,
   canopy,
+  parks,
+  water,
+  sun,
+  minutes,
+  onNow,
 }: TreesWindowProps) {
   const [trees, setTrees] = useState<Trees | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -413,6 +448,9 @@ export default function TreesWindow({
   const [group, setGroup] = useState<number | null>(null);
   const [selectedAsked, setSelected] = useState<number | null>(null);
   const [hoverAsked, setHover] = useState<number | null>(null);
+  // A park, zone, garden or creek, picked or pointed at where there's no tree.
+  const [selectedPlaceAsked, setSelectedPlace] = useState<Place | null>(null);
+  const [hoverPlaceAsked, setHoverPlace] = useState<Place | null>(null);
 
   // Playback stops on a change of view. Worked out while rendering rather than
   // in an effect, so the new view never draws a frame still playing.
@@ -488,6 +526,48 @@ export default function TreesWindow({
     () => (terrain && trees && prepared ? makeGround(terrain, trees.bbox, prepared.widthM, prepared.heightM) : null),
     [terrain, trees, prepared],
   );
+
+  // The parks, gardens and creeks: small, so they follow the trees straight in.
+  const [places, setPlaces] = useState<Places | null>(null);
+  useEffect(() => {
+    if (!trees || !prepared) return;
+    const abort = new AbortController();
+    loadPlaces(trees, prepared.widthM, prepared.heightM, abort.signal)
+      .then(setPlaces)
+      .catch(() => {});
+    return () => abort.abort();
+  }, [trees, prepared]);
+  const showPlaces = places !== null && (parks || water);
+  const placeShown = useCallback(
+    (p: Place) => (p.kind === "creek" ? water : parks),
+    [parks, water],
+  );
+
+  // The sun, on the day the Season view shows (today in the others) at the
+  // toolbar's hour. Rounded to a degree or so: a playing season then relights
+  // the hills a few times a second, not every frame.
+  // While the season plays, the sun moves a week at a time: relighting the
+  // hills every frame would cost more than the trees.
+  const sunDay = mode === "season" ? (playing ? Math.floor(day / 7) * 7 : Math.floor(day)) : todayDoy();
+  const sunYear = new Date().getFullYear();
+  const sunKey = useMemo(() => {
+    if (!sun || !tilt) return null;
+    const at = sunPosition(seattleInstant(sunYear, sunDay, minutes));
+    return `${Math.round(at.azimuth)} ${Math.round(at.altitude * 2) / 2}`;
+  }, [sun, tilt, sunYear, sunDay, minutes]);
+  const light = useMemo<Light | null>(() => {
+    if (!sunKey) return null;
+    const [azimuth, altitude] = sunKey.split(" ").map(Number);
+    return lightFrom({ azimuth, altitude });
+  }, [sunKey]);
+  const daylight = useMemo(() => (sun && tilt ? sunTimes(sunYear, sunDay) : null), [sun, tilt, sunYear, sunDay]);
+  // The ground as drawn: lit by the sun when it's on. Heights, fitting and
+  // standing the trees up all use `ground`, so relighting moves nothing.
+  const litGround = useMemo<Ground | null>(
+    () =>
+      light && terrain && trees && prepared ? makeGround(terrain, trees.bbox, prepared.widthM, prepared.heightM, light) : ground,
+    [light, terrain, trees, prepared, ground],
+  );
   // The LiDAR's other 850k trees: the biggest file by far, so it follows the
   // street trees in, once the map is up, or straight away if Tilt asks.
   const [crowns, setCrowns] = useState<Crowns | null>(null);
@@ -531,8 +611,29 @@ export default function TreesWindow({
     () => (order && scene && sceneGround ? packOrder(order, heading, scene.mx, scene.my, sceneGround, scene.forms) : null),
     [order, scene, sceneGround, heading],
   );
+  // Each draw slot's palette entry for Season and Type: its species, or the
+  // canopy's broadleaf or conifer just past the species, or none — a tree
+  // whose layer is off, or a removed one.
+  const slotKeys = useMemo(() => {
+    if (!packed || !scene || !trees) return null;
+    const S = trees.species.length;
+    const { nS, nR } = scene;
+    const at = nS + nR;
+    const keys = new Uint16Array(packed.n);
+    for (let k = 0; k < packed.n; k++) {
+      const i = packed.index[k];
+      if (i < nS) keys[k] = (trees.flags[i] & 16 ? parks : street) ? trees.species16[i] : NO_KEY;
+      else if (i < at) keys[k] = NO_KEY;
+      else keys[k] = shownCrowns ? S + shownCrowns.conifer[i - at] : NO_KEY;
+    }
+    return keys;
+  }, [packed, scene, trees, street, parks, shownCrowns]);
   // The ground layer, kept until the view moves: playing through a year redraws only the trees.
   const groundLayerRef = useRef<{ key: string; buf: Uint32Array; depth: Float32Array; W: number } | null>(null);
+  // The flat map's places, likewise kept until the view moves.
+  const flatLayerRef = useRef<{ key: string; buf: Uint32Array } | null>(null);
+  // Which pixels are still bare ground, for the trees' shadows to fall on.
+  const shadowMaskRef = useRef<Uint8Array | null>(null);
   const treeColorRef = useRef<Uint32Array | null>(null);
   const treeBareRef = useRef<Uint8Array | null>(null);
   const colorDepsRef = useRef<unknown[]>([]);
@@ -608,7 +709,7 @@ export default function TreesWindow({
       if (kind === "removed") {
         // Only on the timeline, from planting to the year it came down.
         const r = i - scene!.nS;
-        return mode === "planted" && removedPrep !== null && removedPrep.plantedYear[r] <= year && year <= removedPrep.removedYear[r];
+        return street && mode === "planted" && removedPrep !== null && removedPrep.plantedYear[r] <= year && year <= removedPrep.removedYear[r];
       }
       if (kind === "crown") {
         if (!shownCrowns || mode === "planted") return false;
@@ -618,6 +719,8 @@ export default function TreesWindow({
         }
         return true;
       }
+      // A street tree with the Street layer, a park tree with the Parks layer.
+      if (!(trees.flags[i] & 16 ? parks : street)) return false;
       if (mode === "planted") {
         const y = trees.year[i];
         return y !== 0 && 1900 + y <= year;
@@ -625,12 +728,15 @@ export default function TreesWindow({
       if (mode === "species" && group !== null) return prepared.groupOf[trees.species16[i]] === group;
       return true;
     },
-    [trees, prepared, scene, removedPrep, shownCrowns, mode, year, group],
+    [trees, prepared, scene, removedPrep, shownCrowns, mode, year, group, street, parks],
   );
 
   // A pick that's gone out of view (a later year, another genus) goes with it.
   const selected = selectedAsked !== null && isLive(selectedAsked) ? selectedAsked : null;
   const hover = hoverAsked !== null && isLive(hoverAsked) ? hoverAsked : null;
+  const selectedPlace =
+    selected === null && selectedPlaceAsked && placeShown(selectedPlaceAsked) ? selectedPlaceAsked : null;
+  const hoverPlace = hover === null && hoverPlaceAsked && placeShown(hoverPlaceAsked) ? hoverPlaceAsked : null;
 
   // --- view -----------------------------------------------------------------
 
@@ -726,70 +832,39 @@ export default function TreesWindow({
       tiltView = makeTiltView(W, H, v.s * dpr, v.cx, v.cy, pitch, heading);
       // Rough while the view is moving, sharp once it settles.
       const stride = movingRef.current ? 2 : 1;
-      const key = `${W}x${H} ${tiltView.S} ${v.cx} ${v.cy} ${pitch} ${heading} ${ground ? "g" : "-"} ${stride}`;
+      const key =
+        `${W}x${H} ${tiltView.S} ${v.cx} ${v.cy} ${pitch} ${heading} ${ground ? "g" : "-"} ${stride} ` +
+        `${sunKey ?? "map"} ${showPlaces ? `${parks} ${water}` : "-"}`;
       let layer = groundLayerRef.current;
       if (!layer || layer.key !== key) {
         if (!layer || layer.buf.length !== W * H) {
           layer = { key, buf: new Uint32Array(W * H), depth: new Float32Array(W * H), W };
         }
-        renderGround(layer.buf, layer.depth, tiltView, ground, prepared.widthM, prepared.heightM, pack(BG), stride);
+        const overlay = places && parks ? places.overlay : null;
+        renderGround(layer.buf, layer.depth, tiltView, litGround, prepared.widthM, prepared.heightM, pack(BG), stride, overlay);
+        if (showPlaces && places) drapePlaces(layer.buf, layer.depth, tiltView, litGround, places, { parks, water }, light ? 0.3 + 0.7 * light.day : 1);
         layer.key = key;
         layer.W = W;
         groundLayerRef.current = layer;
       }
       buf.set(layer.buf);
+      if (selectedPlace) {
+        outlinePlace(buf, W, H, selectedPlace, pack(PICKED), null, { view: tiltView, depth: layer.depth, g: litGround });
+      }
+      // The sun's light on the trees, and their shadows on whatever ground is bare.
+      let lit = MAP_LIGHT;
+      if (light) {
+        let mask: Uint8Array | null = null;
+        if (light.altitude > 1) {
+          if (!shadowMaskRef.current || shadowMaskRef.current.length !== W * H) shadowMaskRef.current = new Uint8Array(W * H);
+          mask = shadowMaskRef.current;
+          resetShadowMask(mask, layer.depth);
+        }
+        lit = treeLight(tiltView, light, mask);
+      }
 
       const N = scene.mx.length;
       const { nS, nR } = scene;
-      // A million colors, worked out again only when one of them can have
-      // changed — not for every frame of a pan.
-      const colorDeps = [scene, packed, mode, year, speciesPalette, yearPalette, crownLook, removedPrep, bareSpecies];
-      const colorsFresh =
-        treeColorRef.current?.length === N &&
-        colorDepsRef.current.length === colorDeps.length &&
-        colorDeps.every((d, k) => Object.is(d, colorDepsRef.current[k]));
-      colorDepsRef.current = colorDeps;
-      if (!treeColorRef.current || treeColorRef.current.length !== N) treeColorRef.current = new Uint32Array(N);
-      const colors = treeColorRef.current;
-      if (!colorsFresh) {
-        if (mode === "planted") {
-          for (let i = 0; i < nS; i++) colors[i] = trees.year[i] ? yearPalette[trees.year[i]] : 0;
-        } else {
-          for (let i = 0; i < nS; i++) colors[i] = speciesPalette[trees.species16[i]];
-        }
-        for (let r = 0; r < nR; r++) colors[nS + r] = removedPrep && mode === "planted" ? removedColor(removedPrep, r, year, agePalette) : 0;
-        if (shownCrowns) {
-          const at = nS + nR;
-          for (let c = 0; c < shownCrowns.count; c++) colors[at + c] = shownCrowns.conifer[c] ? crownLook.conifer : crownLook.broad;
-        }
-        if (bareSpecies) {
-          if (!treeBareRef.current || treeBareRef.current.length !== N) treeBareRef.current = new Uint8Array(N);
-          const bareNow = treeBareRef.current;
-          bareNow.fill(0);
-          for (let i = 0; i < nS; i++) bareNow[i] = bareSpecies[trees.species16[i]];
-          if (shownCrowns && crownLook.bare) {
-            const at = nS + nR;
-            for (let c = 0; c < shownCrowns.count; c++) bareNow[at + c] = shownCrowns.conifer[c] ? 0 : 1;
-          }
-        }
-      }
-      // Into draw order, so the tree pass reads them front to back like everything else.
-      if (!packedColorRef.current || packedColorRef.current.length !== packed.n) {
-        packedColorRef.current = new Uint32Array(packed.n);
-      }
-      const drawColors = packedColorRef.current;
-      let drawBare: Uint8Array | null = null;
-      if (!colorsFresh) {
-        for (let k = 0; k < packed.n; k++) drawColors[k] = colors[packed.index[k]];
-      }
-      if (bareSpecies && treeBareRef.current) {
-        if (!packedBareRef.current || packedBareRef.current.length !== packed.n) packedBareRef.current = new Uint8Array(packed.n);
-        drawBare = packedBareRef.current;
-        if (!colorsFresh) {
-          const bareNow = treeBareRef.current;
-          for (let k = 0; k < packed.n; k++) drawBare[k] = bareNow[packed.index[k]];
-        }
-      }
       // Far out, where a canopy tree is a fraction of a pixel and several share
       // each one, a sample of the canopy does; while the view is being dragged
       // about, a thinner one still. The street trees are always all there.
@@ -812,7 +887,103 @@ export default function TreesWindow({
       }
       // Only the band of depths the view can see.
       const [from, to] = visibleSlice(tiltView, packed, ground?.zMax ?? 0, scene.tallest, sub);
-      drawTiltTrees(buf, layer.depth, tiltView, packed, drawColors, drawBare, GHOST_PACKED, sub, from, to);
+      if (!packedColorRef.current || packedColorRef.current.length !== packed.n) {
+        packedColorRef.current = new Uint32Array(packed.n);
+      }
+      const drawColors = packedColorRef.current;
+      let drawBare: Uint8Array | null = null;
+      if (mode !== "planted" && slotKeys) {
+        // Season and Type color by species: one palette entry per species (and
+        // the canopy's two), looked up only for the trees in view — a playing
+        // season changes every color every frame, and most aren't on screen.
+        const S = trees.species.length;
+        const pal = new Uint32Array(S + 2);
+        pal.set(speciesPalette);
+        pal[S] = crownLook.broad;
+        pal[S + 1] = crownLook.conifer;
+        let bareOf: Uint8Array | null = null;
+        if (bareSpecies) {
+          bareOf = new Uint8Array(S + 2);
+          bareOf.set(bareSpecies);
+          bareOf[S] = crownLook.bare ? 1 : 0;
+          if (!packedBareRef.current || packedBareRef.current.length !== packed.n) packedBareRef.current = new Uint8Array(packed.n);
+          drawBare = packedBareRef.current;
+        }
+        for (let j = from; j < to; j++) {
+          const k = sub ? sub[j] : j;
+          const key = slotKeys[k];
+          drawColors[k] = key === NO_KEY ? 0 : pal[key];
+          if (drawBare) drawBare[k] = key === NO_KEY ? 0 : bareOf![key];
+        }
+        // The by-tree colors below are stale now.
+        colorDepsRef.current = [];
+      } else {
+        // A million colors, worked out again only when one of them can have
+        // changed — not for every frame of a pan.
+        const colorDeps = [scene, packed, mode, year, speciesPalette, yearPalette, crownLook, removedPrep, bareSpecies, street, parks];
+        const colorsFresh =
+          treeColorRef.current?.length === N &&
+          colorDepsRef.current.length === colorDeps.length &&
+          colorDeps.every((d, k) => Object.is(d, colorDepsRef.current[k]));
+        colorDepsRef.current = colorDeps;
+        if (!treeColorRef.current || treeColorRef.current.length !== N) treeColorRef.current = new Uint32Array(N);
+        const colors = treeColorRef.current;
+        if (!colorsFresh) {
+          if (mode === "planted") {
+            for (let i = 0; i < nS; i++) colors[i] = trees.year[i] ? yearPalette[trees.year[i]] : 0;
+          } else {
+            for (let i = 0; i < nS; i++) colors[i] = speciesPalette[trees.species16[i]];
+          }
+          // Street trees go with the Street layer, park trees with Parks.
+          if (!street || !parks) {
+            for (let i = 0; i < nS; i++) if (!(trees.flags[i] & 16 ? parks : street)) colors[i] = 0;
+          }
+          for (let r = 0; r < nR; r++) {
+            colors[nS + r] = street && removedPrep && mode === "planted" ? removedColor(removedPrep, r, year, agePalette) : 0;
+          }
+          if (shownCrowns) {
+            const at = nS + nR;
+            for (let c = 0; c < shownCrowns.count; c++) colors[at + c] = shownCrowns.conifer[c] ? crownLook.conifer : crownLook.broad;
+          }
+          if (bareSpecies) {
+            if (!treeBareRef.current || treeBareRef.current.length !== N) treeBareRef.current = new Uint8Array(N);
+            const bareNow = treeBareRef.current;
+            bareNow.fill(0);
+            for (let i = 0; i < nS; i++) bareNow[i] = bareSpecies[trees.species16[i]];
+            if (shownCrowns && crownLook.bare) {
+              const at = nS + nR;
+              for (let c = 0; c < shownCrowns.count; c++) bareNow[at + c] = shownCrowns.conifer[c] ? 0 : 1;
+            }
+          }
+        }
+        // Into draw order, so the tree pass reads them front to back like everything else.
+        if (!colorsFresh) {
+          for (let k = 0; k < packed.n; k++) drawColors[k] = colors[packed.index[k]];
+        }
+        if (bareSpecies && treeBareRef.current) {
+          if (!packedBareRef.current || packedBareRef.current.length !== packed.n) packedBareRef.current = new Uint8Array(packed.n);
+          drawBare = packedBareRef.current;
+          if (!colorsFresh) {
+            const bareNow = treeBareRef.current;
+            for (let k = 0; k < packed.n; k++) drawBare[k] = bareNow[packed.index[k]];
+          }
+        }
+      }
+      drawTiltTrees(buf, layer.depth, tiltView, packed, drawColors, drawBare, GHOST_PACKED, sub, from, to, lit);
+    } else if (!tilt && showPlaces && places && v) {
+      const s = v.s * dpr;
+      const ox = W / 2 - v.cx * s;
+      const oy = H / 2 + v.cy * s;
+      const stride = movingRef.current ? 2 : 1;
+      const key = `${W}x${H} ${s} ${ox} ${oy} ${parks} ${water} ${stride}`;
+      let layer = flatLayerRef.current;
+      if (!layer || layer.key !== key) {
+        if (!layer || layer.buf.length !== W * H) layer = { key, buf: new Uint32Array(W * H) };
+        drawFlatPlaces(layer.buf, W, H, s, ox, oy, places, { parks, water }, pack(BG), stride);
+        layer.key = key;
+        flatLayerRef.current = layer;
+      }
+      buf.set(layer.buf);
     } else {
       buf.fill(pack(BG));
     }
@@ -852,10 +1023,12 @@ export default function TreesWindow({
       const { mx, my, crown, order } = prepared;
       const sp16 = trees.species16;
       const yr = trees.year;
+      const fl = trees.flags;
       const planted = mode === "planted";
       const n = order.length;
       for (let k = 0; k < n; k++) {
         const i = order[k];
+        if (!(fl[i] & 16 ? parks : street)) continue;
         let color: number;
         if (planted) {
           const y = yr[i];
@@ -886,7 +1059,7 @@ export default function TreesWindow({
         }
       }
       // The trees that have come down, on the timeline: standing until their year, red in it.
-      if (planted && removedPrep) {
+      if (planted && removedPrep && street) {
         for (let r = 0; r < removedPrep.n; r++) {
           const color = removedColor(removedPrep, r, year, agePalette);
           if (!color) continue;
@@ -909,6 +1082,8 @@ export default function TreesWindow({
           }
         }
       }
+      // The picked place over the dots, or a park's edge is lost among its trees.
+      if (selectedPlace) outlinePlace(buf, W, H, selectedPlace, pack(PICKED), { s, ox, oy }, null);
     }
     ctx.putImageData(img, 0, 0);
 
@@ -923,24 +1098,36 @@ export default function TreesWindow({
             : kindOf(scene, i) === "removed" && removedPrep
               ? removedPrep.dot[i - scene.nS]
               : scene.forms.crown[i];
-        let sx = w / 2 + (scene.mx[i] - v.cx) * v.s;
-        let sy = h / 2 - (scene.my[i] - v.cy) * v.s;
-        let r = Math.max(5, flatDot * v.s + 3);
-        if (tiltView && sceneGround) {
-          const at = treeScreen(
-            tiltView,
-            scene.mx[i],
-            scene.my[i],
-            sceneGround[i],
-            scene.forms.height[i],
-            scene.forms.crown[i],
-          );
-          sx = at.x / dpr;
-          sy = at.y / dpr;
-          r = Math.max(5, scene.forms.crown[i] * TREE_SCALE * v.s + 3);
-        }
         ctx.beginPath();
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        const outline = tiltView && sceneGround
+          ? crownOutline(
+              tiltView,
+              scene.mx[i],
+              scene.my[i],
+              sceneGround[i],
+              scene.forms.height[i],
+              scene.forms.crown[i],
+              scene.forms.shape[i],
+            )
+          : null;
+        if (outline?.shape === "cone") {
+          // The cone's own triangle, a few pixels out all round.
+          const x = outline.x / dpr;
+          const top = outline.top / dpr - 4;
+          const bottom = outline.bottom / dpr + 3;
+          const half = Math.max(4, outline.half / dpr + 3);
+          ctx.moveTo(x, top);
+          ctx.lineTo(x + half, bottom);
+          ctx.lineTo(x - half, bottom);
+          ctx.closePath();
+        } else if (outline) {
+          ctx.arc(outline.x / dpr, outline.y / dpr, Math.max(5, outline.r / dpr + 3), 0, Math.PI * 2);
+        } else {
+          const sx = w / 2 + (scene.mx[i] - v.cx) * v.s;
+          const sy = h / 2 - (scene.my[i] - v.cy) * v.s;
+          ctx.arc(sx, sy, Math.max(5, flatDot * v.s + 3), 0, Math.PI * 2);
+        }
+        ctx.lineJoin = "round";
         ctx.lineWidth = width + 2;
         ctx.strokeStyle = "rgba(0,0,0,0.7)";
         ctx.stroke();
@@ -1019,6 +1206,16 @@ export default function TreesWindow({
     ground,
     sceneGround,
     packed,
+    places,
+    showPlaces,
+    slotKeys,
+    street,
+    parks,
+    water,
+    selectedPlace,
+    light,
+    sunKey,
+    litGround,
   ]);
 
   // The frame always runs the latest draw, so one asked for before the data
@@ -1083,10 +1280,16 @@ export default function TreesWindow({
     if (!prepared) return;
     const last = fittedForRef.current;
     if (last.prepared === prepared && last.fitSignal === fitSignal) return;
+    // Reset puts the day and the year back to today as well.
+    if (last.fitSignal !== fitSignal && fitSignal > 0) {
+      setPlaying(false);
+      setDay(todayDoy());
+      setYear(new Date().getFullYear());
+    }
     fittedForRef.current = { prepared, fitSignal };
     fit();
     requestDraw();
-    // fitSignal is the toolbar's Fit button; prepared is the first load.
+    // fitSignal is the toolbar's Reset button; prepared is the first load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prepared, fitSignal]);
 
@@ -1094,9 +1297,16 @@ export default function TreesWindow({
   // while it moves, as for a pan.
   useEffect(() => {
     if (tilt) moved();
-    // Only a change of angle counts as movement.
+    // Only a change of angle or facing counts as movement.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pitch]);
+  }, [pitch, heading]);
+
+  // Likewise the sun's hour: rough while the slider is dragged, sharp when it stops.
+  useEffect(() => {
+    if (tilt && sun) moved();
+    // Only a change of hour counts as movement.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minutes]);
 
   useEffect(() => {
     if (!fittedRef.current) return;
@@ -1208,6 +1418,37 @@ export default function TreesWindow({
     [trees, prepared, scene, order, ground, removedPrep, shownCrowns, isLive, mode, tilt, pitch, heading, sceneGround, turn, squash],
   );
 
+  /** The place under a spot on the canvas, where there's no tree: in Tilt, on the ground actually drawn there. */
+  const pickPlace = useCallback(
+    (px: number, py: number): Place | null => {
+      const v = viewRef.current;
+      if (!places || !showPlaces || !prepared || !v) return null;
+      // A few pixels' grace, in metres, for the gardens and creeks.
+      const reach = 6 / v.s;
+      let at: { x: number; y: number };
+      if (tilt) {
+        const layer = groundLayerRef.current;
+        const { w, h, dpr } = sizeRef.current;
+        const W = Math.round(w * dpr);
+        const H = Math.round(h * dpr);
+        const ix = Math.floor(px * dpr);
+        const iy = Math.floor(py * dpr);
+        if (!layer || ix < 0 || iy < 0 || ix >= W || iy >= H) return null;
+        const depthAt = layer.depth[iy * layer.W + ix];
+        if (!Number.isFinite(depthAt)) return null;
+        const [cu] = rot(heading, v.cx, v.cy);
+        const [x, y] = unrot(heading, cu + (ix + 0.5 - W / 2) / (v.s * dpr), depthAt);
+        at = { x, y };
+      } else {
+        at = toWorld(px, py, v);
+      }
+      if (at.x < 0 || at.y < 0 || at.x > prepared.widthM || at.y > prepared.heightM) return null;
+      return placeAt(places, { parks, water }, at.x, at.y, reach);
+    },
+    // toWorld changes with turn and squash.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [places, showPlaces, prepared, tilt, heading, parks, water, turn, squash],
+  );
 
   // --- pointer handling -----------------------------------------------------
 
@@ -1284,7 +1525,11 @@ export default function TreesWindow({
     }
     if (e.pointerType !== "mouse") return;
     cancelAnimationFrame(hoverFrame.current);
-    hoverFrame.current = requestAnimationFrame(() => setHover(pick(p.x, p.y)));
+    hoverFrame.current = requestAnimationFrame(() => {
+      const tree = pick(p.x, p.y);
+      setHover(tree);
+      setHoverPlace(tree === null ? pickPlace(p.x, p.y) : null);
+    });
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -1299,7 +1544,9 @@ export default function TreesWindow({
     gesture.current = null;
     if (g && !g.moved && e.type === "pointerup") {
       const p = local(e);
-      setSelected(pick(p.x, p.y));
+      const tree = pick(p.x, p.y);
+      setSelected(tree);
+      setSelectedPlace(tree === null ? pickPlace(p.x, p.y) : null);
     }
   };
 
@@ -1363,7 +1610,10 @@ export default function TreesWindow({
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (e.key === "Escape") setSelected(null);
+      if (e.key === "Escape") {
+        setSelected(null);
+        setSelectedPlace(null);
+      }
       else if (tilt && (e.key === "q" || e.key === "Q")) onTurn(-1);
       else if (tilt && (e.key === "e" || e.key === "E")) onTurn(1);
       else if (e.key === " ") {
@@ -1424,6 +1674,7 @@ export default function TreesWindow({
       const c = i - scene.nS - scene.nR;
       const conifer = crowns.conifer[c] === 1;
       return {
+        kind: "LiDAR tree",
         title: conifer ? "Conifer" : "Broadleaf tree",
         rows: [
           ["Height", metres(crowns.height[c])],
@@ -1441,10 +1692,11 @@ export default function TreesWindow({
       const by = (removed.flags[r] & 1) !== 0;
       const gone = removedPrep.removedYear[r];
       return {
-        title: `${sp.common} (removed)`,
+        kind: "Removed tree",
+        title: sp.common,
         rows: [
-          ["Species", sp.scientific || sp.genus],
-          ["Address", treeAddress(removed.addresses, r) ?? "…"],
+          ["Species", speciesLabel(sp)],
+          ["Address", treeAddress(removed.addresses, r) || "not recorded"],
           ["Trunk", removed.diam[r] ? `${removed.diam[r]} in across` : "not measured"],
           ["Planted", removed.planted[r] ? String(1900 + removed.planted[r]) : "no date"],
           ["Removed", by ? `by ${gone}` : String(gone)],
@@ -1458,42 +1710,81 @@ export default function TreesWindow({
     const flags = trees.flags[i];
     const count = prepared?.speciesCount[trees.species16[i]] ?? 0;
     const measured = crowns?.streetHeight[i] ?? 0;
+    const inPark = isParkTree(trees, i);
+    // Some records have no address, or only a number; the park it stands in will do, if it's in one.
+    let address = treeAddress(addresses, i);
+    if (address !== null && !/[a-z]{2}/i.test(address)) {
+      const park = places && prepared ? parkAt(places, prepared.mx[i], prepared.my[i]) : null;
+      address = park?.name ?? "not recorded";
+    }
     const rows: [string, string][] = [
-      ["Species", sp.scientific || sp.genus],
-      ["Address", treeAddress(addresses, i) ?? "…"],
+      ["Species", speciesLabel(sp)],
+      [inPark ? "Park" : "Address", address ?? "…"],
       ["Trunk", trees.diam[i] ? `${trees.diam[i]} in across` : "not measured"],
     ];
     if (measured > 0) rows.push(["Height", `${metres(measured)} (LiDAR, 2021)`]);
-    rows.push(
-      ["Planted", y ? (y >= INVENTORY[0] && y <= INVENTORY[1] ? `by ${y} (first inventory)` : String(y)) : "no date"],
-      ["Cared for by", OWNER_LABEL[treeOwner(trees, i)]],
-    );
+    // Parks' inventory keeps no planting dates.
+    if (!inPark) {
+      rows.push(["Planted", y ? (y >= INVENTORY[0] && y <= INVENTORY[1] ? `by ${y} (first inventory)` : String(y)) : "no date"]);
+    }
+    rows.push(["Cared for by", OWNER_LABEL[treeOwner(trees, i)]]);
     const notes: string[] = [];
     if ((flags & 12) !== 0) notes.push(flags & 4 ? "Heritage tree" : "Exceptional tree");
-    notes.push(count <= 1 ? "The only one on Seattle's streets." : `One of ${fmt(count)} on Seattle's streets.`);
-    return { title: sp.common, rows, notes, italicSpecies: true, boldFirstNote: (flags & 12) !== 0 };
+    if (inPark) notes.push("From Seattle Parks' own inventory of the trees in its parks.");
+    notes.push(count <= 1 ? "The only one the city has inventoried." : `One of ${fmt(count)} the city has inventoried.`);
+    return {
+      kind: inPark ? "Park tree" : "Street tree",
+      title: sp.common,
+      rows,
+      notes,
+      italicSpecies: true,
+      boldFirstNote: (flags & 12) !== 0,
+    };
   };
 
   const describe = (i: number) => {
     const card = cardFor(i);
     if (!card) return "";
     const get = (k: string) => card.rows.find(([key]) => key === k)?.[1];
-    const parts = [card.title, get("Address"), get("Height"), get("Trunk"), get("Removed") ? `removed ${get("Removed")}` : null];
-    return parts.filter((p) => p && p !== "…" && p !== "not measured").join(" · ");
+    const parts = [
+      card.title,
+      get("Address") ?? get("Park"),
+      get("Height"),
+      get("Trunk"),
+      get("Removed") ? `removed ${get("Removed")}` : null,
+    ];
+    return parts.filter((p) => p && p !== "…" && p !== "not measured" && p !== "not recorded").join(" · ");
   };
 
   const selectedCard = selected !== null ? cardFor(selected) : null;
+  // Counting a park's trees means testing every tree in its box: once, when it's picked.
+  const selectedPlaceCard = useMemo(() => {
+    if (!selectedPlace || !trees || !prepared) return null;
+    return placeCard(selectedPlace, treesInside(selectedPlace, prepared.mx, prepared.my, trees.count));
+  }, [selectedPlace, trees, prepared]);
 
   let status: string;
   if (error) status = "No tree data";
   else if (!trees) status = "Loading Seattle's street trees…";
   else if (tilt && wantTerrain) status = "Loading the ground…";
   else if (hover !== null) status = describe(hover);
+  else if (hoverPlace) status = describePlace(hoverPlace);
   else if (tilt && terrainError) status = "No elevation data here, so the ground is flat";
+  else if (light) {
+    const up = light.altitude > 0;
+    status =
+      `${clockLabel(minutes)} · the sun ${up ? `${Math.round(light.altitude)}° up in the` : "down, below the"} ` +
+      `${compass(light.azimuth)}` +
+      (daylight ? ` · sunrise ${clockLabel(daylight.rise)}, sunset ${clockLabel(daylight.set)}` : "");
+  }
   else if (canopy && crowns && mode !== "planted")
-    status = `${fmt(trees.count)} street trees and ${fmt(crowns.count)} more from the city's 2021 LiDAR survey`;
+    status = `${fmt(trees.count)} street and park trees and ${fmt(crowns.count)} more from the city's 2021 LiDAR survey`;
   else if (mode === "planted" && removed)
-    status = `${fmt(trees.count)} street trees standing, ${fmt(removed.count)} more the city has taken down`;
+    status = `${fmt(trees.count - trees.parkCount)} street trees standing, ${fmt(removed.count)} more the city has taken down`;
+  else if (trees.parkCount)
+    status = `${fmt(trees.count - trees.parkCount)} street trees and ${fmt(trees.parkCount)} in parks · fetched ${new Date(
+      trees.fetched,
+    ).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
   else
     status = `${fmt(trees.count)} street trees · ${trees.source} · fetched ${new Date(trees.fetched).toLocaleDateString(
       "en-US",
@@ -1516,7 +1807,10 @@ export default function TreesWindow({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onPointerLeave={() => setHover(null)}
+          onPointerLeave={() => {
+            setHover(null);
+            setHoverPlace(null);
+          }}
           onDoubleClick={onDoubleClick}
           style={{
             position: "absolute",
@@ -1524,7 +1818,7 @@ export default function TreesWindow({
             width: "100%",
             height: "100%",
             touchAction: "none",
-            cursor: hover !== null ? "pointer" : "grab",
+            cursor: hover !== null || hoverPlace !== null ? "pointer" : "grab",
           }}
         />
         {error ? (
@@ -1551,6 +1845,7 @@ export default function TreesWindow({
           <LoadingPanel label="Loading the city's other 850,000 trees" progress={crownsProgress} corner />
         ) : null}
         {selectedCard && <TreeCard card={selectedCard} onClose={() => setSelected(null)} />}
+        {!selectedCard && selectedPlaceCard && <TreeCard card={selectedPlaceCard} onClose={() => setSelectedPlace(null)} />}
 
       </div>
 
@@ -1591,7 +1886,15 @@ export default function TreesWindow({
               }
             />
             <span style={{ minWidth: 52, flex: "none", whiteSpace: "nowrap", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{dayLabel(Math.floor(day))}</span>
-            <Button size="sm" onClick={() => { setPlaying(false); setDay(todayDoy()); }} title="Back to today">
+            <Button
+              size="sm"
+              onClick={() => {
+                setPlaying(false);
+                setDay(todayDoy());
+                onNow();
+              }}
+              title={sun && tilt ? "Back to today, and the sun to now" : "Back to today"}
+            >
               Today
             </Button>
           </div>
@@ -1894,6 +2197,91 @@ function YearHistogram({
   );
 }
 
+/** The scientific name, or the genus, or — for a record with neither — saying so. */
+function speciesLabel(sp: { scientific: string; genus: string }): string {
+  const ok = (s: string) => s !== "" && !/^unknown$|error/i.test(s);
+  return ok(sp.scientific) ? sp.scientific : ok(sp.genus) ? `${sp.genus} (species not recorded)` : "not recorded";
+}
+
+/** Eight points of the compass, for a bearing in degrees. */
+function compass(deg: number): string {
+  return ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(deg / 45) % 8];
+}
+
+const acresLabel = (acres: number | undefined) =>
+  acres === undefined ? null : `${acres < 10 ? acres.toFixed(1) : fmt(Math.round(acres))} acres`;
+
+/** A park, restoration zone, garden or creek, in a line for the status bar. */
+function describePlace(p: Place): string {
+  switch (p.kind) {
+    case "park":
+      return [p.name ?? "Park", acresLabel(p.acres)].filter(Boolean).join(" · ");
+    case "restoration":
+      return [
+        p.zone ?? "Restoration zone",
+        p.name ? `forest restoration in ${p.name}` : "forest restoration",
+        p.phase !== undefined ? RESTORATION_PHASES[p.phase]?.toLowerCase() : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    case "garden":
+      return [`${p.name ?? "Community"} P-Patch`, p.address, p.plots ? `${p.plots} plots` : null].filter(Boolean).join(" · ");
+    default:
+      return `${p.name ?? "Unnamed creek"}${p.piped ? " · piped here" : ""}`;
+  }
+}
+
+/** The card for a picked place; `trees` is how many of the city's trees stand in it. */
+function placeCard(p: Place, trees: number): CardInfo {
+  const rows: [string, string][] = [];
+  const add = (k: string, v: string | number | null | undefined) => {
+    if (v !== null && v !== undefined && v !== "") rows.push([k, String(v)]);
+  };
+  switch (p.kind) {
+    case "park":
+      add("Area", acresLabel(p.acres));
+      add("Trees", `${fmt(trees)} inventoried`);
+      return {
+        kind: "Park",
+        title: p.name ?? "Park",
+        rows,
+        notes: ["A Seattle Parks and Recreation park. Trees counts the street and park inventories; Canopy shows the rest, measured from the air."],
+      };
+    case "restoration":
+      add("Park", p.name);
+      add("Phase", p.phase !== undefined ? `${p.phase} · ${RESTORATION_PHASES[p.phase] ?? ""}` : null);
+      add("Last checked", p.visited);
+      add("Area", acresLabel(p.acres));
+      return {
+        kind: "Restoration zone",
+        title: p.zone ?? "Restoration zone",
+        rows,
+        notes: [
+          "A Green Seattle Partnership forest-restoration zone: invasive ivy and blackberry cleared, native trees and shrubs planted, then tended until the forest can look after itself.",
+        ],
+      };
+    case "garden":
+      add("Address", p.address);
+      add("Plots", p.plots);
+      add("Since", p.since);
+      add("Size", p.sqft ? `${fmt(p.sqft)} sq ft` : null);
+      return {
+        kind: "P-Patch",
+        title: `${p.name ?? "Community"} P-Patch`,
+        rows,
+        notes: ["A community garden in the city's P-Patch program."],
+      };
+    default:
+      add("Here", p.piped ? "through a pipe" : "open to the sky");
+      return {
+        kind: "Creek",
+        title: p.name ?? "Unnamed creek",
+        rows,
+        notes: ["From Seattle Public Utilities' map of the city's creeks. Piped stretches are drawn dashed."],
+      };
+  }
+}
+
 const OWNER_LABEL = {
   private: "The property owner next to it",
   sdot: "Seattle Department of Transportation",
@@ -1902,6 +2290,9 @@ const OWNER_LABEL = {
 } as const;
 
 type CardInfo = {
+  /** What it is, in the title bar: short enough never to be cut off. */
+  kind: string;
+  /** Its name, in the window, where a long one has room to wrap. */
   title: string;
   rows: [string, string][];
   notes: string[];
@@ -1918,12 +2309,13 @@ function TreeCard({ card, onClose }: { card: CardInfo; onClose: () => void }) {
       onPointerDown={(e) => e.stopPropagation()}
     >
       <WindowHeader style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.title}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.kind}</span>
         <Button size="sm" square onClick={onClose} aria-label="Close">
           <span className="close-icon" />
         </Button>
       </WindowHeader>
       <WindowContent style={{ padding: 8, fontSize: 12 }}>
+        <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: 6, overflowWrap: "anywhere" }}>{card.title}</div>
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 8px" }}>
           {card.rows.map(([k, v]) => (
             <React.Fragment key={k}>

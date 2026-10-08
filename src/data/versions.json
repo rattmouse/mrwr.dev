@@ -3,11 +3,11 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.3",
+      "version": "7.0.4",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-07",
-      "summary": "Seattle street tree map; season, planting and species views; tilted diorama; LiDAR canopy",
+      "summary": "Seattle street and park tree map; season, planting and species views; tilted diorama; LiDAR canopy; parks and creeks; sunlight",
       "issues": [],
       "changes": [
         "Added: trees.exe, in Tools > Map. Every Seattle street tree, from City of Seattle SDOT data",
@@ -19,7 +19,19 @@
         "Added: Canopy toggle (trees.exe). 850k park and yard trees from the 2021 LiDAR survey",
         "Added: removed street trees on the Planted timeline (trees.exe). Red in their removal year",
         "Fixed: street tree data blocked on the live site (trees.exe). Served as a 404",
-        "Changed: bots command excludes the owner's own traffic (bash.exe). Ignore list kept on the server"
+        "Changed: bots command excludes the owner's own traffic (bash.exe). Ignore list kept on the server",
+        "Added: Seattle Parks tree inventory (trees.exe). 21,779 park trees with species and size",
+        "Added: Parks layer (trees.exe). Park boundaries, forest restoration zones, P-Patch gardens",
+        "Added: Water layer (trees.exe). SPU creeks, piped stretches dashed",
+        "Added: Street layer (trees.exe). Street trees can be hidden",
+        "Changed: view buttons moved into View menu (trees.exe). Trees, Map and Layer submenus",
+        "Changed: Species and Planted views renamed Type and Age (trees.exe)",
+        "Changed: turn buttons replaced by facing slider (trees.exe). Any angle; Q and E step 15°",
+        "Changed: Fit renamed Reset (trees.exe). Also returns tilt, facing, sun time, day and year",
+        "Added: park, garden and creek details on click (trees.exe). Area, phase, plots, tree count",
+        "Added: Sun light in Tilt (trees.exe). Real sun position by hour, hill and tree shadows, night",
+        "Changed: season timing tuned to USA-NPN observations (trees.exe). Leaf-out, color, leaf drop",
+        "Fixed: Ship Canal water in Tilt (trees.exe). Lake Union joined to the Sound and Lake Washington"
       ]
     },
     {

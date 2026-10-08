@@ -5,9 +5,17 @@
  * hand-made almanac — rough Seattle dates for the genera that line its
  * streets, with the commoner species and cultivars that differ called out on
  * their own. Good to a week or two, which is all a map of 215k dots needs.
+ *
+ * The almanac's dates are then pulled toward what volunteers for the USA
+ * National Phenology Network have actually recorded around Puget Sound
+ * (src/data/phenology-npn.json, from scripts/content/tune-phenology.mjs), by
+ * as much as the number of plant-years behind each observation earns: leaf
+ * dates by genus, and everything, flowering included, for a species the
+ * network has watched itself.
  */
 
 import type { TreeSpecies } from "@/lib/trees";
+import npnRaw from "@/data/phenology-npn.json";
 
 export type RGB = [number, number, number];
 
@@ -294,14 +302,62 @@ function genusGreen(genus: string): RGB {
   return [Math.round(56 + t * 34), Math.round(122 + t * 30), Math.round(44 + (1 - t) * 22)];
 }
 
+/** A day the network saw, 0-based, and how many plant-years it's the median of. */
+type Seen = [number, number];
+type NpnDates = { leafOut?: Seen; turn?: Seen; drop?: Seen; bloomStart?: Seen; bloomEnd?: Seen };
+const NPN = npnRaw as unknown as { genus: Record<string, NpnDates>; species: Record<string, NpnDates> };
+
+/** Plant-years at which an observation and the almanac's guess count the same. */
+const PULL = 10;
+
+function tuned(hand: number, seen: Seen | undefined): number {
+  if (!seen) return hand;
+  const [day, n] = seen;
+  return Math.round(hand + (day - hand) * (n / (n + PULL)));
+}
+
+/** The leaf dates, pulled toward the network's; autumn kept in order however far they move. */
+function tuneLeaves(p: Phenology, seen: NpnDates | undefined): Phenology {
+  if (!seen || p.evergreen) return p;
+  const leafOut = tuned(p.leafOut ?? D.leafOut, seen.leafOut);
+  const turn = tuned(p.turn ?? D.turn, seen.turn);
+  const drop = Math.max(turn + 10, tuned(p.drop ?? D.drop, seen.drop));
+  return { ...p, leafOut, turn, drop };
+}
+
+function tuneBloom(p: Phenology, seen: NpnDates | undefined): Phenology {
+  const b = p.bloom;
+  if (!b || !seen?.bloomStart || !seen.bloomEnd) return p;
+  const start = tuned(b.start, seen.bloomStart);
+  const end = Math.max(start + 7, tuned(b.end, seen.bloomEnd));
+  // The peak keeps its place between them.
+  const peak = Math.round(start + ((b.peak - b.start) / Math.max(1, b.end - b.start)) * (end - start));
+  return { ...p, bloom: { ...b, start, peak, end } };
+}
+
+/** "Acer circinatum 'Monroe'" → "acer circinatum": the species the network would have watched. */
+function speciesKey(scientific: string): string {
+  return scientific
+    .toLowerCase()
+    .replace(/'[^']*'?/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" ");
+}
+
 export function phenology(sp: TreeSpecies): Phenology {
   const genus = sp.genus.replace(/^x\s*|^×\s*/i, "");
-  const base: Phenology = { ...D, leaf: genusGreen(genus), ...(GENUS[genus] ?? {}) };
+  let p: Phenology = tuneLeaves({ ...D, leaf: genusGreen(genus), ...(GENUS[genus] ?? {}) }, NPN.genus[genus]);
   const key = `${sp.scientific} | ${sp.common}`;
   for (const [match, patch] of SPECIES) {
-    if (match.test(key)) return { ...base, ...patch };
+    if (match.test(key)) {
+      p = { ...p, ...patch };
+      break;
+    }
   }
-  return base;
+  const seen = NPN.species[speciesKey(sp.scientific)];
+  return tuneBloom(tuneLeaves(p, seen), seen);
 }
 
 function mix(a: RGB, b: RGB, t: number): RGB {

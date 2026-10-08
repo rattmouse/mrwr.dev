@@ -1,6 +1,6 @@
 {
   "name": "mrwr.dev",
-  "version": "7.0.3",
+  "version": "7.0.4",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-react95.mjs",
@@ -12,6 +12,7 @@
     "version:bump": "node scripts/version.mjs bump",
     "version:check": "node scripts/version.mjs check",
     "guys:sprites": "node scripts/content/make-guys-sprites.mjs",
+    "trees:phenology": "node scripts/content/tune-phenology.mjs",
     "changelog:json": "node tools/generate-changelog.mjs --json --output src/data/changelogs.json",
     "container:image": "bash containers/ci.sh image",
     "container:dev": "bash containers/ci.sh dev",
