@@ -641,7 +641,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
         >
           {phase === "ready" && (
             <Window style={{ width: "min(300px, 92%)", pointerEvents: "auto" }}>
-              <WindowHeader>tasks.exe</WindowHeader>
+              <WindowHeader active={active}>tasks.exe</WindowHeader>
               <WindowContent>
                 <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px" }}>
                   It&rsquo;s 9 AM and everyone wants something. 
@@ -669,7 +669,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
 
           {phase === "levelup" && (
             <Window style={{ width: "min(340px, 92%)", pointerEvents: "auto" }}>
-              <WindowHeader>Level {runRef.current.level}</WindowHeader>
+              <WindowHeader active={active}>Level {runRef.current.level}</WindowHeader>
               <WindowContent>
                 <p style={{ fontSize: 12, margin: "0 0 10px" }}>Pick one:</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -706,7 +706,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
 
           {phase === "paused" && (
             <Window style={{ width: "min(400px, 94%)", maxHeight: "94%", pointerEvents: "auto", display: "flex", flexDirection: "column" }}>
-              <WindowHeader style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <WindowHeader active={active} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span>🚬 Break</span>
                 <Button onClick={resume} square size="sm" aria-label="Close">
                   <span className="close-icon" />
@@ -720,7 +720,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
 
           {phase === "gameover" && (
             <Window style={{ width: "min(400px, 94%)", maxHeight: "94%", pointerEvents: "auto", display: "flex", flexDirection: "column" }}>
-              <WindowHeader>Burned out</WindowHeader>
+              <WindowHeader active={active}>Burned out</WindowHeader>
               <WindowContent style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
                 <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px", flex: "0 0 auto" }}>
                   Burnt out with hours still to go. Here&rsquo;s how far you got.
@@ -740,7 +740,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
 
           {phase === "victory" && (
             <Window style={{ width: "min(400px, 94%)", maxHeight: "94%", pointerEvents: "auto", display: "flex", flexDirection: "column" }}>
-              <WindowHeader>Clocked out</WindowHeader>
+              <WindowHeader active={active}>Clocked out</WindowHeader>
               <WindowContent style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
                 <p style={{ fontSize: 12, lineHeight: 1.4, margin: "0 0 10px", flex: "0 0 auto" }}>
                   5 o&rsquo;clock, and you&rsquo;re still standing. Here&rsquo;s how the day went &mdash; then go home.

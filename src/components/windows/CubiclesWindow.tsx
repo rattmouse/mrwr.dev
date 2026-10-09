@@ -96,6 +96,13 @@ const nestedStore = {
   onServer: () => false,
 };
 
+/** Whether the last day was worked on Medium or Hard, for the welcome note. */
+const elevatedStore = {
+  subscribe: () => () => {},
+  get: hallDoorsOpen,
+  onServer: () => false,
+};
+
 /**
  * eyes.exe's broken graphics card. The whole view — room, monitor and all —
  * is dragged round the colour wheel at four times the saturation, and the room
@@ -201,6 +208,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
   /** The browser sitting on the monitor, laid over the glass. */
   const screenRef = useRef<HTMLDivElement | null>(null);
   const nested = useSyncExternalStore(nestedStore.subscribe, nestedStore.get, nestedStore.onServer);
+  const elevated = useSyncExternalStore(elevatedStore.subscribe, elevatedStore.get, elevatedStore.onServer);
 
   const [phase, setPhase] = useState<Phase>("intro");
   const [stick, setStick] = useState({ x: 0, y: 0 });
@@ -818,7 +826,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
           }}
         >
           <Window style={{ width: "min(320px, 92%)" }}>
-            <WindowHeader>Welcome!</WindowHeader>
+            <WindowHeader active={active}>Welcome!</WindowHeader>
             <WindowContent>
               <p style={{ fontSize: 12, lineHeight: 1.45, margin: "0 0 10px" }}>
                 This is your new office.
@@ -828,6 +836,12 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
                 - Drag to look around.
                 <br />
                 {nested ? "- How deep does the rabbit hole go?" : "- IT has set up your computer."}
+                {elevated && (
+                  <>
+                    <br />
+                    - You have elevated privileges.
+                  </>
+                )}
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <Button onClick={start}>Start the day</Button>
