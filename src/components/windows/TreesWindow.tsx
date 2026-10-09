@@ -434,6 +434,29 @@ function removedColor(rp: RemovedPrepared, r: number, year: number, agePalette: 
   return 0;
 }
 
+/**
+ * What the right-click menu needs from the window: the timeline — what's
+ * playing, where it's got to, the means to move it — and Type's legend.
+ */
+export type TreesMenuState = {
+  playing: boolean;
+  /** Type has no timeline, and nothing plays before the trees have loaded. */
+  canPlay: boolean;
+  toggle: () => void;
+  /** Season's day of the year, 0–364. */
+  day: number;
+  setDay: (day: number) => void;
+  /** Age's year. */
+  year: number;
+  yearMin: number;
+  yearMax: number;
+  setYear: (year: number) => void;
+  /** Type's kinds of tree and their colors, and the one picked out alone, if any. */
+  groups: { label: string; color: string }[];
+  group: number | null;
+  setGroup: (group: number | null) => void;
+};
+
 export type TreesWindowProps = {
   mode: TreesMode;
   /** The diorama: the city seen from a locked angle, standing on its hills. */
@@ -467,6 +490,10 @@ export type TreesWindowProps = {
   onNow: () => void;
   /** The control panel, under the map and the view's own controls, over the status line. */
   controls?: React.ReactNode;
+  /** A right-click on the map, at that point on the screen: the control panel's settings, as a menu. */
+  onMenu?: (x: number, y: number) => void;
+  /** The menu itself, drawn here so it follows the timeline as it plays. */
+  menu?: (state: TreesMenuState) => React.ReactNode;
   /** The coloring's knob, to the left of the view's own controls: the day or year slider, or the Type legend. */
   modeKnob?: React.ReactNode;
 };
@@ -489,6 +516,8 @@ export default function TreesWindow({
   minutes,
   onNow,
   controls,
+  onMenu,
+  menu,
   modeKnob,
 }: TreesWindowProps) {
   const [trees, setTrees] = useState<Trees | null>(null);
@@ -2248,8 +2277,32 @@ export default function TreesWindow({
 
   const yearMax = prepared?.yearMax ?? new Date().getFullYear();
 
+  // Picking a day or a year from the menu stops playback, as the sliders do.
+  const menuState: TreesMenuState = {
+    playing,
+    canPlay: !!prepared && mode !== "species",
+    toggle: togglePlay,
+    day: Math.floor(day),
+    setDay: (d) => {
+      setPlaying(false);
+      setDay(d);
+    },
+    year,
+    yearMin: YEAR_MIN,
+    yearMax,
+    setYear: (y) => {
+      setPlaying(false);
+      setYear(y);
+    },
+    groups: prepared?.groups ?? [],
+    group,
+    setGroup,
+  };
+
   return (
     <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+      {/* Portalled to the top of the page; only here to see the timeline. */}
+      {menu?.(menuState)}
       <div
         ref={wrapRef}
         style={{ ...SUNK, flex: "1 1 auto", minHeight: 80, position: "relative", overflow: "hidden", background: "rgb(14,20,16)" }}
@@ -2265,6 +2318,10 @@ export default function TreesWindow({
             setHoverPlace(null);
           }}
           onDoubleClick={onDoubleClick}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onMenu?.(e.clientX, e.clientY);
+          }}
           style={{
             position: "absolute",
             inset: 0,

@@ -4,14 +4,16 @@ import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
 import { Dial, Selector } from "@/components/common/Dial";
-import { Glyph } from "@/components/common/MediaGlyphs";
-import TreesWindow, { TreesMode } from "@/components/windows/TreesWindow";
+import { Glyph, PAUSE_PATH, PLAY_PATH } from "@/components/common/MediaGlyphs";
+import TreesWindow, { TreesMode, TreesMenuState } from "@/components/windows/TreesWindow";
+import TreesRingMenu, { CHAR_WIDTH, RingNode } from "@/components/windows/TreesRingMenu";
 import { ProgramProps, windowFrame } from "@/components/programs/programFrame";
-import { Heading, headingName, PITCH_DEFAULT, PITCH_MAX, PITCH_MIN } from "@/lib/treesTilt";
+import { Heading, HEADING_NAMES, headingName, PITCH_DEFAULT, PITCH_MAX, PITCH_MIN } from "@/lib/treesTilt";
 import { clockLabel, seattleMinutesNow } from "@/lib/sun";
+import { dayLabel, doy } from "@/lib/treeSeasons";
 
 /** The Open dial: how the trees are colored, each marked by its own coloring of the tree icon. */
-const MODES: { id: TreesMode; label: string; title: string; mark: React.ReactNode }[] = (
+const MODES: { id: TreesMode; label: string; title: string; icon: string; mark: React.ReactNode }[] = (
   [
     ["season", "Season", "Every tree as it looks on a day of the year", "../w95_tree_season.ico"],
     ["species", "Type", "The commonest kinds of tree, by color", "../w95_tree_type.ico"],
@@ -21,6 +23,7 @@ const MODES: { id: TreesMode; label: string; title: string; mark: React.ReactNod
   id,
   label,
   title: `${label}: ${title}`,
+  icon,
   mark: <img src={icon} alt="" width={16} height={16} style={{ display: "block", imageRendering: "pixelated" }} />,
 }));
 
@@ -43,7 +46,7 @@ const rects = (list: [number, number, number, number][]) => list.map(([x, y, w, 
 
 /**
  * The layer buttons' icons, for when the panel is too narrow for their
- * names: a street tree by the curb, a clump of canopy, a park bench, water,
+ * names, and on the right-click menu's Layers ring: a street tree by the curb, a clump of canopy, a park bench, water,
  * and a pit under the pavement.
  */
 const LAYER_ICONS: Record<string, string> = {
@@ -74,6 +77,16 @@ const LAYER_GAP = 2;
 
 /** Degrees Q and E turn Tilt by. */
 const TURN_STEP = 15;
+
+/** The right-click menu's Day ring: each month's first day of the year. */
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTH_STARTS = MONTH_NAMES.map((_, k) => doy(k + 1, 1));
+
+/** A kind of tree's name, short enough for the Types ring: "Cherries & plums" is Cherries, "Everything else" Other. */
+const shortGroupLabel = (label: string) => (label === "Everything else" ? "Other" : label.split(" ")[0]);
+
+/** The Tilt ring's stops, degrees. */
+const PITCH_STOP = 15;
 
 /** Seattle's time now, to the sun slider's quarter hour. */
 const nowMinutes = () => Math.round(seattleMinutesNow() / 15) * 15;
@@ -163,6 +176,217 @@ export default function TreesProgram(props: ProgramProps) {
   const view = VIEWS.findIndex((v) => v.tilt === tilt && (!tilt || v.sun === sun));
   const overdrive = tilt && sun;
 
+  const reset = () => {
+    setPitch(PITCH_DEFAULT);
+    setHeading(0);
+    setMinutes(nowMinutes());
+    setFitSignal((n) => n + 1);
+  };
+  const pickView = (k: number) => {
+    setTilt(VIEWS[k].tilt);
+    setSun(VIEWS[k].sun);
+  };
+
+  // The right-click menu, as a cut through a trunk: Trees on the left — how
+  // they're colored, and the timeline — and Map on the right, everything else.
+  // On Map's ring, Rotate's ring is a compass with north at the top, Sun's a
+  // 24-hour clock face with 0 there, and Tilt's a protractor: each angle sits
+  // that many degrees up from the horizon at 3 o'clock, so Tilt goes top right.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const menuWedges = (pb: TreesMenuState): RingNode[] => {
+    // Season's months round a year with January at the top; Age's decades round the same way.
+    const decades = Array.from({ length: Math.floor(pb.yearMax / 10) - pb.yearMin / 10 + 1 }, (_, k) => pb.yearMin + k * 10);
+    const month = MONTH_STARTS.findLastIndex((d) => d <= pb.day);
+    const when: RingNode =
+      mode === "planted"
+        ? {
+            label: "Year",
+            value: String(pb.year),
+            title: "Jump to a decade",
+            disabled: !pb.canPlay,
+            ring: {
+              step: 360 / decades.length,
+              start: -90 - 180 / decades.length,
+              items: decades.map((d) => ({
+                label: `${d}s`,
+                title: `The trees standing in ${d}`,
+                role: "menuitemradio",
+                on: Math.floor(pb.year / 10) * 10 === d,
+                keepOpen: true,
+                onSelect: () => pb.setYear(d),
+              })),
+            },
+          }
+        : mode === "species"
+          ? {
+              label: "Types",
+              value: pb.group === null ? "All" : shortGroupLabel(pb.groups[pb.group]?.label ?? ""),
+              title: "Pick out one kind of tree",
+              disabled: !pb.groups.length,
+              ring: {
+                step: 360 / Math.max(1, pb.groups.length),
+                start: -90,
+                // Each kind gets room for its name and swatch.
+                weights: pb.groups.map((g) => shortGroupLabel(g.label).length * CHAR_WIDTH + 24),
+                items: pb.groups.map((g, k) => ({
+                  label: shortGroupLabel(g.label),
+                  title: pb.group === k ? "Show every tree again" : `Show only ${g.label.toLowerCase()}`,
+                  swatch: g.color,
+                  role: "menuitemcheckbox",
+                  on: pb.group === k,
+                  keepOpen: true,
+                  onSelect: () => pb.setGroup(pb.group === k ? null : k),
+                })),
+              },
+            }
+          : {
+              label: "Day",
+              value: dayLabel(pb.day),
+              title: "Jump to a month",
+              disabled: !pb.canPlay,
+              ring: {
+                step: 30,
+                start: -90 - 15,
+                items: MONTH_NAMES.map((name, k) => ({
+                  label: name,
+                  title: `${name} 1`,
+                  role: "menuitemradio",
+                  on: month === k,
+                  keepOpen: true,
+                  onSelect: () => pb.setDay(MONTH_STARTS[k]),
+                })),
+              },
+            };
+    return [
+      {
+        label: "Trees",
+        value: MODES.find((m) => m.id === mode)?.label,
+        ring: {
+          step: 36,
+          items: [
+            {
+              label: pb.playing ? "Pause" : "Play",
+              title: pb.canPlay ? (pb.playing ? "Pause" : mode === "planted" ? "Play the years" : "Play the year") : "Play: Season and Age only",
+              glyph: pb.playing ? PAUSE_PATH : PLAY_PATH,
+              role: "menuitemcheckbox",
+              on: pb.playing,
+              disabled: !pb.canPlay,
+              keepOpen: true,
+              onSelect: pb.toggle,
+            },
+            when,
+            ...MODES.map(
+              (m): RingNode => ({
+                label: m.label,
+                title: m.title,
+                image: m.icon,
+                role: "menuitemradio",
+                on: m.id === mode,
+                onSelect: () => setMode(m.id),
+              }),
+            ),
+          ],
+        },
+      },
+      {
+        label: "Map",
+        value: VIEWS[view < 0 ? 0 : view].label,
+        ring: {
+          step: 30,
+          start: -90,
+          items: [
+            {
+              label: "View",
+              value: VIEWS[view < 0 ? 0 : view].label,
+              ring: {
+                step: 30,
+                items: VIEWS.map((v, k) => ({
+                  label: v.label,
+                  title: v.title,
+                  hot: v.hot,
+                  role: "menuitemradio",
+                  on: k === view,
+                  onSelect: () => pickView(k),
+                })),
+              },
+            },
+            {
+              label: "Tilt",
+              value: `${pitch}°`,
+              disabled: !tilt,
+              title: tilt ? undefined : "Tilt: 2.5D only",
+              ring: {
+                // Steepest first: clockwise from near the top down to near 3 o'clock.
+                step: PITCH_STOP,
+                start: -PITCH_MAX - PITCH_STOP / 2,
+                items: Array.from({ length: (PITCH_MAX - PITCH_MIN) / PITCH_STOP + 1 }, (_, k) => PITCH_MAX - k * PITCH_STOP).map((p) => ({
+                  label: `${p}°`,
+                  title: `Look down from ${p}°`,
+                  role: "menuitemradio",
+                  on: Math.round(pitch / PITCH_STOP) * PITCH_STOP === p,
+                  onSelect: () => setPitch(p),
+                })),
+              },
+            },
+            {
+              label: "Rotate",
+              value: `${heading}°`,
+              disabled: !tilt,
+              title: tilt ? `Facing ${headingName(heading)}` : "Rotate: 2.5D only",
+              ring: {
+                step: 45,
+                start: -90 - 45 / 2,
+                items: HEADING_NAMES.map((name, k) => ({
+                  label: name,
+                  title: `Face ${name}, ${k * 45}°`,
+                  role: "menuitemradio",
+                  on: (Math.round(heading / 45) % 8 + 8) % 8 === k,
+                  onSelect: () => setHeading(k * 45),
+                })),
+              },
+            },
+            {
+              label: "Sun",
+              value: `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`,
+              disabled: !overdrive,
+              title: overdrive ? `${clockLabel(minutes)}, Seattle time` : "Sun: 2.5D+ only",
+              ring: {
+                step: 15,
+                start: -90 - 15 / 2,
+                items: Array.from({ length: 24 }, (_, h) => ({
+                  label: String(h),
+                  title: `${clockLabel(h * 60)}, Seattle time`,
+                  role: "menuitemradio",
+                  on: Math.floor(minutes / 60) === h,
+                  onSelect: () => setMinutes(h * 60),
+                })),
+              },
+            },
+            {
+              label: "Layers",
+              value: `${LAYERS.filter((l) => l.on).length}/${LAYERS.length}`,
+              ring: {
+                step: 30,
+                items: LAYERS.map((l) => ({
+                  label: l.label,
+                  title: `${l.label}: ${l.title}`,
+                  glyph: LAYER_ICONS[l.label],
+                  role: "menuitemcheckbox",
+                  on: l.on,
+                  disabled: l.disabled,
+                  keepOpen: true,
+                  onSelect: () => l.set((on) => !on),
+                })),
+              },
+            },
+            { label: "Reset", title: "Show the whole city, and put the dials back", onSelect: reset },
+          ],
+        },
+      },
+    ];
+  };
+
   // How the trees are colored: beside the view's own controls, the day or year
   // slider or the Type legend.
   const modeKnob = (
@@ -198,10 +422,7 @@ export default function TreesProgram(props: ProgramProps) {
         width={SELECTOR_WIDTH}
         options={VIEWS}
         index={view < 0 ? 0 : view}
-        onChange={(k) => {
-          setTilt(VIEWS[k].tilt);
-          setSun(VIEWS[k].sun);
-        }}
+        onChange={pickView}
       />
       {divider}
       <Dial
@@ -243,12 +464,7 @@ export default function TreesProgram(props: ProgramProps) {
         size="sm"
         style={BOLD}
         title="Show the whole city, and put the dials back: the angle, facing north, the sun to now, the day and year to today"
-        onClick={() => {
-          setPitch(PITCH_DEFAULT);
-          setHeading(0);
-          setMinutes(nowMinutes());
-          setFitSignal((n) => n + 1);
-        }}
+        onClick={reset}
       >
         Reset
       </Button>
@@ -304,6 +520,8 @@ export default function TreesProgram(props: ProgramProps) {
         street={street}
         canopy={canopy}
         onNow={() => setMinutes(nowMinutes())}
+        onMenu={(x, y) => setMenu({ x, y })}
+        menu={menu ? (pb) => <TreesRingMenu x={menu.x} y={menu.y} start={90} wedges={menuWedges(pb)} onDismiss={closeMenu} /> : undefined}
         controls={panel}
         modeKnob={modeKnob}
         parks={parks}

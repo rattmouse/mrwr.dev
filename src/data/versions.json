@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.12",
+      "version": "7.0.13",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
@@ -64,7 +64,8 @@
         "Added: control panel under the map (./trees). Show knob, rotate, tilt and sun knobs, Reset",
         "Changed: layer buttons moved from toolbar to control panel (./trees). Spaced evenly",
         "Changed: Age histogram drawn behind the year slider (./trees)",
-        "Changed: 2.5D+ marked red on the Show knob (./trees). The slow, sunlit view"
+        "Changed: 2.5D+ marked red on the Show knob (./trees). The slow, sunlit view",
+        "Added: right-click ring menu (./trees). Trees and Map rings for coloring, playback and panel settings"
       ]
     },
     {
