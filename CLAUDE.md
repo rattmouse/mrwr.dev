@@ -41,6 +41,11 @@ Orientation notes for working in this repo.
   (`$PROD_BASE/shared/search-history-hidden.json`, edited with
   `scripts/content/hide-search-history.sh`) and leaves those sessions out. The
   list lives on prod, not in the repo, so it applies whichever machine deploys.
+  `deploy.sh` then diffs the result against
+  `$PROD_BASE/shared/search-history-deployed.json` (what the live site was
+  built from, saved after each healthy deploy) and asks y/n before publishing
+  new sessions; "n", or no tty, ships only what's already live.
+  `--yes-search-history` skips the prompt.
 - `src/data/projects.json` + `public/projects/remote/` (GitHub descriptions and
   README images for the Projects window) are the same deal again: gitignored,
   build-time only, refreshed by `scripts/content/refresh-projects.sh` (also run

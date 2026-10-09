@@ -5,6 +5,7 @@
 #   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build] [--skip-issues]
 #                            [--skip-search-history] [--skip-projects]
 #                            [--skip-probes] [--skip-trees]
+#                            [--yes-search-history]
 #
 # Run this from whatever machine has the repo checked out and can reach prod
 # over ssh — that's your Kubuntu box, not a separate build VM. There's no
@@ -13,6 +14,10 @@
 #
 # One-time setup: cp deploy.config.example.sh deploy.config.sh and fill it
 # in (see that file's comments).
+#
+# Before building, it lists search-history sessions the live site doesn't show
+# yet and asks y/n whether to publish them; "n" ships only what's already live.
+# With no terminal to ask on it answers "n"; --yes-search-history answers "y".
 
 set -euo pipefail
 
@@ -28,6 +33,7 @@ SKIP_SEARCH_HISTORY=0
 SKIP_PROJECTS=0
 SKIP_PROBES=0
 SKIP_TREES=0
+YES_SEARCH_HISTORY=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
@@ -37,7 +43,8 @@ for arg in "$@"; do
     --skip-projects) SKIP_PROJECTS=1 ;;
     --skip-probes) SKIP_PROBES=1 ;;
     --skip-trees) SKIP_TREES=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes, --skip-trees)" ;;
+    --yes-search-history) YES_SEARCH_HISTORY=1 ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes, --skip-trees, --yes-search-history)" ;;
   esac
 done
 
@@ -61,6 +68,11 @@ if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
 fi
 
 RELEASE_ID=$(date -u +%Y%m%d%H%M%S)
+SEARCH_HISTORY="$REPO_ROOT/src/data/search-history.json"
+# What the live site's search history was built from — saved after every
+# healthy deploy, so "new" means new to the public site, whichever machine
+# deployed last.
+SEARCH_HISTORY_DEPLOYED="$PROD_BASE/shared/search-history-deployed.json"
 STAGE_DIR="$REPO_ROOT/.deploy/$RELEASE_ID"
 
 log "Preparing release $RELEASE_ID"
@@ -86,6 +98,48 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
       || warn "Search-history refresh failed; shipping src/data/search-history.json as-is."
   else
     warn "Skipping search-history refresh (--skip-search-history) — shipping src/data/search-history.json as-is."
+  fi
+
+  if [[ -f "$SEARCH_HISTORY" ]]; then
+    log "Checking for search history the live site doesn't show yet..."
+    SH_BASELINE=$(mktemp "${TMPDIR:-/tmp}/search-history-deployed.XXXXXX")
+    if ! ssh_prod "cat '$SEARCH_HISTORY_DEPLOYED' 2>/dev/null || true" > "$SH_BASELINE"; then
+      warn "Couldn't read $SEARCH_HISTORY_DEPLOYED from prod — treating every session as new."
+      : > "$SH_BASELINE"
+    elif [[ ! -s "$SH_BASELINE" ]]; then
+      warn "No record on prod of what the live site shows yet — treating every session as new."
+    fi
+    set +e
+    SH_DIFF=$(node "$REPO_ROOT/scripts/content/diff-search-history.mjs" --baseline "$SH_BASELINE" --current "$SEARCH_HISTORY")
+    SH_STATUS=$?
+    set -e
+    if [[ "$SH_STATUS" -eq 10 ]]; then
+      warn "This deploy would publish search history the live site doesn't show yet:"
+      printf '%s\n' "$SH_DIFF" >&2
+      if [[ "$YES_SEARCH_HISTORY" -eq 1 ]]; then
+        SH_ANSWER=y
+        log "Publishing them (--yes-search-history)."
+      elif [[ -t 0 ]]; then
+        SH_ANSWER=""
+        while [[ "$SH_ANSWER" != y && "$SH_ANSWER" != n ]]; do
+          read -r -p "Publish these searches? [y/n] " SH_ANSWER
+          SH_ANSWER=$(printf '%s' "$SH_ANSWER" | tr '[:upper:]' '[:lower:]' | cut -c1)
+        done
+      else
+        SH_ANSWER=n
+        warn "No terminal to ask on — leaving them out (pass --yes-search-history to publish)."
+      fi
+      if [[ "$SH_ANSWER" == n ]]; then
+        node "$REPO_ROOT/scripts/content/diff-search-history.mjs" --baseline "$SH_BASELINE" --current "$SEARCH_HISTORY" --drop-new
+        log "Held back for now; to keep one out for good: scripts/content/hide-search-history.sh add <id>"
+      fi
+    elif [[ "$SH_STATUS" -ne 0 ]]; then
+      rm -f "$SH_BASELINE"
+      fail "Search-history check failed (exit $SH_STATUS)."
+    else
+      log "No new search history."
+    fi
+    rm -f "$SH_BASELINE"
   fi
 
   if [[ "$SKIP_PROJECTS" -ne 1 ]]; then
@@ -243,6 +297,12 @@ rm -rf "$STAGE_DIR"
 
 if [[ "$REMOTE_STATUS" -eq 0 ]]; then
   log "Deploy $RELEASE_ID is live."
+  # Record what the live search history was built from, for the next deploy's
+  # "new search history" check. Only when this deploy actually built it.
+  if [[ "$SKIP_BUILD" -ne 1 && -f "$SEARCH_HISTORY" ]]; then
+    ssh_prod "cat > '$SEARCH_HISTORY_DEPLOYED'" < "$SEARCH_HISTORY" \
+      || warn "Couldn't save $SEARCH_HISTORY_DEPLOYED on prod; the next deploy will treat all search history as new."
+  fi
 else
   fail "Deploy $RELEASE_ID failed its health check and was rolled back. Check: ssh $PROD_HOST journalctl -u $SERVICE_NAME -n 100 --no-pager"
 fi

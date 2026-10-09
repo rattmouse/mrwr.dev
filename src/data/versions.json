@@ -3,12 +3,12 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.15",
+      "version": "7.0.16",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
       "summary": "Seattle street and park tree map; season, planting and species views; tilted diorama; LiDAR canopy; parks and creeks; sunlight",
-      "issues": [],
+      "issues": [180],
       "changes": [
         "Added: trees.exe, in Tools > Map. Every Seattle street tree, from City of Seattle SDOT data",
         "Added: Season view (trees.exe). Bloom, leaf and fall color by day of year, playable",
@@ -73,7 +73,8 @@
         "Added: drilled rain-garden drains and storm outfalls (./trees). Outfalls sized by pipe, sewage ones brown",
         "Added: Rats layer, sewer rats from SPU inspection video (./trees). Drawn at pipe depth, with pipe details",
         "Added: SPU vault and outfall depths (./trees). Vaults with a depth drawn as pits",
-        "Changed: popup title bars grey out when the window is inactive (tasks.exe, cubicles.exe)"
+        "Changed: popup title bars grey out when the window is inactive (tasks.exe, cubicles.exe)",
+        "Fixed: SPU rats credit link asking for sign-in (about.txt). Points to public dataset page"
       ]
     },
     {
