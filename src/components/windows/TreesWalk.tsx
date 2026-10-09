@@ -9,7 +9,8 @@ import { CONIFER_COLOR, CROWN_BROADLEAF, CROWN_CONIFER, hexRgb, plantedColor, sp
 import { clockLabel, lightFrom, seattleInstant, sunPosition } from "@/lib/sun";
 import type { TreesMode } from "@/components/windows/TreesWindow";
 import { loadTerrain, Terrain } from "@/lib/terrain";
-import { loadPlaces, Places } from "@/lib/places";
+import { describePlace, loadPlaces, Places } from "@/lib/places";
+import { loadPipes, pipePlace, Pipes } from "@/lib/pipes";
 import { groundZ, makeGround, treeForms } from "@/lib/treesTilt";
 import { walkerChannel, WalkerLayers, WalkerMap, WalkerMessage } from "@/lib/treesWalker";
 import TreesRingMenu, { RingNode } from "@/components/windows/TreesRingMenu";
@@ -22,6 +23,7 @@ import {
   WalkWorld,
   gridTrees,
   isWet,
+  RatFollower,
   renderWalk,
   walkFrame,
 } from "@/lib/treesWalk";
@@ -31,14 +33,17 @@ import {
  * Hard has opened them: you, out of the office and stood among Seattle's
  * trees, at one of DROP_INS, as they look today — and then through the year.
  * The same data trees.exe draws, every layer of it — street, park and campus
- * trees, the LiDAR canopy, parks, creeks, gardens, track and areaways on the
- * wireframe ground — from eye height (treesWalk.ts), walked about
+ * trees, the LiDAR canopy, parks, creeks, gardens, track, areaways and SPU's
+ * vaults, drains, outfalls and sewer rats on (and under) the wireframe ground
+ * — from eye height (treesWalk.ts), walked about
  * with the cubicle's own controls — WASD or the arrows or the stick, drag to
  * look. Esc, or the button, goes back in.
  *
  * Space jumps. Medium's day leaves you as you are: Earth's gravity, a jump
  * of half a metre, a sprint a person could keep up. `light` is Hard's:
  * gravity turned right down, a jump clean over the trees, and faster legs.
+ * E or Q dives: down into the ground, among the pipes, shafts and rats, and
+ * floated back up — easily, or fast and deep with Super.
  *
  * Wherever you are, trees.exe hears about it (treesWalker.ts) and draws you
  * on its map.
@@ -46,12 +51,39 @@ import {
  * Right-click brings up trees.exe's ring menu, with what applies out here:
  * the year's playback and its Day slider, and the layers, plus a way back in.
  * Once a Hard day has been worked (`full`), Type and Age's colorings — Age
- * with its own years to play through — and the Sun, which lights the walk by
- * its hour, come too.
+ * with its own years to play through — the Sun, which lights the walk by
+ * its hour, come too. Having clocked out on Hard (`light`), so does Super:
+ * Hard's light body, its high jump and fast dive, switched off and on.
  *
  * It owns the whole cubicle window while it's up, and loads its own copy of
  * the trees: trees.exe's is in the iframe on the desk, a frame away.
  */
+
+/** Pixels round the crosshair a small mark can be off it and still be what it's on. */
+const PLACE_GRACE = 4;
+
+/** The place (or pipe, from `ids`) drawn nearest the middle of the frame, within PLACE_GRACE and not behind a tree, or -1. */
+function placeNear(frame: WalkFrame, ids: Int32Array): number {
+  const cx = frame.W >> 1;
+  const cy = frame.H >> 1;
+  let best = -1;
+  let bestD = Infinity;
+  for (let dy = -PLACE_GRACE; dy <= PLACE_GRACE; dy++) {
+    const y = cy + dy;
+    if (y < 0 || y >= frame.H) continue;
+    for (let dx = -PLACE_GRACE; dx <= PLACE_GRACE; dx++) {
+      const x = cx + dx;
+      if (x < 0 || x >= frame.W) continue;
+      const q = y * frame.W + x;
+      const d = dx * dx + dy * dy;
+      if (ids[q] >= 0 && frame.id[q] < 0 && d < bestD) {
+        best = ids[q];
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
 
 const pack = (c: RGB) => ((255 << 24) | (Math.round(c[2]) << 16) | (Math.round(c[1]) << 8) | Math.round(c[0])) >>> 0;
 
@@ -86,6 +118,27 @@ const DROP_UP = 175;
 type Body = { gravity: number; jump: number; walk: number; run: number };
 const NORMAL: Body = { gravity: 9.81, jump: 3.1, walk: 4.5, run: 8 };
 const LIGHT: Body = { gravity: 2.4, jump: 16, walk: 6.5, run: 22 };
+
+/**
+ * Dive, on E or Q: down into the ground, as Space takes you up,
+ * and the ground buoys you back — slowing you, turning you, and bringing you
+ * up onto your feet again. As yourself, an easy dive: metres a second down,
+ * and the pull back up, some ten metres at the bottom. With Super, the same
+ * dive fast: as fast down as Super's jump goes up, and back at its light
+ * gravity, some fifty metres down. Never deeper than DIVE_DEEPEST.
+ */
+type Dive = { speed: number; buoyancy: number };
+const DIVE: Dive = { speed: 5, buoyancy: 1.2 };
+const SUPER_DIVE: Dive = { speed: LIGHT.jump, buoyancy: LIGHT.gravity };
+const DIVE_DEEPEST = 70;
+
+/**
+ * How near (metres, any way) you dive to a rat down in its pipe for it to
+ * leave the pipe and follow you, how far behind you they trail, and how many at most.
+ */
+const RAT_CATCH = 2.2;
+const RAT_GAP = 0.9;
+const RATS_FOLLOWING = 40;
 /** How often trees.exe is told where you are. */
 const TELL_MS = 100;
 /** The year goes round as trees.exe's Season view plays it: about thirty seconds a turn. */
@@ -185,14 +238,16 @@ function paintSeason(scene: Scene, day: number) {
   }
 }
 
-/** What's drawn, the right-click menu's Layers: trees.exe's five. */
+/** What's drawn, the right-click menu's Layers: trees.exe's seven. */
 type WalkLayers = WalkerLayers;
 const LAYER_NAMES: { key: keyof WalkLayers; label: string; title: string }[] = [
   { key: "street", label: "Street", title: "The city's street, park and campus trees" },
   { key: "canopy", label: "Canopy", title: "Every other tree, from the 2021 LiDAR survey" },
   { key: "parks", label: "Parks", title: "Parks, restoration zones and P-Patch gardens on the ground" },
   { key: "water", label: "Water", title: "Creeks" },
-  { key: "underground", label: "Underground", title: "The areaways and Link light rail" },
+  { key: "underground", label: "Underground", title: "The areaways, Link light rail, and SPU's vaults, drains and outfalls" },
+  { key: "pipes", label: "Pipes", title: "SPU's sewers and storm drains and King County's trunks, at their depths" },
+  { key: "rats", label: "Rats", title: "Rats SPU's sewer cameras have caught, down in their pipes" },
 ];
 
 /** How the trees are coloured, other than Season's: Type's legend and the kind picked out of it, or Age's year. */
@@ -295,7 +350,7 @@ export default function TreesWalk({
     worldRef.current = world;
   }, [world]);
 
-  // The parks, creeks, gardens, track and areaways: small, so they follow the trees straight in.
+  // The parks, creeks, gardens, track, areaways and drainage: small, so they follow the trees straight in.
   const placesRef = useRef<Places | null>(null);
   const widthM = world?.widthM ?? 0;
   const heightM = world?.heightM ?? 0;
@@ -341,10 +396,20 @@ export default function TreesWalk({
   const keysRef = useRef<Set<string>>(new Set());
   /** A jump asked for, taken the next frame you're on the ground. */
   const jumpRef = useRef(false);
+  /** A dive asked for (E or Q), taken the next frame you're on the ground. */
+  const diveRef = useRef(false);
+  /** Down in the ground right now, for the corner's words. */
+  const [under, setUnder] = useState(false);
+  /**
+   * Super: Hard's light body — the high jump, the low gravity, the fast dive
+   * — or your own. Only to be had having clocked out on Hard (`light`), and
+   * on to begin with then; the menu's Super switches it.
+   */
+  const [superOn, setSuperOn] = useState(light);
   const lightRef = useRef(light);
   useEffect(() => {
-    lightRef.current = light;
-  }, [light]);
+    lightRef.current = superOn;
+  }, [superOn]);
   const stickRef = useRef({ x: 0, y: 0 });
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const activeRef = useRef(active);
@@ -374,6 +439,11 @@ export default function TreesWalk({
       if (event.code === "Space") {
         event.preventDefault();
         jumpRef.current = true;
+        return;
+      }
+      if (event.code === "KeyE" || event.code === "KeyQ") {
+        event.preventDefault();
+        diveRef.current = true;
         return;
       }
       if (!MOVE_KEYS.has(event.code)) return;
@@ -434,11 +504,33 @@ export default function TreesWalk({
   useEffect(() => {
     playingRef.current = playing;
   }, [playing]);
-  const [layers, setLayers] = useState<WalkLayers>({ street: true, canopy: true, parks: true, water: true, underground: true });
+  const [layers, setLayers] = useState<WalkLayers>({
+    street: true,
+    canopy: true,
+    parks: true,
+    water: true,
+    underground: true,
+    rats: true,
+    pipes: false,
+  });
   const layersRef = useRef(layers);
   useEffect(() => {
     layersRef.current = layers;
   }, [layers]);
+  // The Pipes layer's pipes: a megabyte, so only once the layer's first switched on.
+  const pipesRef = useRef<Pipes | null>(null);
+  const wantPipes = layers.pipes && !!data && !!widthM;
+  useEffect(() => {
+    if (!wantPipes || pipesRef.current || !data) return;
+    const abort = new AbortController();
+    loadPipes(data.trees, widthM, heightM, abort.signal)
+      .then((loaded) => {
+        pipesRef.current = loaded;
+      })
+      .catch(() => {});
+    return () => abort.abort();
+  }, [wantPipes, data, widthM, heightM]);
+
   // Hard's extras: Type and Age's colorings — Age with its own year to play
   // through — and the Sun's hour, null while it's left as it was.
   const [look, setLook] = useState<Look>({ mode: "season", group: null, year: new Date().getFullYear() });
@@ -613,6 +705,15 @@ export default function TreesWalk({
     let rise = 0;
     /** Stood on the ground last frame, so a slope down is walked, not fallen off. */
     let grounded = true;
+    /** Down in the ground on a dive, from going under till coming back up through it. */
+    let diving = false;
+    /** Down in the ground last frame, for telling the corner when that changes. */
+    let wasUnder = false;
+    /** The rats dived to and caught, trailing after you; the rats out of the places, found once. */
+    const caught = new Set<number>();
+    const followers: (RatFollower & { base: number })[] = [];
+    let ratsOf: Places | null = null;
+    let rats: number[] = [];
     const channel = walkerChannel();
     const bbox = () => dataRef.current?.trees.bbox ?? null;
     let told = 0;
@@ -660,6 +761,7 @@ export default function TreesWalk({
         }
         moveTo = null;
         const body = lightRef.current ? LIGHT : NORMAL;
+        const dive = lightRef.current ? SUPER_DIVE : DIVE;
         cam.yaw += ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0)) * TURN * dt;
         const airborne = !grounded;
         let side = (held("KeyD") ? 1 : 0) - (held("KeyA") ? 1 : 0);
@@ -677,8 +779,8 @@ export default function TreesWalk({
           const dx = (Math.sin(cam.yaw) * sa + Math.cos(cam.yaw) * sx) * speed;
           const dy = (Math.cos(cam.yaw) * sa - Math.sin(cam.yaw) * sx) * speed;
           // Not off the edge of the table, and not into the Sound: slide along the shore instead.
-          // In the air, or already in it (come down there off a jump), the water doesn't stop you.
-          const free = airborne || isWet(w.ground, cam.x, cam.y);
+          // In the air, or already in it (come down there off a jump), the water doesn't stop you; nor does it under the ground.
+          const free = airborne || diving || isWet(w.ground, cam.x, cam.y);
           const ok = (x: number, y: number) =>
             x > 1 && y > 1 && x < w.widthM - 1 && y < w.heightM - 1 && (free || !isWet(w.ground, x, y));
           if (ok(cam.x + dx, cam.y + dy)) {
@@ -688,26 +790,93 @@ export default function TreesWalk({
           else if (ok(cam.x, cam.y + dy)) cam.y += dy;
           bob = airborne ? 0 : bob + dt * (held("ShiftLeft", "ShiftRight") ? 11 : 7.5);
         } else bob = 0;
-        const floor = groundAt(w, cam.x, cam.y) + EYE;
-        if (jumpRef.current && grounded) {
+        const ground = groundAt(w, cam.x, cam.y);
+        const floor = ground + EYE;
+        if (diveRef.current && grounded) {
+          rise = -dive.speed;
+          grounded = false;
+          diving = true;
+          cam.z = floor - 0.02;
+        } else if (jumpRef.current && grounded) {
           rise = body.jump;
           grounded = false;
         }
         jumpRef.current = false;
-        if (grounded && floor < cam.z) {
-          // Downhill: kept on your feet, unless it drops away faster than a cliff would let you walk it.
-          const fall = cam.z - floor;
-          if (fall <= Math.max(0.3, body.run * dt * 1.5)) cam.z = floor;
-          else grounded = false;
-        }
-        if (!grounded) {
-          rise -= body.gravity * dt;
+        diveRef.current = false;
+        // Down in the ground on a dive: buoyed back up, and stood on it again once
+        // through. (Only a dive: a step uphill leaves you under the new ground's
+        // height too, and that's just stepped up onto, below.)
+        if (diving) {
+          rise += dive.buoyancy * dt;
           cam.z += rise * dt;
+          if (cam.z < ground - DIVE_DEEPEST) {
+            cam.z = ground - DIVE_DEEPEST;
+            rise = Math.max(0, rise);
+          }
+          if (cam.z >= floor) {
+            cam.z = floor;
+            rise = 0;
+            grounded = true;
+            diving = false;
+          }
+        } else {
+          if (grounded && floor < cam.z) {
+            // Downhill: kept on your feet, unless it drops away faster than a cliff would let you walk it.
+            const fall = cam.z - floor;
+            if (fall <= Math.max(0.3, body.run * dt * 1.5)) cam.z = floor;
+            else grounded = false;
+          }
+          if (!grounded) {
+            rise -= body.gravity * dt;
+            cam.z += rise * dt;
+          }
+          if (cam.z <= floor) {
+            cam.z = floor;
+            rise = 0;
+            grounded = true;
+          }
         }
-        if (cam.z <= floor) {
-          cam.z = floor;
-          rise = 0;
-          grounded = true;
+        const isUnder = diving && cam.z < ground;
+        if (isUnder !== wasUnder) {
+          wasUnder = isUnder;
+          setUnder(isUnder);
+        }
+
+        // Down to a rat in its pipe, with Rats showing: it leaves the pipe and follows you.
+        const pl = placesRef.current;
+        if (pl !== ratsOf) {
+          ratsOf = pl;
+          rats = pl ? pl.list.flatMap((p, k) => (p.kind === "rat" ? [k] : [])) : [];
+        }
+        if (pl && layersRef.current.rats && followers.length < RATS_FOLLOWING) {
+          // You, about the middle of you.
+          const body = cam.z - EYE / 2;
+          for (const k of rats) {
+            if (caught.has(k)) continue;
+            const p = pl.list[k];
+            const z = groundAt(w, p.x[0], p.y[0]) - (p.deep ?? 6) * 0.3048;
+            if (Math.hypot(p.x[0] - cam.x, p.y[0] - cam.y, z - body) > RAT_CATCH) continue;
+            caught.add(k);
+            followers.push({ x: p.x[0], y: p.y[0], z, base: z, k });
+          }
+        }
+        // Each a little behind the one in front, the first a little behind
+        // you — the way you came, so turning round finds them there — bobbing up and down.
+        const follow = 1 - Math.exp(-5 * dt);
+        for (let k = 0; k < followers.length; k++) {
+          const rat = followers[k];
+          const lead = k === 0 ? { x: cam.x, y: cam.y, base: cam.z - EYE + 0.5 } : followers[k - 1];
+          const gap = k === 0 ? RAT_GAP * 2 : RAT_GAP;
+          const dx = lead.x - rat.x;
+          const dy = lead.y - rat.y;
+          const d = Math.hypot(dx, dy);
+          if (d > gap) {
+            const move = (d - gap) * follow;
+            rat.x += (dx / d) * move;
+            rat.y += (dy / d) * move;
+          }
+          rat.base += (lead.base - rat.base) * follow;
+          rat.z = rat.base + Math.sin(now / 350 + k * 1.7) * 0.12;
         }
         eye = { ...cam, z: cam.z + (bob ? Math.sin(bob) * 0.04 : 0) };
       }
@@ -761,7 +930,7 @@ export default function TreesWalk({
         });
       }
 
-      renderWalk(frame, eye, w, placesRef.current, layersRef.current);
+      renderWalk(frame, eye, w, placesRef.current, layersRef.current, pipesRef.current, followers, caught);
       // The Sun at its hour, over everything: worked out again only when the hour or the day moves.
       const hour = sunRef.current;
       if (hour !== null) {
@@ -782,9 +951,17 @@ export default function TreesWalk({
       }
       ctx.putImageData(image, 0, 0);
 
-      // Whatever tree the crosshair is on.
+      // Whatever tree the crosshair is on, or else the vault, drain, outfall or rat nearest it.
       const at = frame.id[(frame.H >> 1) * frame.W + (frame.W >> 1)];
-      const text = dropRef.current ? null : describeRef.current(at);
+      const place = at < 0 ? placeNear(frame, frame.place) : -1;
+      const pipe = at < 0 && place < 0 ? placeNear(frame, frame.pipe) : -1;
+      const text = dropRef.current
+        ? null
+        : place >= 0 && placesRef.current
+          ? describePlace(placesRef.current.list[place])
+          : pipe >= 0 && pipesRef.current
+            ? describePlace(pipePlace(pipesRef.current, pipe))
+            : describeRef.current(at);
       if (text !== shown) {
         shown = text;
         setPrompt(text);
@@ -914,6 +1091,20 @@ export default function TreesWalk({
                       })),
                     },
                   },
+                  {
+                    label: "Super",
+                    value: superOn ? "On" : "Off",
+                    disabled: !light,
+                    title: light
+                      ? superOn
+                        ? "Super: off — a person's jump, and an easy dive"
+                        : "Super: on — a jump over the trees, low gravity, and a fast dive"
+                      : "Super: clock out on Hard first",
+                    role: "menuitemcheckbox",
+                    on: superOn,
+                    keepOpen: true,
+                    onSelect: () => setSuperOn((on) => !on),
+                  },
                   { label: "Leave", title: "Back to the office (Esc)", onSelect: onLeave } satisfies RingNode,
                 ],
               },
@@ -1011,17 +1202,24 @@ export default function TreesWalk({
           >
             {today === null ? null : dayLabel(today)}
             <br />
-            {light ? "You feel very light" : "It smells like rain"}
+            {under ? "Down in the ground" : superOn ? "You feel very light" : "It smells like rain"}
             <br />
-            Space to jump, Shift to run
+            Space to jump, E or Q to dive, Shift to run
           </div>
-          {/* For a touch screen, with no Space bar. */}
+          {/* For a touch screen, with no Space bar, E or Q. */}
           <Button
             onPointerDown={() => (jumpRef.current = true)}
             size="sm"
             style={{ position: "absolute", right: 8, bottom: 40, fontSize: 11 }}
           >
             Jump (Space)
+          </Button>
+          <Button
+            onPointerDown={() => (diveRef.current = true)}
+            size="sm"
+            style={{ position: "absolute", right: 8, bottom: 72, fontSize: 11 }}
+          >
+            Dive (E)
           </Button>
           <Button onClick={onLeave} size="sm" style={{ position: "absolute", right: 8, bottom: 8, fontSize: 11 }}>
             Back to the office (Esc)

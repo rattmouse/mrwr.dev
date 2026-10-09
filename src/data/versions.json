@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.13",
+      "version": "7.0.14",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
@@ -68,7 +68,11 @@
         "Added: right-click ring menu (./trees). Trees and Map rings for coloring, playback and panel settings",
         "Added: arced day and year slider in the right-click menu (./trees). Drag to scrub the timeline",
         "Changed: clicking a picked tree or place again clears it (./trees)",
-        "Changed: tree card drags by its title bar and snaps to a map corner (./trees)"
+        "Changed: tree card drags by its title bar and snaps to a map corner (./trees)",
+        "Added: SPU drainage vaults and tanks to Underground (./trees). Footprints with owner and size",
+        "Added: drilled rain-garden drains and storm outfalls (./trees). Outfalls sized by pipe, sewage ones brown",
+        "Added: Rats layer, sewer rats from SPU inspection video (./trees). Drawn at pipe depth, with pipe details",
+        "Added: SPU vault and outfall depths (./trees). Vaults with a depth drawn as pits"
       ]
     },
     {

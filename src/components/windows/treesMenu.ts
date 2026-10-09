@@ -17,7 +17,8 @@ export const rects = (list: [number, number, number, number][]) =>
 /**
  * The layer buttons' icons, for when trees.exe's panel is too narrow for
  * their names, and on the menu's Layers ring: a street tree by the curb, a
- * clump of canopy, a park bench, water, and a pit under the pavement.
+ * clump of canopy, a park bench, water, a pit under the pavement, a warp
+ * pipe, and a rat.
  */
 export const LAYER_ICONS: Record<string, string> = {
   Street: "M4 1h4v1h1v1h1v3H9v1H3V6H2V3h1V2h1z" + rects([[5, 7, 2, 3], [0, 10, 12, 1]]),
@@ -34,6 +35,27 @@ export const LAYER_ICONS: Record<string, string> = {
     ]),
   ),
   Underground: rects([[0, 2, 12, 1], [2, 3, 1, 8], [9, 3, 1, 8], [3, 10, 6, 1], [4, 5, 1, 1], [7, 7, 1, 1], [5, 8, 1, 1]]),
+  // A warp pipe, as in the first Super Mario Bros.: the wide lip, the narrower
+  // pipe under it, and the shine down the left of both.
+  Pipes: rects([
+    [0, 1, 1, 4],
+    [2, 1, 10, 4],
+    [1, 6, 1, 6],
+    [3, 6, 8, 6],
+  ]),
+  // Side on, facing right: ear, back, body and snout, a tail curling off behind, feet.
+  Rats: rects([
+    [7, 3, 1, 1],
+    [4, 4, 6, 1],
+    [3, 5, 9, 1],
+    [2, 6, 8, 1],
+    [3, 7, 7, 1],
+    [1, 7, 1, 1],
+    [0, 6, 1, 1],
+    [0, 4, 1, 2],
+    [4, 8, 1, 1],
+    [8, 8, 1, 1],
+  ]),
 };
 
 /** How the trees are colored, each marked by its own coloring of the tree icon. */

@@ -28,7 +28,8 @@
 import type { Ground } from "@/lib/treesTilt";
 import { crownBall, groundZ, WATER } from "@/lib/treesTilt";
 import { OVERLAY_RESTORATION, overlayAt, Places } from "@/lib/places";
-import { drapeWalkPlaces, PlacesShown } from "@/lib/placesDraw";
+import { drapeWalkPlaces, PlacesShown, ratTurn, spinRat } from "@/lib/placesDraw";
+import type { Pipes } from "@/lib/pipes";
 
 /** Metres from the ground to the eye. */
 export const EYE = 1.7;
@@ -84,6 +85,84 @@ function fogged(c: number, k: number): number {
   const b = (c >>> 16) & 255;
   return pack(r + (HAZE[0] - r) * k, g + (HAZE[1] - g) * k, b + (HAZE[2] - b) * k);
 }
+
+/**
+ * Down in the ground (Dive): the dark of the earth everything fades into, a
+ * few dozen metres off; the surface overhead seen from under it, dim and
+ * gridded every CEILING_GRID metres; and how far off places are still drawn.
+ */
+const EARTH = [16, 12, 9] as const;
+const UNDER_FOG = 45;
+const CEILING = pack(58, 46, 34);
+const CEILING_LINE = pack(104, 86, 62);
+const CEILING_GRID = 8;
+const UNDER_REACH = 250;
+
+function earthed(c: number, d: number): number {
+  const k = 1 - Math.exp(-d / UNDER_FOG);
+  const r = c & 255;
+  const g = (c >>> 8) & 255;
+  const b = (c >>> 16) & 255;
+  return pack(r + (EARTH[0] - r) * k, g + (EARTH[1] - g) * k, b + (EARTH[2] - b) * k);
+}
+
+/**
+ * The ground as seen from under it: for each column, the surface overhead
+ * from the top of the screen down — the nearest stretch first, as from below
+ * it's the near ground that hides what's beyond — and the dark of the earth
+ * under that, as far off as anything down here is drawn: the pipes and pits
+ * draw over it, and no tree from further off shows through.
+ */
+function drawCeiling(frame: WalkFrame, cam: WalkCamera, w: WalkWorld, f: number, horizon: number) {
+  const { W, H, buf, depth } = frame;
+  const g = w.ground!;
+  const fx = Math.sin(cam.yaw);
+  const fy = Math.cos(cam.yaw);
+  const rx = Math.cos(cam.yaw);
+  const ry = -Math.sin(cam.yaw);
+  const dark = pack(EARTH[0], EARTH[1], EARTH[2]);
+  const zs = STEPS.z;
+  for (let x = 0; x < W; x++) {
+    const t = (x + 0.5 - W / 2) / f;
+    const dx = fx + rx * t;
+    const dy = fy + ry * t;
+    let yt = 0;
+    let lastCx = NaN;
+    let lastCy = NaN;
+    for (let k = 0; k < STEPS.n && yt < H; k++) {
+      const z = zs[k];
+      if (z > UNDER_REACH) break;
+      const wx = cam.x + dx * z;
+      const wy = cam.y + dy * z;
+      if (wx < 0 || wy < 0 || wx > w.widthM || wy > w.heightM) break;
+      const h = groundZ(g, wx, wy);
+      if (h <= cam.z) continue;
+      const ys = horizon - (h - cam.z) * (f / z);
+      const y1 = Math.min(H, Math.floor(ys));
+      const cx = Math.floor(wx / CEILING_GRID);
+      const cy = Math.floor(wy / CEILING_GRID);
+      const line = cx !== lastCx || cy !== lastCy;
+      lastCx = cx;
+      lastCy = cy;
+      if (y1 <= yt) continue;
+      const c = earthed(line && k > 0 ? CEILING_LINE : CEILING, z);
+      for (let y = Math.max(0, yt); y < y1; y++) {
+        const p = y * W + x;
+        buf[p] = c;
+        depth[p] = z;
+      }
+      yt = y1;
+    }
+    for (let y = Math.max(0, yt); y < H; y++) {
+      const p = y * W + x;
+      buf[p] = dark;
+      depth[p] = UNDER_REACH;
+    }
+  }
+}
+
+/** A rat caught down in its pipe and now following you: where it is, and which rat in the places (its index) it is. */
+export type RatFollower = { x: number; y: number; z: number; k: number };
 
 function shade(c: number, k: number): number {
   return pack(Math.min(255, (c & 255) * k), Math.min(255, ((c >>> 8) & 255) * k), Math.min(255, ((c >>> 16) & 255) * k));
@@ -213,10 +292,24 @@ export type WalkFrame = {
   treeDepth: Float32Array;
   /** Which tree each pixel shows, -1 for none: the crosshair reads it. */
   id: Int32Array;
+  /** Which vault, drain, outfall, structure or rat (its index in places.list) each pixel shows under the trees, -1 for none. */
+  place: Int32Array;
+  /** Which pipe (its index in pipes) each pixel shows, -1 for none. */
+  pipe: Int32Array;
 };
 
 export function walkFrame(W: number, H: number, buf: Uint32Array): WalkFrame {
-  return { W, H, buf, depth: new Float32Array(W * H), treeDepth: new Float32Array(W * H), id: new Int32Array(W * H) };
+  const n = W * H;
+  return {
+    W,
+    H,
+    buf,
+    depth: new Float32Array(n),
+    treeDepth: new Float32Array(n),
+    id: new Int32Array(n),
+    place: new Int32Array(n),
+    pipe: new Int32Array(n),
+  };
 }
 
 // --- drawing ----------------------------------------------------------------------
@@ -227,9 +320,14 @@ export function renderWalk(
   w: WalkWorld,
   /** The parks, creeks, gardens, track and areaways, once they're in, and which of them to show. */
   places: Places | null = null,
-  show: PlacesShown = { parks: true, water: true, underground: true },
+  show: PlacesShown = { parks: true, water: true, underground: true, rats: true, pipes: false },
+  /** The Pipes layer's pipes, once they're in. */
+  pipes: Pipes | null = null,
+  /** The rats dived down to and caught, trailing after you; `caught` holds their places' indexes, not drawn in their pipes. */
+  followers: RatFollower[] = [],
+  caught?: Set<number>,
 ) {
-  const { W, H, buf, depth, treeDepth, id } = frame;
+  const { W, H, buf, depth, treeDepth, id, place, pipe } = frame;
   const f = H / 2 / Math.tan(FOV / 2);
   const horizon = H / 2 + f * Math.tan(cam.pitch);
   const fx = Math.sin(cam.yaw);
@@ -296,7 +394,10 @@ export function renderWalk(
   // The rows each step's span crosses a line on, as fractions of the way from the step before.
   const runs = new Float32Array(RUNS * 2);
 
-  for (let x = 0; x < W; x++) {
+  // Down in the ground itself (Dive), the surface is overhead.
+  const below = !!g && cam.z < groundZ(g, cam.x, cam.y);
+  if (below) drawCeiling(frame, cam, w, f, horizon);
+  else for (let x = 0; x < W; x++) {
     const t = (x + 0.5 - W / 2) / f;
     const dx = fx + rx * t;
     const dy = fy + ry * t;
@@ -450,6 +551,15 @@ export function renderWalk(
     }
   }
 
+  const project = (mx: number, my: number, z: number) => {
+    const ox = mx - cam.x;
+    const oy = my - cam.y;
+    const d = ox * fx + oy * fy;
+    const s = f / d;
+    return { x: W / 2 + (ox * rx + oy * ry) * s, y: horizon - (z - cam.z) * s, d };
+  };
+  place.fill(-1);
+  pipe.fill(-1);
   if (places) {
     drapeWalkPlaces(
       buf,
@@ -461,25 +571,35 @@ export function renderWalk(
         f,
         cx: cam.x,
         cy: cam.y,
-        reach: PLACE_REACH,
-        project: (mx, my, z) => {
-          const ox = mx - cam.x;
-          const oy = my - cam.y;
-          const d = ox * fx + oy * fy;
-          const s = f / d;
-          return { x: W / 2 + (ox * rx + oy * ry) * s, y: horizon - (z - cam.z) * s, d };
-        },
-        tint: (c, d) => fogged(c, 1 - Math.exp(-d / FOG)),
+        reach: below ? UNDER_REACH : PLACE_REACH,
+        project,
+        tint: below ? earthed : (c, d) => fogged(c, 1 - Math.exp(-d / FOG)),
+        below,
       },
       g,
       places,
       show,
+      place,
+      pipes,
+      pipe,
+      caught,
     );
   }
 
   treeDepth.fill(Infinity);
   id.fill(-1);
   drawTrees(frame, cam, w, f, horizon);
+
+  // The rats following you, spinning as they did in their pipes; behind a tree, hidden.
+  const tint = below ? earthed : (c: number, d: number) => fogged(c, 1 - Math.exp(-d / FOG));
+  for (const rat of followers) {
+    const at = project(rat.x, rat.y, rat.z);
+    if (at.d < NEAR || at.d > 120) continue;
+    const qx = Math.round(at.x);
+    const qy = Math.round(at.y);
+    if (qx >= 0 && qy >= 0 && qx < W && qy < H && treeDepth[qy * W + qx] < at.d) continue;
+    spinRat(buf, W, H, at.x, at.y, Math.max(6, (0.5 * f) / at.d), ratTurn(rat.k), (c) => tint(c, at.d));
+  }
 }
 
 function drawTrees(frame: WalkFrame, cam: WalkCamera, w: WalkWorld, f: number, horizon: number) {

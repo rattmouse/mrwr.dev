@@ -20,7 +20,15 @@ export type WalkerMove = { type: "move"; lat: number; lon: number };
  * kind picked out of Type (an index into its legend, which both work out
  * alike), the day or year, and whether it's playing.
  */
-export type WalkerLayers = { street: boolean; canopy: boolean; parks: boolean; water: boolean; underground: boolean };
+export type WalkerLayers = {
+  street: boolean;
+  canopy: boolean;
+  parks: boolean;
+  water: boolean;
+  underground: boolean;
+  rats: boolean;
+  pipes: boolean;
+};
 export type WalkerTrees = {
   mode?: "season" | "species" | "planted";
   group?: number | null;
