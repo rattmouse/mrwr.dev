@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.0.14",
+      "version": "7.0.15",
       "era": "claude",
       "name": "Trees",
       "date": "2026-10-08",
@@ -72,7 +72,8 @@
         "Added: SPU drainage vaults and tanks to Underground (./trees). Footprints with owner and size",
         "Added: drilled rain-garden drains and storm outfalls (./trees). Outfalls sized by pipe, sewage ones brown",
         "Added: Rats layer, sewer rats from SPU inspection video (./trees). Drawn at pipe depth, with pipe details",
-        "Added: SPU vault and outfall depths (./trees). Vaults with a depth drawn as pits"
+        "Added: SPU vault and outfall depths (./trees). Vaults with a depth drawn as pits",
+        "Changed: popup title bars grey out when the window is inactive (tasks.exe, cubicles.exe)"
       ]
     },
     {
