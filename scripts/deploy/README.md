@@ -115,6 +115,7 @@ npm run deploy -- --skip-build  # re-deploy the existing out/ as-is
 npm run deploy -- --skip-issues # build + deploy without re-pulling issues.json
 npm run deploy -- --skip-probes # build + deploy without re-pulling probes.json
 npm run deploy -- --skip-trees  # build + deploy without re-pulling the street trees
+npm run deploy -- --yes-search-history # publish new search history without asking
 npm run deploy:status           # what's live on prod right now
 npm run deploy:rollback         # back to the previous release
 npm run deploy:rollback -- 20260905101500   # back to a specific release

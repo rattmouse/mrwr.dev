@@ -7,6 +7,7 @@ import MeltFilter, { MELT_FILTER_ID, meltStyle } from "@/components/windows/Melt
 import FrameLightsStyle, { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
 import { Layout, WindowBox } from "@/components/windows/windowTypes";
 import { Turn, isUpright, toScreen, turnTransform, unturn } from "@/lib/windowTurn";
+import { canPersistDesktop } from "@/lib/desktopStorage";
 
 type DesktopWindowProps = {
   title: string;
@@ -148,8 +149,12 @@ export default function DesktopWindow({
   // Pin a window that hasn't got a box yet to wherever it has just been laid
   // out. It's measured before paint, so there's no visible jump — the window
   // simply stops being centred by CSS and starts being held where it is.
+  // Not on the screen inside cubicles.exe, which saves nothing anyway: that
+  // screen grows when the cubicle's window does, and a window pinned while it
+  // was small would be left off to one side. There it stays centred by CSS
+  // until it's dragged.
   useLayoutEffect(() => {
-    if (box || layout !== "normal") return;
+    if (box || layout !== "normal" || !canPersistDesktop()) return;
     const frame = headerRef.current?.parentElement;
     if (!frame) return;
     const rect = measureFrame(frame);

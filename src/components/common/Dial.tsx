@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 /**
  * Rotary knobs bevelled like Win98 controls, after midi.exe's: a `Dial` for a
@@ -209,6 +209,53 @@ export function Dial({
   );
 }
 
+/**
+ * A knob that's pushed, not turned: the same cap as a Dial's, a turn-back
+ * arrow where the pointer would be, its bevel sinking in while it's held.
+ */
+export function KnobButton({ label, title, onClick }: { label: string; title?: string; onClick: () => void }) {
+  const [down, setDown] = useState(false);
+  const c = SIZE / 2;
+  const r = 11;
+  // Three-quarters of a circle round the centre, its head pointing back the other way, top left.
+  const tip = polar(c, c, 5, -75);
+  const barbIn = polar(c, c, 2, -30);
+  const barbOut = polar(c, c, 8, -30);
+  return (
+    <div title={title} style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 52 }}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        onPointerDown={() => setDown(true)}
+        onPointerUp={() => setDown(false)}
+        onPointerLeave={() => setDown(false)}
+        onPointerCancel={() => setDown(false)}
+        onKeyDown={(e) => (e.key === " " || e.key === "Enter") && setDown(true)}
+        onKeyUp={() => setDown(false)}
+        onBlur={() => setDown(false)}
+        style={{ ...FOCUS, display: "block", padding: 0, border: 0, background: "transparent", cursor: "pointer" }}
+      >
+        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} style={{ display: "block" }} aria-hidden>
+          <circle cx={c} cy={c} r={14.5} fill="none" stroke={C.shadow} strokeWidth={1} />
+          <circle cx={c} cy={c} r={r} fill={C.material} />
+          <path d={arc(c, c, r, -180, 0)} fill="none" stroke={down ? C.darkest : C.light} strokeWidth={1.5} />
+          <path d={arc(c, c, r, 0, 180)} fill="none" stroke={down ? C.light : C.darkest} strokeWidth={1.5} />
+          <path d={arc(c, c, r - 1.5, down ? -180 : 0, down ? 0 : 180)} fill="none" stroke={C.shadow} strokeWidth={1.5} />
+          <g transform={down ? "translate(0.75 0.75)" : undefined}>
+            <path d={arc(c, c, 5, -30, 240)} fill="none" stroke={C.darkest} strokeWidth={1.75} />
+            <path
+              d={`M ${tip.x} ${tip.y} L ${barbIn.x} ${barbIn.y} L ${barbOut.x} ${barbOut.y} Z`}
+              fill={C.darkest}
+            />
+          </g>
+        </svg>
+      </button>
+      <span style={{ fontSize: 10, lineHeight: "12px", color: C.dim, whiteSpace: "nowrap" }}>{label}</span>
+    </div>
+  );
+}
+
 export type SelectorOption = {
   label: string;
   title: string;
@@ -227,14 +274,20 @@ export function Selector({
   onChange,
   label,
   width = 118,
+  caption,
 }: {
   options: SelectorOption[];
   index: number;
   onChange: (index: number) => void;
-  /** Its name, for screen readers; nothing's printed under it. */
+  /** Its name, for screen readers; nothing's printed under it unless it's `caption`ed. */
   label: string;
   /** The box the knob and its labels sit in, pixels. */
   width?: number;
+  /**
+   * Laid out like a Dial instead, as narrow: the positions only ticked round
+   * the knob, the one it's at printed bold under it, and this under that.
+   */
+  caption?: boolean;
 }) {
   const ref = useRef<SVGSVGElement>(null);
   const drag = useRef<{ y: number; index: number; moved: boolean } | null>(null);
@@ -255,6 +308,75 @@ export function Selector({
   const R = 22;
   const top = cy - SIZE / 2;
   const current = options[index];
+  const knob = (
+    <svg
+      ref={ref}
+      role="slider"
+      tabIndex={0}
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={n - 1}
+      aria-valuenow={index}
+      aria-valuetext={current?.label}
+      viewBox={`0 0 ${SIZE} ${SIZE}`}
+      width={SIZE}
+      height={SIZE}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        grab(e.currentTarget);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { y: e.clientY, index, moved: false };
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d) return;
+        const clicks = Math.round((d.y - e.clientY) / CLICK_PX);
+        if (clicks) d.moved = true;
+        set(d.index + clicks);
+      }}
+      onPointerUp={() => {
+        // A click without a drag steps it round to the next position.
+        if (drag.current && !drag.current.moved) onChange((index + 1) % n);
+        drag.current = null;
+      }}
+      onPointerCancel={() => (drag.current = null)}
+      onKeyDown={(e) => {
+        const moves: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
+        if (e.key in moves) set(index + moves[e.key]);
+        else if (e.key === "Home") set(0);
+        else if (e.key === "End") set(n - 1);
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      style={{
+        ...FOCUS,
+        ...(caption ? {} : { position: "absolute", left: cx - c, top }),
+        display: "block",
+        touchAction: "none",
+        cursor: "pointer",
+      }}
+    >
+      {options.map((o, k) => {
+        const p = polar(c, c, 13, at(k));
+        const q = polar(c, c, 16, at(k));
+        return <line key={k} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke={o.hot ? C.hot : C.darkest} strokeWidth={k === index ? 2.5 : 1.5} />;
+      })}
+      <Cap angle={at(index)} pointer={current?.hot ? C.hot : C.darkest} />
+    </svg>
+  );
+  if (caption)
+    return (
+      <div title={current?.title} style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 52 }}>
+        {knob}
+        <span
+          style={{ fontSize: 11, fontWeight: "bold", lineHeight: "13px", whiteSpace: "nowrap", color: current?.hot ? C.hot : undefined }}
+        >
+          {current?.label}
+        </span>
+        <span style={{ fontSize: 10, lineHeight: "12px", color: C.dim, whiteSpace: "nowrap" }}>{label}</span>
+      </div>
+    );
   return (
     <div style={{ position: "relative", flex: "none", width, height: top + SIZE }}>
       {options.map((o, k) => {
@@ -293,55 +415,7 @@ export function Selector({
           </button>
         );
       })}
-      <svg
-        ref={ref}
-        role="slider"
-        tabIndex={0}
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={n - 1}
-        aria-valuenow={index}
-        aria-valuetext={current?.label}
-        viewBox={`0 0 ${SIZE} ${SIZE}`}
-        width={SIZE}
-        height={SIZE}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          grab(e.currentTarget);
-          e.currentTarget.setPointerCapture(e.pointerId);
-          drag.current = { y: e.clientY, index, moved: false };
-        }}
-        onPointerMove={(e) => {
-          const d = drag.current;
-          if (!d) return;
-          const clicks = Math.round((d.y - e.clientY) / CLICK_PX);
-          if (clicks) d.moved = true;
-          set(d.index + clicks);
-        }}
-        onPointerUp={() => {
-          // A click without a drag steps it round to the next position.
-          if (drag.current && !drag.current.moved) onChange((index + 1) % n);
-          drag.current = null;
-        }}
-        onPointerCancel={() => (drag.current = null)}
-        onKeyDown={(e) => {
-          const moves: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
-          if (e.key in moves) set(index + moves[e.key]);
-          else if (e.key === "Home") set(0);
-          else if (e.key === "End") set(n - 1);
-          else return;
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        style={{ ...FOCUS, position: "absolute", left: cx - c, top, display: "block", touchAction: "none", cursor: "pointer" }}
-      >
-        {options.map((o, k) => {
-          const p = polar(c, c, 13, at(k));
-          const q = polar(c, c, 16, at(k));
-          return <line key={k} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke={o.hot ? C.hot : C.darkest} strokeWidth={k === index ? 2.5 : 1.5} />;
-        })}
-        <Cap angle={at(index)} pointer={current?.hot ? C.hot : C.darkest} />
-      </svg>
+      {knob}
     </div>
   );
 }

@@ -1802,7 +1802,7 @@ export default function DocumentWindow({
                   </li>
                   <li>
                     - rats from{" "}
-                    <Anchor href="https://data-seattlecitygis.opendata.arcgis.com/datasets/abb9584e58444baabfc03e269319167c" target="_blank">
+                    <Anchor href="https://www.arcgis.com/home/item.html?id=abb9584e58444baabfc03e269319167c" target="_blank">
                       Seattle Public Utilities
                     </Anchor>
                   </li>

@@ -139,7 +139,7 @@ export const PROGRAMS = {
     kind: "program",
     title: "./trees",
     icon: "../w95_tree.ico",
-    size: { width: 460, height: 560 },
+    size: { width: 720, height: 560 },
     menu: { label: "Map", folder: "tools" },
     shell: { blurb: "every street tree in Seattle, through the year.", file: "trees.exe" },
   },

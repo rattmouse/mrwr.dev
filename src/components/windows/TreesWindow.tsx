@@ -92,7 +92,7 @@ import {
   TreeGroup,
   YEAR_MIN,
 } from "@/lib/treeColors";
-import { WALKER_STALE_MS, WalkerAt, walkerChannel, WalkerMessage } from "@/lib/treesWalker";
+import { WALKER_STALE_MS, WalkerAt, walkerChannel, WalkerLook, WalkerMessage } from "@/lib/treesWalker";
 
 /**
  * trees.exe's map: every street tree in Seattle as a dot, with no basemap —
@@ -413,8 +413,11 @@ export type TreesMenuState = {
   groups: { label: string; color: string }[];
   group: number | null;
   setGroup: (group: number | null) => void;
-  /** With the walk on when the menu opened: put the walker down where it was opened. */
-  walkerHere: (() => void) | null;
+  /**
+   * With the walk on when the menu opened: put the walker down where it was
+   * opened, and whether the map follows them, kept centred on them as they go.
+   */
+  walker: { here: () => void; following: boolean; toggleFollow: () => void } | null;
 };
 
 export type TreesWindowProps = {
@@ -452,8 +455,10 @@ export type TreesWindowProps = {
   minutes: number;
   /** The Today button: the sun's hour back to now, as the day goes back to today. */
   onNow: () => void;
-  /** The control panel, under the map and the view's own controls, over the status line. */
+  /** The map's own controls, down the right of the map. */
   controls?: React.ReactNode;
+  /** The layer buttons, down the left of the map: as icons alone when the window's too narrow for their names. */
+  layers?: (compact: boolean) => React.ReactNode;
   /** A right-click on the map, at that point on the screen: the control panel's settings, as a menu. */
   onMenu?: (x: number, y: number) => void;
   /** The menu itself, drawn here so it follows the timeline as it plays. */
@@ -482,6 +487,7 @@ export default function TreesWindow({
   minutes,
   onNow,
   controls,
+  layers,
   onMenu,
   menu,
   modeKnob,
@@ -513,6 +519,17 @@ export default function TreesWindow({
   const playing = playAsked && !paused && mode !== "species";
   const year = prepared ? Math.min(Math.max(yearAsked, YEAR_MIN), prepared.yearMax) : yearAsked;
 
+  // The map's row, its width watched for whether the layers keep their names.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const observer = new ResizeObserver(() => setNarrow(row.clientWidth < NARROW_W));
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View | null>(null);
@@ -534,6 +551,16 @@ export default function TreesWindow({
   /** The figure being dragged: which pointer, and how far the pointer is from the ground under its feet. */
   const walkerDragRef = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const [overWalker, setOverWalker] = useState(false);
+  /** The menu's Guy → Follow: the map kept centred on the walker. A drag of the map, or Reset, lets go. */
+  const [following, setFollowing] = useState(false);
+  const followingRef = useRef(false);
+  useEffect(() => {
+    followingRef.current = following;
+  }, [following]);
+  /** Centre the map on the walker; replaced every render, for the channel's listener to call. */
+  const centreRef = useRef(() => {});
+  /** Pick out what the walker's looking at, as a click on it would; replaced every render, likewise. */
+  const lookRef = useRef<(look: WalkerLook) => void>(() => {});
 
   // How far each download has got, 0–1, for the progress panel; null while
   // the size isn't known yet.
@@ -1535,6 +1562,10 @@ export default function TreesWindow({
       const message = event.data;
       // Another trees.exe moving the walker: theirs will come back as an "at" like any other.
       if (message?.type === "move") return;
+      if (message?.type === "look") {
+        lookRef.current(message);
+        return;
+      }
       // The walk's settings: its layers, Sun and coloring are TreesProgram's to take up; the rest are here.
       if (message?.type === "map") {
         const t = message.trees;
@@ -1562,6 +1593,8 @@ export default function TreesWindow({
           walkerMovedRef.current = performance.now();
         }
         walkerRef.current = { at, t: performance.now() };
+        // Not while the figure's being dragged about the map: the map would slide out from under the pointer.
+        if (followingRef.current && !held) centreRef.current();
         stale = window.setTimeout(requestDraw, WALKER_STALE_MS + 50);
       } else walkerRef.current = null;
       requestDraw();
@@ -1621,6 +1654,7 @@ export default function TreesWindow({
     if (last.prepared === prepared && last.fitSignal === fitSignal) return;
     // Reset puts the day and the year back to today as well.
     if (last.fitSignal !== fitSignal && fitSignal > 0) {
+      setFollowing(false);
       setPlaying(false);
       setDay(todayDoy());
       setYear(new Date().getFullYear());
@@ -1659,6 +1693,11 @@ export default function TreesWindow({
     (px: number, py: number, factor: number) => {
       const v = viewRef.current;
       if (!v) return;
+      // Following the walker, the zoom is about them, in the middle, wherever the pointer is.
+      if (followingRef.current) {
+        px = sizeRef.current.w / 2;
+        py = sizeRef.current.h / 2;
+      }
       const [lo, hi] = scaleLimits();
       const s = Math.min(hi, Math.max(lo, v.s * factor));
       beginStretch();
@@ -1881,6 +1920,40 @@ export default function TreesWindow({
     return !!hit && px >= hit.x0 && px <= hit.x1 && py >= hit.y0 && py <= hit.y1;
   };
 
+  /** The view slid, at the same zoom, so the walker stands in the middle of it. */
+  const centreOnWalker = () => {
+    const v = viewRef.current;
+    const walker = walkerRef.current;
+    if (!v || !walker || !trees || !prepared) return;
+    const { south, north, west, east } = trees.bbox;
+    const cx = ((walker.at.lon - west) / (east - west)) * prepared.widthM;
+    const cy = ((walker.at.lat - south) / (north - south)) * prepared.heightM;
+    if (Math.abs(cx - v.cx) + Math.abs(cy - v.cy) < 0.01) return;
+    beginStretch();
+    viewRef.current = { ...v, cx, cy };
+    fittedRef.current = false;
+    moved();
+    requestDraw();
+  };
+  useEffect(() => {
+    centreRef.current = centreOnWalker;
+  });
+
+  // What the walker's looking at, picked out here: a tree, or a place or pipe, if this map has it to show.
+  useEffect(() => {
+    lookRef.current = (look) => {
+      let tree: number | null = null;
+      let place: Place | null = null;
+      if (look.tree !== undefined && scene && look.tree < scene.nS) tree = look.tree;
+      else if (look.crown !== undefined && scene && look.crown < scene.nC) tree = scene.nS + scene.nR + look.crown;
+      else if (look.place !== undefined && places?.list[look.place]) place = places.list[look.place];
+      else if (look.pipe !== undefined && pipeData && look.pipe < pipeData.n) place = pipePlace(pipeData, look.pipe);
+      if (tree === null && place === null) return;
+      setSelected(tree);
+      setSelectedPlace(place);
+    };
+  });
+
   /**
    * Put the walker down under (px, py): the ground there in 2.5D, the map
    * there flat. Only where they stand — how high is the walk's business.
@@ -1971,7 +2044,10 @@ export default function TreesWindow({
       }
       const dx = p.x - g.startX;
       const dy = p.y - g.startY;
-      if (!g.moved && dx * dx + dy * dy > 16) g.moved = true;
+      if (!g.moved && dx * dx + dy * dy > 16) {
+        g.moved = true;
+        setFollowing(false);
+      }
       if (g.moved) {
         // The ground that was under the pointer stays under it.
         beginStretch();
@@ -2110,7 +2186,10 @@ export default function TreesWindow({
       const speed = Math.min(w, h) * 0.8 * dt;
       const dx = (held.has("d") ? 1 : 0) - (held.has("a") ? 1 : 0);
       const dy = (held.has("s") ? 1 : 0) - (held.has("w") ? 1 : 0);
-      if (dx || dy) panBy((dx * speed) / Math.hypot(dx, dy), (dy * speed) / Math.hypot(dx, dy));
+      if (dx || dy) {
+        setFollowing(false);
+        panBy((dx * speed) / Math.hypot(dx, dy), (dy * speed) / Math.hypot(dx, dy));
+      }
       raf = held.size ? requestAnimationFrame(step) : 0;
     };
     const onDown = (e: KeyboardEvent) => {
@@ -2185,7 +2264,7 @@ export default function TreesWindow({
       const c = i - scene.nS - scene.nR;
       const conifer = crowns.conifer[c] === 1;
       return {
-        kind: "LiDAR tree",
+        kind: "Canopy tree",
         title: conifer ? "Conifer" : "Broadleaf tree",
         rows: [
           ["Height", metres(crowns.height[c])],
@@ -2304,6 +2383,9 @@ export default function TreesWindow({
     return placeCard(selectedPlace, treesInside(selectedPlace, prepared.mx, prepared.my, trees.count));
   }, [selectedPlace, trees, prepared]);
 
+  // The picked thing's card sits in the sidebar's info section, or over the map without one.
+  const cardOnMap = !layers || narrow;
+
   let status: string;
   if (error) status = "No tree data";
   else if (!trees) status = "Loading Seattle's street trees…";
@@ -2364,16 +2446,39 @@ export default function TreesWindow({
     groups: prepared?.groups ?? [],
     group,
     setGroup,
-    walkerHere: menuAt ? () => dropWalker(menuAt.x, menuAt.y) : null,
+    walker: menuAt
+      ? {
+          here: () => dropWalker(menuAt.x, menuAt.y),
+          following,
+          toggleFollow: () => {
+            setFollowing(!following);
+            if (!following) centreRef.current();
+          },
+        }
+      : null,
   };
 
   return (
     <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", gap: 4 }}>
       {/* Portalled to the top of the page; only here to see the timeline. */}
       {menu?.(menuState)}
+      {/* Layers down the left of the map, its controls down the right; the trees' own along the bottom. */}
+      <div ref={rowRef} style={{ flex: "1 1 auto", minHeight: 80, display: "flex", gap: 4 }}>
+      {layers && (
+        <div style={{ flex: "none", width: narrow ? undefined : SIDEBAR_W, display: "flex", flexDirection: "column", gap: 4, minHeight: 0 }}>
+          <div style={{ flex: "none" }}>{layers(narrow)}</div>
+          {/* What's picked, under the layers; too narrow for it there, it goes back over the map. */}
+          {!narrow && (
+            <InfoPanel
+              card={selectedCard ?? selectedPlaceCard}
+              onClose={() => (selectedCard ? setSelected(null) : setSelectedPlace(null))}
+            />
+          )}
+        </div>
+      )}
       <div
         ref={wrapRef}
-        style={{ ...SUNK, flex: "1 1 auto", minHeight: 80, position: "relative", overflow: "hidden", background: "rgb(14,20,16)" }}
+        style={{ ...SUNK, flex: "1 1 auto", minWidth: 80, position: "relative", overflow: "hidden", background: "rgb(14,20,16)" }}
       >
         <canvas
           ref={canvasRef}
@@ -2425,15 +2530,19 @@ export default function TreesWindow({
         ) : wantCrowns && trees ? (
           <LoadingPanel label="Loading the city's other 850,000 trees" progress={crownsProgress} corner />
         ) : null}
-        {selectedCard && <TreeCard card={selectedCard} corner={cardCorner} onCorner={setCardCorner} onClose={() => setSelected(null)} />}
-        {!selectedCard && selectedPlaceCard && (
+        {cardOnMap && selectedCard && (
+          <TreeCard card={selectedCard} corner={cardCorner} onCorner={setCardCorner} onClose={() => setSelected(null)} />
+        )}
+        {cardOnMap && !selectedCard && selectedPlaceCard && (
           <TreeCard card={selectedPlaceCard} corner={cardCorner} onCorner={setCardCorner} onClose={() => setSelectedPlace(null)} />
         )}
 
       </div>
+      {controls && <div style={{ flex: "none", display: "flex", flexDirection: "column", overflowX: "hidden", overflowY: "auto" }}>{controls}</div>}
+      </div>
 
-      {/* The same 10px gaps as the control panel's, so the separators after their knobs line up; and
-          as tall whichever view's controls are in it, so switching views doesn't move the map's edge. */}
+      {/* The trees' own controls, under the map: as tall whichever view's are in it, so switching
+          views doesn't move the map's edge. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, height: MODE_ROW_H, flex: "none" }}>
         {modeKnob}
         <div
@@ -2593,14 +2702,18 @@ export default function TreesWindow({
         </div>
       </div>
 
-      {controls && <div style={{ borderTop: "1px solid #808080", boxShadow: "inset 0 1px #fff" }}>{controls}</div>}
-
       <div style={{ ...SUNK, padding: "1px 4px", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {status}
       </div>
     </div>
   );
 }
+
+/** The left sidebar's width with its layers named: room for the info section under them. */
+const SIDEBAR_W = 184;
+
+/** Narrower than this, the window's layer buttons drop their names for their icons. */
+const NARROW_W = 560;
 
 /** The coloring's row under the map: the Season view's slider, its month letters and its notes. */
 const MODE_ROW_H = 64;
@@ -3082,12 +3195,64 @@ type CardInfo = {
   boldFirstNote?: boolean;
 };
 
+/** The picked tree's or place's card's contents: its name, its rows and its notes. */
+function CardBody({ card }: { card: CardInfo }) {
+  return (
+    <>
+      <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: 6, overflowWrap: "anywhere" }}>{card.title}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 8px" }}>
+        {card.rows.map(([k, v]) => (
+          <React.Fragment key={k}>
+            <span style={{ opacity: 0.7 }}>{k}</span>
+            <span style={{ fontStyle: k === "Species" && card.italicSpecies ? "italic" : undefined, overflowWrap: "anywhere" }}>{v}</span>
+          </React.Fragment>
+        ))}
+      </div>
+      {card.notes.map((note, k) => (
+        <div key={k} style={{ marginTop: 6, opacity: k === 0 && card.boldFirstNote ? 1 : 0.8, fontWeight: k === 0 && card.boldFirstNote ? "bold" : undefined }}>
+          {note}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * The bottom of the left sidebar: what's picked on the map — its kind on a
+ * strip with a close box, its card scrolling under that — or, with nothing
+ * picked, how to pick something.
+ */
+function InfoPanel({ card, onClose }: { card: CardInfo | null; onClose: () => void }) {
+  return (
+    <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column", fontSize: 11 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, minHeight: 20 }}>
+        <span style={{ fontWeight: "bold", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {card ? card.kind : "Info"}
+        </span>
+        {card && (
+          <Button size="sm" square onClick={onClose} aria-label="Close" style={{ width: 18, height: 18 }}>
+            <span className="close-icon" />
+          </Button>
+        )}
+      </div>
+      <div style={{ ...SUNK, flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: 6, background: "#fff" }}>
+        {card ? (
+          <CardBody card={card} />
+        ) : (
+          <span style={{ opacity: 0.6 }}>Click a tree, park or creek on the map to see what it is.</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** The tree card's resting places: a corner of the map, CARD_GAP in from both edges. */
 type CardCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const CARD_GAP = 6;
 
 /**
- * The picked tree's (or place's) details, over a corner of the map. Dragged by
+ * The picked tree's (or place's) details, over a corner of the map, when the
+ * window's too narrow for the sidebar's info section. Dragged by
  * its title bar it follows the pointer, kept on the map, and let go it snaps
  * to whichever corner its middle is nearest — as Sounds' scope does.
  */
@@ -3173,20 +3338,7 @@ function TreeCard({
         </Button>
       </WindowHeader>
       <WindowContent style={{ padding: 8, fontSize: 12 }}>
-        <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: 6, overflowWrap: "anywhere" }}>{card.title}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 8px" }}>
-          {card.rows.map(([k, v]) => (
-            <React.Fragment key={k}>
-              <span style={{ opacity: 0.7 }}>{k}</span>
-              <span style={{ fontStyle: k === "Species" && card.italicSpecies ? "italic" : undefined }}>{v}</span>
-            </React.Fragment>
-          ))}
-        </div>
-        {card.notes.map((note, k) => (
-          <div key={k} style={{ marginTop: 6, opacity: k === 0 && card.boldFirstNote ? 1 : 0.8, fontWeight: k === 0 && card.boldFirstNote ? "bold" : undefined }}>
-            {note}
-          </div>
-        ))}
+        <CardBody card={card} />
       </WindowContent>
     </Window>
   );
