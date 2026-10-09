@@ -12,7 +12,7 @@ import { loadTerrain, Terrain } from "@/lib/terrain";
 import { describePlace, loadPlaces, Places } from "@/lib/places";
 import { loadPipes, pipePlace, Pipes } from "@/lib/pipes";
 import { groundZ, makeGround, treeForms } from "@/lib/treesTilt";
-import { walkerChannel, WalkerLayers, WalkerMap, WalkerMessage } from "@/lib/treesWalker";
+import { walkerChannel, WalkerLayers, WalkerLook, WalkerMap, WalkerMessage } from "@/lib/treesWalker";
 import TreesRingMenu, { RingNode } from "@/components/windows/TreesRingMenu";
 import { coloringItems, dayItem, layerItems, playItem, treesRing } from "@/components/windows/treesMenu";
 import {
@@ -39,11 +39,10 @@ import {
  * with the cubicle's own controls — WASD or the arrows or the stick, drag to
  * look. Esc, or the button, goes back in.
  *
- * Space jumps. Medium's day leaves you as you are: Earth's gravity, a jump
- * of half a metre, a sprint a person could keep up. `light` is Hard's:
- * gravity turned right down, a jump clean over the trees, and faster legs.
- * E or Q dives: down into the ground, among the pipes, shafts and rats, and
- * floated back up — easily, or fast and deep with Super.
+ * Space jumps: Earth's gravity, and as high up as a dive goes down. E or Q
+ * dives: down into the ground, among the pipes, shafts and rats, and floated
+ * back up. With Super, none of that: no-clip — Space flies you up, E or Q
+ * down, through the ground and the trees and anything else, on faster legs.
  *
  * Wherever you are, trees.exe hears about it (treesWalker.ts) and draws you
  * on its map.
@@ -52,8 +51,8 @@ import {
  * the year's playback and its Day slider, and the layers, plus a way back in.
  * Once a Hard day has been worked (`full`), Type and Age's colorings — Age
  * with its own years to play through — the Sun, which lights the walk by
- * its hour, come too. Having clocked out on Hard (`light`), so does Super:
- * Hard's light body, its high jump and fast dive, switched off and on.
+ * its hour, come too. Having clocked out on Hard (`light`), so does Super,
+ * no-clip flying, switched off and on.
  *
  * It owns the whole cubicle window while it's up, and loads its own copy of
  * the trees: trees.exe's is in the iframe on the desk, a frame away.
@@ -110,27 +109,27 @@ const DROP_MS = 2400;
 const DROP_BACK = 300;
 const DROP_UP = 175;
 /**
- * How you move: metres a second squared down, metres a second up off the
- * ground when you jump, and metres a second walking and with Shift held.
- * Medium's is a person's: a jump of half a metre, a sprint of eight. Hard's
- * jump goes some fifty metres up.
- */
-type Body = { gravity: number; jump: number; walk: number; run: number };
-const NORMAL: Body = { gravity: 9.81, jump: 3.1, walk: 4.5, run: 8 };
-const LIGHT: Body = { gravity: 2.4, jump: 16, walk: 6.5, run: 22 };
-
-/**
  * Dive, on E or Q: down into the ground, as Space takes you up,
  * and the ground buoys you back — slowing you, turning you, and bringing you
- * up onto your feet again. As yourself, an easy dive: metres a second down,
- * and the pull back up, some ten metres at the bottom. With Super, the same
- * dive fast: as fast down as Super's jump goes up, and back at its light
- * gravity, some fifty metres down. Never deeper than DIVE_DEEPEST.
+ * up onto your feet again. An easy dive: metres a second down, and the pull
+ * back up, some ten metres at the bottom. Never deeper than DIVE_DEEPEST.
  */
 type Dive = { speed: number; buoyancy: number };
 const DIVE: Dive = { speed: 5, buoyancy: 1.2 };
-const SUPER_DIVE: Dive = { speed: LIGHT.jump, buoyancy: LIGHT.gravity };
 const DIVE_DEEPEST = 70;
+
+/**
+ * How you move: metres a second squared down, metres a second up off the
+ * ground when you jump, and metres a second walking and with Shift held.
+ * Earth's gravity, a sprint a person could keep up, and a jump as high as a
+ * dive goes deep — v² / 2g against the dive's v² / 2b — some ten metres.
+ */
+type Body = { gravity: number; jump: number; walk: number; run: number };
+const GRAVITY = 9.81;
+const BODY: Body = { gravity: GRAVITY, jump: DIVE.speed * Math.sqrt(GRAVITY / DIVE.buoyancy), walk: 4.5, run: 8 };
+
+/** Super's no-clip: metres a second across and up or down, and with Shift held. */
+const NOCLIP = { walk: 6.5, run: 22, climb: 8, climbFast: 24 };
 
 /**
  * How near (metres, any way) you dive to a rat down in its pipe for it to
@@ -310,7 +309,7 @@ export default function TreesWalk({
   onLeave: () => void;
   /** Where to come down. */
   landing: Landing;
-  /** Hard's low gravity, high jump and fast legs. */
+  /** Clocked out on Hard: Super, on the menu. */
   light?: boolean;
   /** A Hard day's been worked: every coloring, and the Sun, on the menu. */
   full?: boolean;
@@ -401,15 +400,15 @@ export default function TreesWalk({
   /** Down in the ground right now, for the corner's words. */
   const [under, setUnder] = useState(false);
   /**
-   * Super: Hard's light body — the high jump, the low gravity, the fast dive
-   * — or your own. Only to be had having clocked out on Hard (`light`), and
-   * on to begin with then; the menu's Super switches it.
+   * Super: no-clip — no gravity, nothing solid; Space up, E or Q down, held,
+   * through the ground and everything in it. Only to be had having clocked out
+   * on Hard (`light`), and on to begin with then; the menu's Super switches it.
    */
-  const [superOn, setSuperOn] = useState(light);
-  const lightRef = useRef(light);
+  const [noclip, setNoclip] = useState(light);
+  const noclipRef = useRef(light);
   useEffect(() => {
-    lightRef.current = superOn;
-  }, [superOn]);
+    noclipRef.current = noclip;
+  }, [noclip]);
   const stickRef = useRef({ x: 0, y: 0 });
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const activeRef = useRef(active);
@@ -436,14 +435,17 @@ export default function TreesWalk({
         onLeave();
         return;
       }
+      // Pressed, a jump or a dive; held, with Super, up or down.
       if (event.code === "Space") {
         event.preventDefault();
         jumpRef.current = true;
+        keysRef.current.add(event.code);
         return;
       }
       if (event.code === "KeyE" || event.code === "KeyQ") {
         event.preventDefault();
         diveRef.current = true;
+        keysRef.current.add(event.code);
         return;
       }
       if (!MOVE_KEYS.has(event.code)) return;
@@ -724,6 +726,8 @@ export default function TreesWalk({
         if (event.data?.type === "move") moveTo = event.data;
       };
     let shown: string | null = null;
+    /** What trees.exe was last told the crosshair is on. */
+    let looked: string | null = null;
 
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
@@ -760,8 +764,9 @@ export default function TreesWalk({
           cam.z = groundAt(w, cam.x, cam.y) + lift;
         }
         moveTo = null;
-        const body = lightRef.current ? LIGHT : NORMAL;
-        const dive = lightRef.current ? SUPER_DIVE : DIVE;
+        const flying = noclipRef.current;
+        const body = flying ? { ...BODY, ...NOCLIP } : BODY;
+        const dive = DIVE;
         cam.yaw += ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0)) * TURN * dt;
         const airborne = !grounded;
         let side = (held("KeyD") ? 1 : 0) - (held("KeyA") ? 1 : 0);
@@ -780,7 +785,7 @@ export default function TreesWalk({
           const dy = (Math.cos(cam.yaw) * sa - Math.sin(cam.yaw) * sx) * speed;
           // Not off the edge of the table, and not into the Sound: slide along the shore instead.
           // In the air, or already in it (come down there off a jump), the water doesn't stop you; nor does it under the ground.
-          const free = airborne || diving || isWet(w.ground, cam.x, cam.y);
+          const free = airborne || diving || flying || isWet(w.ground, cam.x, cam.y);
           const ok = (x: number, y: number) =>
             x > 1 && y > 1 && x < w.widthM - 1 && y < w.heightM - 1 && (free || !isWet(w.ground, x, y));
           if (ok(cam.x + dx, cam.y + dy)) {
@@ -792,7 +797,18 @@ export default function TreesWalk({
         } else bob = 0;
         const ground = groundAt(w, cam.x, cam.y);
         const floor = ground + EYE;
-        if (diveRef.current && grounded) {
+        if (flying) {
+          // Up on Space, down on E or Q, held; through anything, but no deeper than a dive goes.
+          const climb = (held("Space") ? 1 : 0) - (held("KeyE", "KeyQ") ? 1 : 0);
+          cam.z += climb * (held("ShiftLeft", "ShiftRight") ? NOCLIP.climbFast : NOCLIP.climb) * dt;
+          cam.z = Math.max(cam.z, ground - DIVE_DEEPEST);
+          rise = 0;
+          // Let go of it in the air and you fall; under the ground, you're stood back up on it.
+          grounded = false;
+          diving = false;
+          jumpRef.current = false;
+          diveRef.current = false;
+        } else if (diveRef.current && grounded) {
           rise = -dive.speed;
           grounded = false;
           diving = true;
@@ -819,7 +835,8 @@ export default function TreesWalk({
             grounded = true;
             diving = false;
           }
-        } else {
+        } else if (!flying) {
+          // (Super's no-clip has no gravity and no ground to stand on: it's moved you already, above.)
           if (grounded && floor < cam.z) {
             // Downhill: kept on your feet, unless it drops away faster than a cliff would let you walk it.
             const fall = cam.z - floor;
@@ -836,7 +853,7 @@ export default function TreesWalk({
             grounded = true;
           }
         }
-        const isUnder = diving && cam.z < ground;
+        const isUnder = (diving || flying) && cam.z < ground;
         if (isUnder !== wasUnder) {
           wasUnder = isUnder;
           setUnder(isUnder);
@@ -966,6 +983,22 @@ export default function TreesWalk({
         shown = text;
         setPrompt(text);
       }
+      // Something new under the crosshair: trees.exe picks it out too. Looking away leaves it picked.
+      const sc = worldRef.current;
+      const aim: WalkerLook | null = dropRef.current
+        ? null
+        : at >= 0 && sc
+          ? at < sc.nStreet
+            ? { type: "look", tree: at }
+            : { type: "look", crown: at - sc.nStreet }
+          : place >= 0
+            ? { type: "look", place }
+            : pipe >= 0
+              ? { type: "look", pipe }
+              : null;
+      const lookKey = aim ? `${aim.tree}/${aim.crown}/${aim.place}/${aim.pipe}` : null;
+      if (aim && lookKey !== looked) channel?.postMessage(aim);
+      if (lookKey) looked = lookKey;
     };
     raf = requestAnimationFrame(loop);
     return () => {
@@ -1093,17 +1126,17 @@ export default function TreesWalk({
                   },
                   {
                     label: "Super",
-                    value: superOn ? "On" : "Off",
+                    value: noclip ? "On" : "Off",
                     disabled: !light,
                     title: light
-                      ? superOn
-                        ? "Super: off — a person's jump, and an easy dive"
-                        : "Super: on — a jump over the trees, low gravity, and a fast dive"
+                      ? noclip
+                        ? "Super: off — walk, jump and dive again"
+                        : "Super: on — no-clip, fly through anything, Space up, E or Q down"
                       : "Super: clock out on Hard first",
                     role: "menuitemcheckbox",
-                    on: superOn,
+                    on: noclip,
                     keepOpen: true,
-                    onSelect: () => setSuperOn((on) => !on),
+                    onSelect: () => setNoclip((on) => !on),
                   },
                   { label: "Leave", title: "Back to the office (Esc)", onSelect: onLeave } satisfies RingNode,
                 ],
@@ -1202,24 +1235,37 @@ export default function TreesWalk({
           >
             {today === null ? null : dayLabel(today)}
             <br />
-            {under ? "Down in the ground" : superOn ? "You feel very light" : "It smells like rain"}
+            {under ? "Down in the ground" : noclip ? "Nothing is solid" : "It smells like rain"}
             <br />
-            Space to jump, E or Q to dive, Shift to run
+            {noclip ? "Space to go up, E or Q to go down, Shift to hurry" : "Space to jump, E or Q to dive, Shift to run"}
           </div>
           {/* For a touch screen, with no Space bar, E or Q. */}
+          {/* Held, as the keys are, for Super's up and down. */}
           <Button
-            onPointerDown={() => (jumpRef.current = true)}
+            onPointerDown={() => {
+              jumpRef.current = true;
+              keysRef.current.add("Space");
+            }}
+            onPointerUp={() => keysRef.current.delete("Space")}
+            onPointerLeave={() => keysRef.current.delete("Space")}
+            onPointerCancel={() => keysRef.current.delete("Space")}
             size="sm"
             style={{ position: "absolute", right: 8, bottom: 40, fontSize: 11 }}
           >
-            Jump (Space)
+            {noclip ? "Up (Space)" : "Jump (Space)"}
           </Button>
           <Button
-            onPointerDown={() => (diveRef.current = true)}
+            onPointerDown={() => {
+              diveRef.current = true;
+              keysRef.current.add("KeyE");
+            }}
+            onPointerUp={() => keysRef.current.delete("KeyE")}
+            onPointerLeave={() => keysRef.current.delete("KeyE")}
+            onPointerCancel={() => keysRef.current.delete("KeyE")}
             size="sm"
             style={{ position: "absolute", right: 8, bottom: 72, fontSize: 11 }}
           >
-            Dive (E)
+            {noclip ? "Down (E)" : "Dive (E)"}
           </Button>
           <Button onClick={onLeave} size="sm" style={{ position: "absolute", right: 8, bottom: 8, fontSize: 11 }}>
             Back to the office (Esc)

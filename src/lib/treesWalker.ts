@@ -37,7 +37,13 @@ export type WalkerTrees = {
   playing?: boolean;
 };
 export type WalkerMap = { type: "map"; layers?: WalkerLayers; sunHour?: number; trees?: WalkerTrees };
-export type WalkerMessage = WalkerAt | WalkerMove | WalkerMap | { type: "gone" };
+/**
+ * What the walker's looking at, for trees.exe to pick out too: a street, park
+ * or campus tree (its index in the trees), a LiDAR crown (its index in the
+ * crowns), or a place or pipe (its index in places.list or the pipes).
+ */
+export type WalkerLook = { type: "look"; tree?: number; crown?: number; place?: number; pipe?: number };
+export type WalkerMessage = WalkerAt | WalkerMove | WalkerMap | WalkerLook | { type: "gone" };
 
 /** How long a position is believed without another, in case the walk ended without saying so. */
 export const WALKER_STALE_MS = 3000;

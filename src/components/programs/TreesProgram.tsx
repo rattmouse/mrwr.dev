@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "react95";
 import DesktopWindow from "@/components/windows/DesktopWindow";
-import { Dial, Selector } from "@/components/common/Dial";
+import { Dial, KnobButton, Selector } from "@/components/common/Dial";
 import { Glyph } from "@/components/common/MediaGlyphs";
 import TreesWindow, { TreesMode, TreesMenuState } from "@/components/windows/TreesWindow";
 import TreesRingMenu, { RingNode } from "@/components/windows/TreesRingMenu";
@@ -36,11 +36,8 @@ const VIEWS: { label: string; title: string; tilt: boolean; sun: boolean; hot?: 
 /** The panel's buttons are Sounds' (strudel.cc's): raised, bold, pressed in while on. */
 const BOLD: React.CSSProperties = { fontWeight: "bold" };
 
-/** The Open and Show knobs' boxes, the same so the two line up down the window's left edge. */
+/** The Open knob's box. */
 const SELECTOR_WIDTH = 92;
-
-/** The least room between two layer buttons, pixels. */
-const LAYER_GAP = 2;
 
 /** Degrees Q and E turn Tilt by. */
 const TURN_STEP = 15;
@@ -104,34 +101,8 @@ export default function TreesProgram(props: ProgramProps) {
   }, []);
 
   const divider = <span aria-hidden style={{ alignSelf: "stretch", width: 0, margin: "4px 0", borderLeft: "1px solid #808080", borderRight: "1px solid #fff" }} />;
+  const rule = <span aria-hidden style={{ alignSelf: "stretch", height: 0, margin: "2px 4px", borderTop: "1px solid #808080", borderBottom: "1px solid #fff" }} />;
 
-  // The layer buttons spread out over whatever the panel leaves right of
-  // Reset: with their names when they fit there, as icons when they don't, and
-  // wrapped onto a line under the rest only when even the icons don't fit —
-  // still icons there, or the names would fit that line and jump back up top.
-  // Their width with names is measured whenever they're showing them, and
-  // the room watched against it.
-  const layersRef = useRef<HTMLSpanElement>(null);
-  const namedWidth = useRef(0);
-  const [compact, setCompact] = useState(false);
-  useLayoutEffect(() => {
-    const room = layersRef.current;
-    if (!room) return;
-    const check = () => {
-      if (!compact) {
-        const buttons = Array.from(room.children as HTMLCollectionOf<HTMLElement>);
-        namedWidth.current = buttons.reduce((w, b) => w + b.offsetWidth, 0) + LAYER_GAP * (buttons.length - 1);
-      }
-      const first = room.parentElement?.firstElementChild as HTMLElement | null;
-      // Below the whole of the first knob, not just lower: the row centres the shorter buttons on it.
-      const wrapped = !!first && room.offsetTop >= first.offsetTop + first.offsetHeight;
-      setCompact((compact && wrapped) || namedWidth.current > room.clientWidth);
-    };
-    check();
-    const observer = new ResizeObserver(check);
-    observer.observe(room);
-    return () => observer.disconnect();
-  }, [compact]);
   // What's drawn: toggle buttons, pressed in while on.
   const LAYERS: {
     label: string;
@@ -319,8 +290,26 @@ export default function TreesProgram(props: ProgramProps) {
               value: `${LAYERS.filter((l) => l.on).length}/${LAYERS.length}`,
               ring: { step: 30, items: layerItems(LAYERS.map((l) => ({ ...l, toggle: () => l.set((on) => !on) }))) },
             },
-            ...(pb.walkerHere
-              ? [{ label: "Guy", value: "Here", title: "Move the guy here", onSelect: pb.walkerHere } satisfies RingNode]
+            ...(pb.walker
+              ? [
+                  {
+                    label: "Guy",
+                    value: pb.walker.following ? "Follow" : undefined,
+                    ring: {
+                      step: 30,
+                      items: [
+                        { label: "Here", title: "Move the guy here", onSelect: pb.walker.here },
+                        {
+                          label: "Follow",
+                          title: pb.walker.following ? "Stop following the guy" : "Keep the map on the guy wherever they go",
+                          role: "menuitemcheckbox",
+                          on: pb.walker.following,
+                          onSelect: pb.walker.toggleFollow,
+                        },
+                      ],
+                    },
+                  } satisfies RingNode,
+                ]
               : []),
             { label: "Reset", title: "Show the whole city, and put the dials back", onSelect: reset },
           ],
@@ -344,107 +333,87 @@ export default function TreesProgram(props: ProgramProps) {
     </>
   );
 
-  // Under the map: what's shown, then Tilt's three dials — which way it faces
-  // (the pointer is the bearing), how far it leans, and with the sun on, the
-  // hour — and Reset with them; then the layers. 2.5D+ is printed red: it runs hot.
+  // Right of the map: what's shown, then Tilt's three dials — which way it
+  // faces (the pointer is the bearing), how far it leans, and with the sun on,
+  // the hour — and the Reset knob with them. 2.5D+ is printed red: it runs hot.
   const panel = (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        justifyContent: "flex-start",
-        columnGap: 10,
-        rowGap: 4,
-        paddingTop: 2,
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingTop: 2 }}>
       <Selector
         label="Show"
-        width={SELECTOR_WIDTH}
+        caption
         options={VIEWS}
         index={view < 0 ? 0 : view}
         onChange={pickView}
       />
-      {divider}
-      <Dial
-        label="Rotate"
-        min={0}
-        max={360}
-        step={5}
-        endless
-        value={heading}
-        onChange={setHeading}
-        defaultValue={0}
-        disabled={!tilt}
-        readout={`${headingName(heading)} ${heading}°`}
-        title={tilt ? `Facing ${heading}° — Q and E turn it ${TURN_STEP}° at a time` : "Rotate: 2.5D only"}
-      />
-      <Dial
-        label="Tilt"
-        min={PITCH_MIN}
-        max={PITCH_MAX}
-        value={pitch}
-        onChange={setPitch}
-        defaultValue={PITCH_DEFAULT}
-        disabled={!tilt}
-        readout={`${pitch}°`}
-        title={tilt ? `Looking down from ${pitch}° — lower to see the hills and trees stand up` : "Tilt: 2.5D only"}
-      />
-      <Dial
-        label="Sun"
-        min={0}
-        max={1425}
-        step={15}
-        value={minutes}
-        onChange={setMinutes}
-        disabled={!overdrive}
-        readout={clockLabel(minutes)}
-        title={overdrive ? `${clockLabel(minutes)}, Seattle time` : "Sun: 2.5D+ only"}
-      />
-      <Button
-        size="sm"
-        style={BOLD}
-        title="Show the whole city, and put the dials back: the angle, facing north, the sun to now, the day and year to today"
-        onClick={reset}
-      >
-        Reset
-      </Button>
-      {divider}
-      {/* What's drawn, in whatever's left of the row: toggle buttons, pressed in while on. */}
-      <span
-        ref={layersRef}
-        style={{
-          flex: "1 1 0",
-          minWidth: compact ? "min-content" : 0,
-          display: "flex",
-          justifyContent: "space-evenly",
-          gap: LAYER_GAP,
-        }}
-      >
-        {LAYERS.map((l) => (
-          <Button
-            key={l.label}
-            size="sm"
-            square={compact}
-            style={BOLD}
-            active={l.on}
-            aria-pressed={l.on}
-            aria-label={l.label}
-            disabled={l.disabled}
-            title={compact ? `${l.label}: ${l.title}` : l.title}
-            onClick={() => l.set((on) => !on)}
-          >
-            {compact ? (
-              <Glyph>
-                <path d={LAYER_ICONS[l.label]} fill="currentColor" />
-              </Glyph>
-            ) : (
-              l.label
-            )}
-          </Button>
-        ))}
-      </span>
+      {rule}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+        <Dial
+          label="Rotate"
+          min={0}
+          max={360}
+          step={5}
+          endless
+          value={heading}
+          onChange={setHeading}
+          defaultValue={0}
+          disabled={!tilt}
+          readout={`${headingName(heading)} ${heading}°`}
+          title={tilt ? `Facing ${heading}° — Q and E turn it ${TURN_STEP}° at a time` : "Rotate: 2.5D only"}
+        />
+        <Dial
+          label="Tilt"
+          min={PITCH_MIN}
+          max={PITCH_MAX}
+          value={pitch}
+          onChange={setPitch}
+          defaultValue={PITCH_DEFAULT}
+          disabled={!tilt}
+          readout={`${pitch}°`}
+          title={tilt ? `Looking down from ${pitch}° — lower to see the hills and trees stand up` : "Tilt: 2.5D only"}
+        />
+        <Dial
+          label="Sun"
+          min={0}
+          max={1425}
+          step={15}
+          value={minutes}
+          onChange={setMinutes}
+          disabled={!overdrive}
+          readout={clockLabel(minutes)}
+          title={overdrive ? `${clockLabel(minutes)}, Seattle time` : "Sun: 2.5D+ only"}
+        />
+        <KnobButton
+          label="Reset"
+          title="Show the whole city, and put the dials back: the angle, facing north, the sun to now, the day and year to today"
+          onClick={reset}
+        />
+      </div>
+    </div>
+  );
+
+  // Left of the map, what's drawn: toggle buttons, pressed in while on, named
+  // beside their icons — or the icons alone, when the window's too narrow.
+  const layersPanel = (compact: boolean) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2 }}>
+      {LAYERS.map((l) => (
+        <Button
+          key={l.label}
+          size="sm"
+          square={compact}
+          style={{ ...BOLD, justifyContent: compact ? "center" : "flex-start", gap: 6 }}
+          active={l.on}
+          aria-pressed={l.on}
+          aria-label={l.label}
+          disabled={l.disabled}
+          title={compact ? `${l.label}: ${l.title}` : l.title}
+          onClick={() => l.set((on) => !on)}
+        >
+          <Glyph>
+            <path d={LAYER_ICONS[l.label]} fill="currentColor" />
+          </Glyph>
+          {!compact && l.label}
+        </Button>
+      ))}
     </div>
   );
 
@@ -465,6 +434,7 @@ export default function TreesProgram(props: ProgramProps) {
         onMenu={(x, y) => setMenu({ x, y })}
         menu={menu ? (pb) => <TreesRingMenu x={menu.x} y={menu.y} start={90} wedges={menuWedges(pb)} onDismiss={closeMenu} /> : undefined}
         controls={panel}
+        layers={layersPanel}
         modeKnob={modeKnob}
         parks={parks}
         water={water}
