@@ -47,15 +47,19 @@ export const NextIcon = () => (
   </Glyph>
 );
 
+/** Play and pause as bare paths, for drawing them somewhere other than a Glyph. */
+export const PLAY_PATH = "M3 1h1v10H3zM4 2h1v8H4zM5 3h1v6H5zM6 4h1v4H6zM7 5h1v2H7z";
+export const PAUSE_PATH = "M2 2h3v8H2zM7 2h3v8H7z";
+
 export const PlayIcon = () => (
   <Glyph>
-    <path d="M3 1h1v10H3zM4 2h1v8H4zM5 3h1v6H5zM6 4h1v4H6zM7 5h1v2H7z" fill="currentColor" />
+    <path d={PLAY_PATH} fill="currentColor" />
   </Glyph>
 );
 
 export const PauseIcon = () => (
   <Glyph>
-    <path d="M2 2h3v8H2zM7 2h3v8H7z" fill="currentColor" />
+    <path d={PAUSE_PATH} fill="currentColor" />
   </Glyph>
 );
 
