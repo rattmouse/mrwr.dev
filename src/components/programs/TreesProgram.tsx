@@ -63,10 +63,13 @@ export default function TreesProgram(props: ProgramProps) {
   // The layer buttons. The street trees; the LiDAR's other 850,000 trees under them in both views.
   const [street, setStreet] = useState(true);
   const [canopy, setCanopy] = useState(true);
-  // What's under the trees: parks (with their restoration zones and gardens), creeks, and the areaways under the sidewalks.
+  // What's under the trees: parks (with their restoration zones and gardens), creeks, and what's under the streets.
   const [parks, setParks] = useState(true);
   const [water, setWater] = useState(true);
   const [underground, setUnderground] = useState(true);
+  const [rats, setRats] = useState(true);
+  // The pipes are the walk's layer: no button here, but shown while the walk has them on.
+  const [pipes, setPipes] = useState(false);
   // Tilt lit by the sun at an hour of the day, Seattle time — now, to begin with.
   const [sun, setSun] = useState(false);
   const [minutes, setMinutes] = useState(nowMinutes);
@@ -86,6 +89,9 @@ export default function TreesProgram(props: ProgramProps) {
         setParks(message.layers.parks);
         setWater(message.layers.water);
         setUnderground(message.layers.underground);
+        // A walk from before Rats was a layer doesn't say.
+        setRats(message.layers.rats ?? true);
+        setPipes(message.layers.pipes ?? false);
       }
       if (message.sunHour !== undefined) setMinutes(message.sunHour * 60);
       if (message.trees?.mode) setMode(message.trees.mode);
@@ -153,9 +159,15 @@ export default function TreesProgram(props: ProgramProps) {
     {
       label: "Underground",
       title:
-        "The areaways — hollow sidewalks, mostly Pioneer Square's, left when the streets were raised after the 1889 fire — and Link light rail, dashed in its tunnels",
+        "The areaways — hollow sidewalks, mostly Pioneer Square's, left when the streets were raised after the 1889 fire — Link light rail, dashed in its tunnels, and SPU's drainage vaults, drilled drains and outfalls",
       on: underground,
       set: setUnderground,
+    },
+    {
+      label: "Rats",
+      title: "Rats Seattle Public Utilities' sewer cameras have caught on video, each down at its pipe's depth",
+      on: rats,
+      set: setRats,
     },
   ];
 
@@ -307,6 +319,9 @@ export default function TreesProgram(props: ProgramProps) {
               value: `${LAYERS.filter((l) => l.on).length}/${LAYERS.length}`,
               ring: { step: 30, items: layerItems(LAYERS.map((l) => ({ ...l, toggle: () => l.set((on) => !on) }))) },
             },
+            ...(pb.walkerHere
+              ? [{ label: "Guy", value: "Here", title: "Move the guy here", onSelect: pb.walkerHere } satisfies RingNode]
+              : []),
             { label: "Reset", title: "Show the whole city, and put the dials back", onSelect: reset },
           ],
         },
@@ -454,6 +469,8 @@ export default function TreesProgram(props: ProgramProps) {
         parks={parks}
         water={water}
         underground={underground}
+        rats={rats}
+        pipes={pipes}
         sun={sun}
         minutes={minutes}
       />

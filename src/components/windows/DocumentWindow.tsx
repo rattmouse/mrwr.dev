@@ -1801,6 +1801,12 @@ export default function DocumentWindow({
                     </Anchor>
                   </li>
                   <li>
+                    - rats from{" "}
+                    <Anchor href="https://data-seattlecitygis.opendata.arcgis.com/datasets/abb9584e58444baabfc03e269319167c" target="_blank">
+                      Seattle Public Utilities
+                    </Anchor>
+                  </li>
+                  <li>
                     - campus from{" "}
                     <Anchor href="https://facilities.uw.edu/services/space/gis-maps" target="_blank">
                       UW Facilities GIS

@@ -84,6 +84,7 @@ const ADDR_PATH = resolve(ROOT, "public/trees/addresses.bin.gz");
 const REMOVED_PATH = resolve(ROOT, "public/trees/removed.bin.gz");
 const CROWNS_PATH = resolve(ROOT, "public/trees/crowns.bin.gz");
 const PLACES_PATH = resolve(ROOT, "public/trees/places.bin.gz");
+const PIPES_PATH = resolve(ROOT, "public/trees/pipes.bin.gz");
 const SIDEWALK_PATH = resolve(ROOT, "public/trees/sidewalk.bin.gz");
 const UW_PATH = resolve(ROOT, "public/trees/uw.bin.gz");
 /** Bits of position dropped: 0.4 m east–west, 0.8 m north–south — finer than the city's own placement. */
@@ -162,22 +163,26 @@ async function fetchAll(layer = LAYER, where = "1=1", fields = FIELDS) {
  * in plain longitude and latitude, `geometry` being any extra query string
  * (simplification, precision). Paged by offset, PAGE at a time.
  */
-async function fetchFeatures(layer, where, fields, geometry = null) {
-  const w = encodeURIComponent(where);
+/**
+ * `filter` is more query string for both the count and the pages: a spatial
+ * filter, say. `page` is the most the server hands back at once.
+ */
+async function fetchFeatures(layer, where, fields, geometry = null, filter = "", page = PAGE) {
+  const w = encodeURIComponent(where) + filter;
   const { count } = await getJson(`${layer}?where=${w}&returnCountOnly=true&f=json`);
   if (!count) throw new Error(`${layer.split("/services/")[1]} reported nothing`);
-  const pages = Math.ceil(count / PAGE);
+  const pages = Math.ceil(count / page);
   const out = new Array(pages);
   let next = 0;
   const shapes = geometry === null ? "&returnGeometry=false" : `&returnGeometry=true&outSR=4326${geometry}`;
   const worker = async () => {
     while (next < pages) {
-      const page = next++;
+      const at = next++;
       const url =
         `${layer}?where=${w}&outFields=${fields}${shapes}&orderByFields=OBJECTID` +
-        `&resultOffset=${page * PAGE}&resultRecordCount=${PAGE}&f=json`;
+        `&resultOffset=${at * page}&resultRecordCount=${page}&f=json`;
       const body = await getJson(url);
-      out[page] = body.features;
+      out[at] = body.features;
     }
   };
   await Promise.all(Array.from({ length: WORKERS }, worker));
@@ -1008,7 +1013,7 @@ function packCrowns(rows, bbox, street) {
   return { bytes: withHeader("CRW1", meta, body), n: kept.length, matched, junk };
 }
 
-// --- places: parks, restoration sites, gardens, creeks, areaways, light rail ---------
+// --- places: parks, restoration sites, gardens, creeks, areaways, light rail, drainage ---------
 
 const ORG = "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services";
 /** Shapes simplified to about a metre and a half, which none of the views can tell apart. */
@@ -1018,6 +1023,93 @@ const SIMPLIFY = "&maxAllowableOffset=0.000015&geometryPrecision=6";
  * side sewers, detention tanks and stubs aren't creek.
  */
 const CREEK_KEEP = new Set(["Open Stream Channel", "Mainline", "Lateral", "Bridge", "Ditch", "Surface Drainage", "Culvert"]);
+
+// --- King County's wastewater system, under Seattle's ------------------------------
+
+const KC_ORG = "https://services.arcgis.com/Ej0PsM5Aw677QF1W/arcgis/rest/services";
+const KC_FACILITIES = `${KC_ORG}/FACILITY_POINT_279/FeatureServer/0/query`;
+const KC_LINES = `${KC_ORG}/SEWER_LINE_280/FeatureServer/0/query`;
+/** The county's server hands back a thousand at a time. */
+const KC_PAGE = 1000;
+/** The county's layers run from Snohomish to Pierce: only what's in and around the city. */
+const KC_FILTER =
+  "&geometry=" +
+  encodeURIComponent('{"xmin":-122.45,"ymin":47.48,"xmax":-122.2,"ymax":47.75,"spatialReference":{"wkid":4326}}') +
+  "&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects";
+/** The county's structure types, from its layer's coded values, as a card names them. */
+const KC_STRUCTURES = {
+  0: "Sewer structure",
+  1: "Manhole",
+  2: "T-top manhole",
+  3: "Poured-in-place manhole",
+  4: "Pressure manhole",
+  5: "Lake manhole",
+  6: "Diversion structure",
+  7: "Overflow structure",
+  8: "Bypass structure",
+  9: "Outfall structure",
+  10: "Siphon inlet",
+  11: "Siphon outlet",
+  12: "Transition structure",
+  13: "Angle structure",
+  14: "Sand catcher",
+  15: "Junction structure",
+  16: "Force main discharge",
+  17: "Flushing manhole",
+  18: "Pump station",
+  19: "Regulator station",
+  20: "Drop manhole",
+  21: "Crossover structure",
+  22: "Measuring manhole",
+  23: "Tunnel access",
+  24: "Drop structure",
+  25: "Gate structure",
+  26: "Tunnel discharge",
+  27: "Landfall structure",
+  28: "Adit",
+  29: "Grit chamber",
+  30: "Influent manhole",
+  31: "Energy dissipator",
+  33: "Vent",
+  34: "Low-head structure",
+  35: "Low-head structure",
+  36: "Connection point",
+  37: "Emergency relief structure",
+  38: "Treatment plant",
+  39: "Siphon inlet shaft",
+  40: "Siphon outlet shaft",
+  48: "Wet-weather treatment facility",
+  53: "Storage tank",
+  67: "Flow monitor",
+};
+const KC_USES = { SS: "Sanitary", SW: "Drainage", CB: "Combined" };
+/** The county's pipe materials, coded. */
+const KC_MATERIALS = {
+  1: "Reinforced Concrete",
+  2: "PVC",
+  3: "Ductile Iron",
+  4: "Cast Iron",
+  5: "Brick",
+  6: "Brick arch, concrete invert",
+  7: "Concrete, brick invert",
+  8: "Brick arch tunnel",
+  9: "Concrete-lined brick",
+  10: "Concrete tunnel",
+  12: "Asbestos Cement",
+  14: "Fiberglass",
+  17: "Concrete-lined steel",
+  18: "Wood",
+  20: "Steel",
+  21: "Corrugated Metal Pipe",
+  23: "Plain concrete",
+  24: "Clay",
+  25: "Concrete cylinder",
+  26: "Steel",
+  28: "High Density Polyethylene",
+  31: "Prestressed concrete cylinder",
+  36: "Fiberglass",
+};
+const KC_PIPE_TYPES = { 2: "pressure", 3: "siphon", 4: "force", 5: "outfall", 6: "overflow" };
 
 const PLACE_LAYERS = [
   {
@@ -1111,7 +1203,281 @@ const PLACE_LAYERS = [
     clip: true,
     attrs: (a) => ({ name: a.NAME || null }),
   },
+  {
+    kind: "vault",
+    // SPU's drainage vaults and detention tanks: concrete boxes under lots and
+    // streets that hold storm runoff back, the biggest the CSO storage tanks.
+    url: `${ORG}/SPU_DWW_Vaults/FeatureServer/0/query`,
+    where: "1=1",
+    fields: "OBJECTID,PLY_DWW_FEATURE_KEY,PLY_DWW_FEATYPE_TEXT,PLY_DESC_TEXT,PLY_OWNER_NAME,PLY_LIFECYCLE_STAT,PLY_AREA_SQFT_NBR",
+    clip: true,
+    attrs: (a) => ({
+      name: vaultName(a.PLY_DESC_TEXT, a.PLY_DWW_FEATYPE_TEXT),
+      tank: a.PLY_DWW_FEATYPE_TEXT === "Detention Tank" ? 1 : null,
+      ownedBy: ownerLabel(a.PLY_OWNER_NAME),
+      status: /provisional/i.test(a.PLY_LIFECYCLE_STAT ?? "") ? "provisional" : null,
+      sqft: Math.round(Number(a.PLY_AREA_SQFT_NBR)) || null,
+      // Filled in by drainageDepths from SPU's network.
+      deep: a.DEEP ?? null,
+    }),
+  },
+  {
+    kind: "injection",
+    // Drilled drains under roadside rain gardens, letting runoff soak straight
+    // down into the ground. SPU records a depth field for them but leaves it 0.
+    url: `${ORG}/SPU_DWW_Underground_Injection_Cells/FeatureServer/1/query`,
+    where: "1=1",
+    fields: "OBJECTID,SDP_GSIP_NAME,SDP_OWNER_TEXT,SDP_INSTALL_DATE",
+    clip: true,
+    attrs: (a) => ({
+      name: a.SDP_GSIP_NAME || null,
+      ownedBy: ownerLabel(a.SDP_OWNER_TEXT),
+      since: a.SDP_INSTALL_DATE ? new Date(a.SDP_INSTALL_DATE).getUTCFullYear() : null,
+    }),
+  },
+  {
+    kind: "outfall",
+    // Where a pipe empties into the lakes, the Sound or the Duwamish. A
+    // combined one carries sewage too when the rain overflows the system.
+    url: `${ORG}/SPU_DWW_Storm_Outfalls/FeatureServer/0/query`,
+    where: "1=1",
+    fields:
+      "OBJECTID,OUT_PRBL_FLOW_TEXT,OUT_REC_WTRBDY_NAME,OUT_OWNER_NAME,OUT_PIPE_MTRL_TEXT,OUT_PIPE_HGHT_IN_NBR," +
+      "OUT_PIPE_WDTH_IN_NBR,OUT_INSTALL_DATE,OUT_CSO_DESC,OUT_NPDES_ADRS_TEXT,OUT_NPDES_ACTV_FLAG,OUT_PIPE_FEA_KEY,OUT_CVR_ELEV_FT_NBR",
+    clip: true,
+    attrs: (a) => {
+      const w = Number(a.OUT_PIPE_WDTH_IN_NBR) || 0;
+      const h = Number(a.OUT_PIPE_HGHT_IN_NBR) || 0;
+      const material = a.OUT_PIPE_MTRL_TEXT ?? "";
+      // "Vegetation", "Grass" and the like: an open swale, not a pipe.
+      const swale = /^(vegetation|grass|asphalt|rock|riprap|earth|soil)$/i.test(material);
+      return {
+        flow: FLOW_LABELS[a.OUT_PRBL_FLOW_TEXT] ?? null,
+        into: a.OUT_REC_WTRBDY_NAME && a.OUT_REC_WTRBDY_NAME !== "Urban Combined System" ? a.OUT_REC_WTRBDY_NAME : null,
+        ownedBy: ownerLabel(a.OUT_OWNER_NAME),
+        material: swale || /^unknown$/i.test(material) ? null : material || null,
+        swale: swale ? 1 : null,
+        inches: swale ? null : Math.max(w, h) || null,
+        pipe: swale || !w ? null : w === h || !h ? `${w} in` : `${w} × ${h} in`,
+        since: a.OUT_INSTALL_DATE ? new Date(a.OUT_INSTALL_DATE).getUTCFullYear() : null,
+        cso: csoLabel(a.OUT_CSO_DESC),
+        address: a.OUT_NPDES_ADRS_TEXT ? parkName(a.OUT_NPDES_ADRS_TEXT) : null,
+        permit: a.OUT_NPDES_ACTV_FLAG === "Y" ? 1 : null,
+        // The pipe's depth at its mouth, from its mainline (drainageDepths), and the ground's height there, feet.
+        deep: a.DEEP ?? null,
+        elev: Number(a.OUT_CVR_ELEV_FT_NBR) > 0 ? round(Number(a.OUT_CVR_ELEV_FT_NBR), 1) : null,
+      };
+    },
+  },
+  {
+    kind: "rat",
+    // Rats SPU's sewer cameras have caught on video, each where along its pipe
+    // it was seen. ratPipes fills in the pipe (PIPE) from the mainlines layer.
+    url: `${ORG}/Rat_Observations_in_SPU_DWW_Mainlines/FeatureServer/0/query`,
+    where: "CO_OBS_CODE='VR'",
+    fields: "OBJECTID,CO_MNL_FEATURE_KEY,CO_CI_INSP_DATE,CO_CREATED_DATE,CO_PHOTO_NBR,CO_MNL_MATERIAL_CODE,CO_MNL_PRBL_FLOW_CODE",
+    clip: true,
+    attrs: (a) => {
+      const pipe = a.PIPE ?? {};
+      const when = a.CO_CI_INSP_DATE ?? a.CO_CREATED_DATE;
+      return {
+        seen: when ? new Date(when).toISOString().slice(0, 10) : null,
+        flow: FLOW_LABELS[{ C: "Combined", S: "Sanitary", D: "Drainage" }[a.CO_MNL_PRBL_FLOW_CODE]] ?? null,
+        material: pipe.material ?? PIPE_MATERIALS[a.CO_MNL_MATERIAL_CODE] ?? null,
+        inches: pipe.inches ?? null,
+        since: pipe.since ?? null,
+        deep: pipe.deep ?? null,
+        address: pipe.address ?? null,
+        photos: Number(a.CO_PHOTO_NBR) || null,
+        sightings: a.SIGHTINGS > 1 ? a.SIGHTINGS : null,
+      };
+    },
+  },
+  {
+    kind: "structure",
+    // King County's sewer structures — manholes, regulators, siphon shafts,
+    // tunnel access — on the trunks and interceptors it runs under the city's
+    // own sewers, each with how deep it goes.
+    url: KC_FACILITIES,
+    where: "1=1",
+    filter: KC_FILTER,
+    page: KC_PAGE,
+    fields: "OBJECTID,FACILITY_TYPE,FACILITY_DEPTH,N_Depth,YEAR_INSTALLED,TRUNK,STREET_ADDRESS,N_MH_USE",
+    clip: true,
+    attrs: (a) => ({
+      name: KC_STRUCTURES[a.FACILITY_TYPE] ?? "Sewer structure",
+      deep: Number(a.FACILITY_DEPTH) || Number(a.N_Depth) || null,
+      since: Number(a.YEAR_INSTALLED) || null,
+      trunk: a.TRUNK || null,
+      address: a.STREET_ADDRESS ? parkName(String(a.STREET_ADDRESS).replace(/\s+\d{5}$/, "")) : null,
+      flow: FLOW_LABELS[KC_USES[a.N_MH_USE]] ?? null,
+    }),
+  },
 ];
+
+
+const FLOW_LABELS = { Drainage: "storm drain", Combined: "combined sewer", Sanitary: "sanitary sewer" };
+const PIPE_MATERIALS = {
+  CON: "Concrete",
+  VC: "Vitrified Clay",
+  VCP: "Vitrified Clay",
+  RCP: "Reinforced Concrete Pipe",
+  DIP: "Ductile Iron Pipe",
+  BRK: "Brick",
+  AC: "Asbestos Cement",
+  PVC: "Polyvinyl Chloride",
+  CIP: "Cast Iron Pipe",
+};
+
+/** "Vault - Detention Vault" → "Detention vault"; "Tank - Windermere CSO Storage Facility/Tank" → "Windermere CSO Storage Facility/Tank". */
+function vaultName(desc, type) {
+  let s = String(desc ?? "").replace(/\s+/g, " ").trim();
+  s = s.replace(/^(vault|tank|wqs|dts)\s*-\s*/i, "").replace(/\s*\((pos|metro kc)\)/i, "").replace(/detentiontank/i, "detention tank").trim();
+  // Asset ids and bare owners aren't a description.
+  if (!s || /^(vault|tank|spu|maximo\b.*)$/i.test(s)) s = type || "Vault";
+  if (/^detention$/i.test(s)) s = type === "Detention Tank" ? "Detention tank" : "Detention vault";
+  // A plain kind ("Detention Vault") in sentence case; a name of its own (a CSO tank, a size, a department) as written.
+  if (!/CSO|\d|,/.test(s)) s = s[0].toUpperCase() + s.slice(1).toLowerCase();
+  s = s.replace(/dentention/i, "detention").replace(/\bwwps\b/i, "wastewater pump station");
+  return s[0].toUpperCase() + s.slice(1);
+}
+
+/** SPU's owner names as a card shows them; "Unknown" isn't one. */
+function ownerLabel(name) {
+  if (!name || /^unknown$/i.test(name)) return null;
+  return name === "Private" ? "Private property" : name;
+}
+
+/** "OUTFALL POINT - NPDES 30 - CSO 17 - D042-173" → "CSO 17, permit 30". */
+function csoLabel(desc) {
+  const cso = /CSO\s*([\d, ]+\d[A-Z]?)/i.exec(desc ?? "");
+  if (!cso) return null;
+  const npdes = /NPDES\s*(\d+)/i.exec(desc);
+  return `CSO ${cso[1].trim().replace(/\s*,\s*/g, ", ")}${npdes ? `, permit ${npdes[1]}` : ""}`;
+}
+
+/**
+ * How deep SPU's vaults and outfalls go, out of its own network: a vault's
+ * depth from the node it is in the network (mainline end point or not), or
+ * failing that the deepest pipe end that meets it; an outfall's from the
+ * downstream end of the main it's the mouth of. Set as DEEP, feet.
+ */
+async function drainageDepths(byKind) {
+  const keyed = async (url, keyField, keys, fields, each) => {
+    for (let i = 0; i < keys.length; i += 150) {
+      const where = encodeURIComponent(`${keyField} IN (${keys.slice(i, i + 150).join(",")})`);
+      const body = await getJson(`${url}?where=${where}&outFields=${fields}&returnGeometry=false&f=json`);
+      for (const f of body.features) each(f.attributes);
+    }
+  };
+  const vaults = byKind.find((k) => k.kind === "vault");
+  if (vaults) {
+    const keys = [...new Set(vaults.features.map((f) => f.attributes.PLY_DWW_FEATURE_KEY).filter(Boolean))];
+    const depth = new Map();
+    const keep = (k, d) => {
+      if (Number(d) > 0 && !(depth.get(k) >= Number(d))) depth.set(k, Number(d));
+    };
+    await keyed(`${ORG}/SPU_DWW_Mainline_Points_External/FeatureServer/1/query`, "MNLEP_FEA_KEY", keys, "MNLEP_FEA_KEY,MNLEP_DEPTH_FT_NBR", (a) =>
+      keep(a.MNLEP_FEA_KEY, a.MNLEP_DEPTH_FT_NBR),
+    );
+    await keyed(`${ORG}/SPU_DWW_Non_Mainline_Points/FeatureServer/1/query`, "NMNLPT_FEA_KEY", keys, "NMNLPT_FEA_KEY,NMNLPT_DEPTH_FT_NBR", (a) =>
+      keep(a.NMNLPT_FEA_KEY, a.NMNLPT_DEPTH_FT_NBR),
+    );
+    const own = new Set(depth.keys());
+    for (const layer of [10, 14, 15]) {
+      const url = `${ORG}/SPU_DWW_Mainlines_External/FeatureServer/${layer}/query`;
+      const fields = "MNL_UPS_FEATURE_KEY,MNL_DNS_FEATURE_KEY,MNL_UPS_DEPTH_FT_NBR,MNL_DNS_DEPTH_FT_NBR";
+      const each = (a) => {
+        if (!own.has(a.MNL_UPS_FEATURE_KEY)) keep(a.MNL_UPS_FEATURE_KEY, a.MNL_UPS_DEPTH_FT_NBR);
+        if (!own.has(a.MNL_DNS_FEATURE_KEY)) keep(a.MNL_DNS_FEATURE_KEY, a.MNL_DNS_DEPTH_FT_NBR);
+      };
+      await keyed(url, "MNL_UPS_FEATURE_KEY", keys, fields, each);
+      await keyed(url, "MNL_DNS_FEATURE_KEY", keys, fields, each);
+    }
+    for (const f of vaults.features) {
+      const d = depth.get(f.attributes.PLY_DWW_FEATURE_KEY);
+      if (d) f.attributes.DEEP = round(d, 1);
+    }
+  }
+  const outfalls = byKind.find((k) => k.kind === "outfall");
+  if (outfalls) {
+    const keys = [...new Set(outfalls.features.map((f) => f.attributes.OUT_PIPE_FEA_KEY).filter(Boolean))];
+    const depth = new Map();
+    await keyed(`${ORG}/SPU_DWW_Mainlines_External/FeatureServer/10/query`, "MNL_FEA_KEY", keys, "MNL_FEA_KEY,MNL_DNS_DEPTH_FT_NBR", (a) => {
+      if (Number(a.MNL_DNS_DEPTH_FT_NBR) > 0) depth.set(a.MNL_FEA_KEY, Number(a.MNL_DNS_DEPTH_FT_NBR));
+    });
+    for (const f of outfalls.features) {
+      const d = depth.get(f.attributes.OUT_PIPE_FEA_KEY);
+      if (d) f.attributes.DEEP = round(d, 1);
+    }
+  }
+}
+
+/**
+ * Each rat's pipe, out of SPU's mainlines: what it's made of, how wide, how
+ * old, where, and how deep it runs under the rat — the depths at its two
+ * ends, in between as far along it as the rat was seen. And how many rats
+ * that pipe has had.
+ */
+async function ratPipes(byKind) {
+  const rats = byKind.find((k) => k.kind === "rat");
+  if (!rats) return;
+  const keys = [...new Set(rats.features.map((f) => f.attributes.CO_MNL_FEATURE_KEY).filter(Boolean))];
+  const sightings = new Map();
+  for (const f of rats.features) sightings.set(f.attributes.CO_MNL_FEATURE_KEY, (sightings.get(f.attributes.CO_MNL_FEATURE_KEY) ?? 0) + 1);
+  const pipes = new Map();
+  const url = `${ORG}/SPU_DWW_Mainlines_External/FeatureServer/10/query`;
+  const fields =
+    "MNL_FEA_KEY,MNL_MATERIAL_TYPE,MNL_WIDTH_IN_NBR,MNL_HEIGHT_IN_NBR,MNL_INSTALL_DATE,MNL_UPS_DEPTH_FT_NBR,MNL_DNS_DEPTH_FT_NBR,MNL_MXM_ADRS_TEXT";
+  for (let i = 0; i < keys.length; i += 100) {
+    const where = encodeURIComponent(`MNL_FEA_KEY IN (${keys.slice(i, i + 100).join(",")})`);
+    const body = await getJson(`${url}?where=${where}&outFields=${fields}&returnGeometry=true&outSR=4326&f=json`);
+    for (const f of body.features) pipes.set(f.attributes.MNL_FEA_KEY, f);
+  }
+  const kx = 111320 * Math.cos((47.6 * Math.PI) / 180);
+  const ky = 110574;
+  for (const f of rats.features) {
+    const a = f.attributes;
+    a.SIGHTINGS = sightings.get(a.CO_MNL_FEATURE_KEY);
+    const pipe = pipes.get(a.CO_MNL_FEATURE_KEY);
+    if (!pipe) continue;
+    const p = pipe.attributes;
+    const w = Number(p.MNL_WIDTH_IN_NBR) || 0;
+    const up = Number(p.MNL_UPS_DEPTH_FT_NBR) || 0;
+    const down = Number(p.MNL_DNS_DEPTH_FT_NBR) || 0;
+    let deep = null;
+    if (up > 0 && down > 0 && f.geometry && pipe.geometry?.paths?.length) {
+      // How far along the pipe, upstream end first, the rat's point falls.
+      const path = pipe.geometry.paths.flat();
+      const [rx, ry] = [f.geometry.x, f.geometry.y];
+      let total = 0;
+      let at = 0;
+      let best = Infinity;
+      for (let i = 0; i + 1 < path.length; i++) {
+        const ax = (path[i][0] - rx) * kx, ay = (path[i][1] - ry) * ky;
+        const bx = (path[i + 1][0] - rx) * kx, by = (path[i + 1][1] - ry) * ky;
+        const dx = bx - ax, dy = by - ay;
+        const len = Math.hypot(dx, dy);
+        const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (len * len || 1)));
+        const d = Math.hypot(ax + t * dx, ay + t * dy);
+        if (d < best) {
+          best = d;
+          at = total + t * len;
+        }
+        total += len;
+      }
+      const t = total ? at / total : 0.5;
+      deep = round(up + (down - up) * t, 1);
+    } else if (up > 0 || down > 0) deep = round(Math.max(up, down), 1);
+    a.PIPE = {
+      material: p.MNL_MATERIAL_TYPE && !/unknown/i.test(p.MNL_MATERIAL_TYPE) ? p.MNL_MATERIAL_TYPE : null,
+      inches: w || Number(p.MNL_HEIGHT_IN_NBR) || null,
+      since: p.MNL_INSTALL_DATE ? new Date(p.MNL_INSTALL_DATE).getUTCFullYear() : null,
+      deep,
+      address: p.MNL_MXM_ADRS_TEXT ? parkName(p.MNL_MXM_ADRS_TEXT) : null,
+    };
+  }
+}
 
 /** How the track runs, from Sound Transit's profile codes. */
 const RAIL_PROFILES = {
@@ -1176,6 +1542,7 @@ function clipToBbox(f, { south, north, west, east }) {
   const inside = ([lon, lat]) => lon >= west && lon <= east && lat >= south && lat <= north;
   const g = f.geometry;
   if (!g) return null;
+  if (Number.isFinite(g.x)) return inside([g.x, g.y]) ? f : null;
   if (g.rings) return g.rings.some((ring) => ring.some(inside)) ? f : null;
   const paths = [];
   for (const path of g.paths ?? []) {
@@ -1284,11 +1651,13 @@ async function refreshPlaces() {
   const bbox = (await readMeta(OUT_PATH)).bbox;
   const byKind = [];
   for (const layer of PLACE_LAYERS) {
-    let features = await fetchFeatures(layer.url, layer.where, layer.fields, SIMPLIFY);
+    let features = await fetchFeatures(layer.url, layer.where, layer.fields, SIMPLIFY, layer.filter ?? "", layer.page);
     if (layer.clip) features = features.map((f) => clipToBbox(f, bbox)).filter(Boolean);
     byKind.push({ kind: layer.kind, layer, features });
   }
   markUndergroundStations(byKind);
+  await ratPipes(byKind);
+  await drainageDepths(byKind);
   const packed = packPlaces(byKind);
   const gz = gzipSync(packed.bytes, { level: 9 });
   await writeAtomic(PLACES_PATH, gz);
@@ -1296,6 +1665,179 @@ async function refreshPlaces() {
     `[trees] wrote places (${Object.entries(packed.counts).map(([k, n]) => `${n} ${k}`).join(", ")}; ` +
       `${packed.points} points) — ${(gz.length / 1e6).toFixed(2)}MB gzipped`,
   );
+}
+
+// --- pipes: SPU's sewers and storm drains, and King County's trunks under them ------
+
+const SPU_MAINLINES = `${ORG}/SPU_DWW_Mainlines_External/FeatureServer`;
+const SPU_PIPE_FIELDS =
+  "OBJECTID,MNL_FEATYPE_TEXT,MNL_PRBL_FLOW_TEXT,MNL_MATERIAL_TYPE,MNL_OWNER_NAME,MNL_WIDTH_IN_NBR,MNL_HEIGHT_IN_NBR," +
+  "MNL_INSTALL_DATE,MNL_UPS_DEPTH_FT_NBR,MNL_DNS_DEPTH_FT_NBR,MNL_CCTV_DATE,MNL_LINING_FLAG,MNL_STREAM_NAME,MNL_LIFECYCLE_STAT";
+/**
+ * Which pipes, and what each is to the card. King County's own pipes are left
+ * out of SPU's layer, as the county's layer has them, with their depths.
+ */
+const PIPE_KINDS = ["main", "stub", "force", "detention", "abandoned", "county"];
+const PIPE_SOURCES = [
+  {
+    layer: 10,
+    where: "MNL_FEATYPE_TEXT IN ('Mainline','Stub') AND (MNL_OWNER_NAME IS NULL OR MNL_OWNER_NAME <> 'King County')",
+    kind: (a) => (a.MNL_FEATYPE_TEXT === "Stub" ? "stub" : "main"),
+  },
+  { layer: 14, where: "1=1", kind: () => "force" },
+  { layer: 15, where: "1=1", kind: () => "detention" },
+  { layer: 13, where: "MNL_LIFECYCLE_STAT LIKE 'Abandoned%'", kind: () => "abandoned" },
+];
+const PIPE_FLOWS = ["", "storm drain", "sanitary sewer", "combined sewer"];
+const FLOW_INDEX = { Drainage: 1, Sanitary: 2, Combined: 3 };
+
+/**
+ * pipes.bin.gz — every sewer and storm drain the walk's Pipes layer draws,
+ * about 70k, a megabyte or so; fetched only once that layer's on:
+ *   "PIP1"  u32 metaLength  meta (JSON: bbox, count, points, kinds, flows,
+ *   materials, owners, names), then a column per pipe, u16s as byte planes:
+ *     points            how many points it has (u16)
+ *     kind, flow, material, owner   indexes into meta's lists (u8 each)
+ *     flags             bit 0 relined
+ *     width             inches, its widest (u16)
+ *     year, inspected   laid, and last seen by SPU's cameras (u16, 0 unknown)
+ *     up, down          depth at its upstream and downstream ends, tenths of a foot
+ *                       (u16, 0 unknown — but never both: a pipe with neither is left out)
+ *     name              1 + index into meta.names — the creek it carries or
+ *                       the county trunk it's part of — 0 for none (u16)
+ *   then every point of every pipe in order, upstream first, quantized to 16
+ *   bits across meta.bbox, as the step from the point before: dx lo, dx hi, dy lo, dy hi.
+ */
+async function refreshPipes() {
+  const bbox = (await readMeta(OUT_PATH)).bbox;
+  let rows = [];
+  const year = (ms) => (ms ? new Date(ms).getUTCFullYear() : 0);
+  for (const src of PIPE_SOURCES) {
+    const features = await fetchFeatures(`${SPU_MAINLINES}/${src.layer}/query`, src.where, SPU_PIPE_FIELDS, SIMPLIFY);
+    for (const f of features) {
+      const clipped = clipToBbox(f, bbox);
+      if (!clipped) continue;
+      const a = f.attributes;
+      for (const path of clipped.geometry.paths) {
+        rows.push({
+          path,
+          kind: src.kind(a),
+          flow: FLOW_INDEX[a.MNL_PRBL_FLOW_TEXT] ?? 0,
+          material: a.MNL_MATERIAL_TYPE && !/unknown/i.test(a.MNL_MATERIAL_TYPE) ? a.MNL_MATERIAL_TYPE : "",
+          owner: ownerLabel(a.MNL_OWNER_NAME) ?? "",
+          lined: a.MNL_LINING_FLAG === "Y",
+          width: Math.max(Number(a.MNL_WIDTH_IN_NBR) || 0, Number(a.MNL_HEIGHT_IN_NBR) || 0),
+          year: year(a.MNL_INSTALL_DATE),
+          inspected: year(a.MNL_CCTV_DATE),
+          up: Number(a.MNL_UPS_DEPTH_FT_NBR) || 0,
+          down: Number(a.MNL_DNS_DEPTH_FT_NBR) || 0,
+          name: a.MNL_STREAM_NAME ? parkName(a.MNL_STREAM_NAME) : "",
+        });
+      }
+    }
+  }
+  // The county's: depths from the structures at each end, as its pipes mostly don't carry their own.
+  const structures = await fetchFeatures(KC_FACILITIES, "1=1", "OBJECTID,FIRS_TAG,FACILITY_DEPTH,N_Depth", null, KC_FILTER, KC_PAGE);
+  const deep = new Map(structures.map((f) => [f.attributes.FIRS_TAG, Number(f.attributes.FACILITY_DEPTH) || Number(f.attributes.N_Depth) || 0]));
+  const lines = await fetchFeatures(
+    KC_LINES,
+    "1=1",
+    "OBJECTID,UP_FACILITY,DOWN_FACILITY,PIPE_TYPE,PIPE_USE,MATERIAL,WIDTH,HEIGHT,YEAR_INSTALLED,TRUNK,N_Depth,LINING",
+    SIMPLIFY,
+    KC_FILTER,
+    KC_PAGE,
+  );
+  for (const f of lines) {
+    const clipped = clipToBbox(f, bbox);
+    if (!clipped) continue;
+    const a = f.attributes;
+    const both = Number(a.N_Depth) || 0;
+    for (const path of clipped.geometry.paths) {
+      rows.push({
+        path,
+        kind: KC_PIPE_TYPES[a.PIPE_TYPE] === "force" || KC_PIPE_TYPES[a.PIPE_TYPE] === "pressure" ? "force" : "county",
+        flow: FLOW_INDEX[KC_USES[a.PIPE_USE]] ?? 0,
+        material: KC_MATERIALS[a.MATERIAL] ?? "",
+        owner: "King County",
+        lined: !!a.LINING,
+        width: Math.max(Number(a.WIDTH) || 0, Number(a.HEIGHT) || 0),
+        year: Number(a.YEAR_INSTALLED) || 0,
+        inspected: 0,
+        up: deep.get(a.UP_FACILITY) || both,
+        down: deep.get(a.DOWN_FACILITY) || both,
+        name: a.TRUNK || "",
+      });
+    }
+  }
+  // A pipe neither SPU nor the county has a depth for at either end isn't drawn: there'd be no telling where it is.
+  const known = rows.filter((r) => r.up > 0 || r.down > 0);
+  console.log(`[trees] ${rows.length - known.length} pipes left out, with no depth at either end`);
+  rows = known;
+  const packed = packPipes(rows, bbox);
+  const gz = gzipSync(packed.bytes, { level: 9 });
+  await writeAtomic(PIPES_PATH, gz);
+  const byKind = PIPE_KINDS.map((k) => `${rows.filter((r) => r.kind === k).length} ${k}`).join(", ");
+  console.log(`[trees] wrote pipes (${byKind}; ${packed.points} points) — ${(gz.length / 1e6).toFixed(2)}MB gzipped`);
+}
+
+function packPipes(rows, { south, north, west, east }) {
+  const table = (key) => {
+    const list = [...new Set(rows.map((r) => r[key]).filter(Boolean))].sort();
+    const at = new Map(list.map((v, i) => [v, i]));
+    return { list, at };
+  };
+  const materials = table("material");
+  const owners = table("owner");
+  const names = table("name");
+  const q = ([lon, lat]) => [
+    Math.round(((lon - west) / (east - west)) * 65535),
+    Math.round(((lat - south) / (north - south)) * 65535),
+  ];
+  // Rows about 50 m deep, west to east along each: neighbours sit next to each other.
+  for (const r of rows) r.q = r.path.map(q);
+  rows.sort((a, b) => (a.q[0][1] >> 8) - (b.q[0][1] >> 8) || a.q[0][0] - b.q[0][0]);
+  const xs = [];
+  const ys = [];
+  for (const r of rows) for (const [x, y] of r.q) xs.push(x), ys.push(y);
+  const step = (list) => {
+    let prev = 0;
+    return list.map((v) => {
+      const d = (v - prev) & 0xffff;
+      prev = v;
+      return d;
+    });
+  };
+  const u8 = (f) => Buffer.from(rows.map(f));
+  const u16 = (f) => planes16(rows.map((r) => Math.max(0, Math.min(65535, Math.round(f(r))))));
+  const body = Buffer.concat([
+    u16((r) => r.q.length),
+    u8((r) => PIPE_KINDS.indexOf(r.kind)),
+    u8((r) => r.flow),
+    u8((r) => (r.material ? materials.at.get(r.material) + 1 : 0)),
+    u8((r) => (r.owner ? owners.at.get(r.owner) + 1 : 0)),
+    u8((r) => (r.lined ? 1 : 0)),
+    u16((r) => r.width),
+    u16((r) => r.year),
+    u16((r) => r.inspected),
+    u16((r) => r.up * 10),
+    u16((r) => r.down * 10),
+    u16((r) => (r.name ? names.at.get(r.name) + 1 : 0)),
+    planes16(step(xs)),
+    planes16(step(ys)),
+  ]);
+  const meta = {
+    source: "Seattle Public Utilities, DWW mainlines; King County Wastewater Treatment Division, conveyance and facilities",
+    fetched: new Date().toISOString(),
+    bbox: { south, north, west, east },
+    count: rows.length,
+    points: xs.length,
+    kinds: PIPE_KINDS,
+    flows: PIPE_FLOWS,
+    materials: materials.list,
+    owners: owners.list,
+    names: names.list,
+  };
+  return { bytes: withHeader("PIP1", meta, body), points: xs.length };
 }
 
 /** A u16 column as byte planes: every low byte, then every high byte. */
@@ -1863,13 +2405,24 @@ async function main() {
 
   if (!(await isFresh(PLACES_PATH, "PLC1")) || !(await hasEveryPlaceKind())) {
     try {
-      console.log("[trees] fetching parks, restoration sites, P-Patches, creeks, areaways and light rail...");
+      console.log("[trees] fetching parks, restoration sites, P-Patches, creeks, areaways, light rail and drainage...");
       await refreshPlaces();
     } catch (err) {
       console.warn(`[trees] warning: places refresh failed (${err.message}); keeping the old file, or none.`);
     }
   } else {
     console.log(`[trees] ${PLACES_PATH} is under a week old; keeping it.`);
+  }
+
+  if (!(await isFresh(PIPES_PATH, "PIP1"))) {
+    try {
+      console.log("[trees] fetching SPU's sewers and storm drains and King County's trunks (about 70k pipes)...");
+      await refreshPipes();
+    } catch (err) {
+      console.warn(`[trees] warning: pipes refresh failed (${err.message}); keeping the old file, or none.`);
+    }
+  } else {
+    console.log(`[trees] ${PIPES_PATH} is under a week old; keeping it.`);
   }
 
   // The terrain is cut to the trees' bbox, so a new trees file means new terrain.

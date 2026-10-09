@@ -59,8 +59,10 @@ Orientation notes for working in this repo.
   a contact sheet of the cut-outs to check.
 - `public/trees/` (trees.exe: street, Parks- and UW-campus-inventory trees and
   the Quad cherries' bloom checks, removed trees,
-  LiDAR crowns, terrain, and `places.bin.gz` — parks, restoration zones,
-  P-Patches, creeks) is gitignored and build-time only, refreshed by
+  LiDAR crowns, terrain, `places.bin.gz` — parks, restoration zones,
+  P-Patches, creeks, SPU drainage and King County sewer structures — and
+  `pipes.bin.gz`, SPU's and King County's pipes for the walk's Pipes layer,
+  which trees.exe also draws while the walk has it on) is gitignored and build-time only, refreshed by
   `scripts/content/refresh-trees.sh` (run by `deploy.sh`; skips files under a
   week old, `--force` to refetch). `src/data/phenology-npn.json`, which tunes
   the Season view's almanac to USA-NPN observations, is the opposite:

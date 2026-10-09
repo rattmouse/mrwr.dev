@@ -2,7 +2,10 @@
  * Everything trees.exe draws under the trees that isn't a tree: Seattle's
  * parks, Green Seattle Partnership's forest-restoration zones inside them,
  * P-Patch community gardens, creeks, the areaways — the hollow sidewalks of
- * Pioneer Square and downtown — and Link light rail's track and stations.
+ * Pioneer Square and downtown — Link light rail's track and stations, and
+ * what Seattle Public Utilities has under the streets: drainage vaults and
+ * tanks, the drilled drains under rain gardens, the outfalls where pipes empty
+ * into the water, and the rats its sewer cameras have caught on video.
  * One static, gzipped
  * file written by scripts/content/refresh-trees.mjs (the format is written up
  * at packPlaces there), laid out here on the trees' own metres.
@@ -19,7 +22,35 @@ import { dataUrl, fetchGzip, Progress, readHeader, Trees } from "@/lib/trees";
 
 export const PLACES_URL = dataUrl("/trees/places.bin.gz");
 
-export type PlaceKind = "park" | "restoration" | "garden" | "creek" | "areaway" | "rail" | "station";
+export type PlaceKind =
+  | "park"
+  | "restoration"
+  | "garden"
+  | "creek"
+  | "areaway"
+  | "rail"
+  | "station"
+  | "vault"
+  | "injection"
+  | "outfall"
+  | "rat"
+  | "structure"
+  | "pipe";
+
+/** Which layers are on: Parks, Water, Underground, Pipes (with King County's structures), and Rats on their own. */
+export type PlacesShown = { parks: boolean; water: boolean; underground: boolean; rats: boolean; pipes: boolean };
+
+/** The kinds the Underground layer shows. */
+const UNDERGROUND_KINDS = new Set<PlaceKind>(["areaway", "rail", "station", "vault", "injection", "outfall"]);
+/** The kinds drawn at a single point. */
+const POINT_KINDS = new Set<PlaceKind>(["injection", "outfall", "rat", "structure"]);
+
+/** Whether a place is on with these layers. */
+export function placeShown(p: Place, show: PlacesShown): boolean {
+  if (p.kind === "rat") return show.rats;
+  if (p.kind === "pipe" || p.kind === "structure") return show.pipes;
+  return p.kind === "creek" ? show.water : UNDERGROUND_KINDS.has(p.kind) ? show.underground : show.parks;
+}
 
 export type Place = {
   kind: PlaceKind;
@@ -36,9 +67,10 @@ export type Place = {
   zone?: string;
   phase?: number;
   visited?: number;
-  /** Garden. */
+  /** Garden (and an outfall's permit address, or a rat's pipe's). */
   address?: string;
   plots?: number;
+  /** The year it was started, built or laid. */
   since?: number;
   sqft?: number;
   /** Creek: 1 where it runs through a pipe. */
@@ -52,7 +84,7 @@ export type Place = {
   /** What the street-side wall is built of, and what holds the sidewalk up over it. */
   wall?: string;
   roof?: string;
-  /** Feet: the wall's tallest, the space's width, and the wall's length. */
+  /** Feet: the wall's tallest, the space's width, and the wall's length. A rat's `deep` is its pipe's depth under it. */
   deep?: number;
   wide?: number;
   long?: number;
@@ -66,6 +98,37 @@ export type Place = {
   profile?: string;
   /** Station: 1 where its platform is down in a tunnel. */
   underground?: number;
+  /** Vault, injection cell, outfall: who owns it, as SPU names them. */
+  ownedBy?: string;
+  /** Vault: 1 for a tank (a big pipe laid in the ground) rather than a box. */
+  tank?: number;
+  /** Outfall and rat: what the pipe carries — "storm drain", "combined sewer" or "sanitary sewer". */
+  flow?: string;
+  /** Outfall: the water it empties into. */
+  into?: string;
+  /** Outfall and rat: the pipe's material, and its widest, inches. */
+  material?: string;
+  inches?: number;
+  /** Outfall: the pipe's size as SPU gives it ("36 in", "160 × 40 in"); 1 where it's an open swale instead. */
+  pipe?: string;
+  swale?: number;
+  /** Outfall: its combined-sewer overflow number and discharge permit, and 1 while that permit is active. */
+  cso?: string;
+  permit?: number;
+  /** Rat: the day the camera went down the pipe, how many stills were taken, and how many rats the pipe has had. */
+  seen?: string;
+  photos?: number;
+  sightings?: number;
+  /** Outfall: the ground's height at it, feet. */
+  elev?: number;
+  /** Structure, pipe: the King County trunk it's on. */
+  trunk?: string;
+  /** Pipe: which sort, how deep each point is (metres, NaN not recorded), its ends' depths in feet, and 1 where it's been relined. */
+  pipeKind?: string;
+  z?: Float32Array;
+  upDeep?: number;
+  downDeep?: number;
+  lined?: number;
 };
 
 export type Overlay = {
@@ -270,12 +333,13 @@ function distanceToLine(place: Place, mx: number, my: number, within: number): n
 
 /**
  * The place under a world point, `reach` metres being a few pixels at the
- * current zoom: a garden, creek, areaway, track or station near enough
- * first, as they're small, then the restoration zone, then the park.
+ * current zoom: a garden, creek, areaway, track, station, vault or one of the
+ * drainage points near enough first, as they're small, then the restoration
+ * zone, then the park. A rat wins a tie, being the smallest of all.
  */
 export function placeAt(
   places: Places,
-  show: { parks: boolean; water: boolean; underground: boolean },
+  show: PlacesShown,
   mx: number,
   my: number,
   reach: number,
@@ -301,7 +365,13 @@ export function placeAt(
         best = p;
         bestD = d;
       }
-    } else if ((p.kind === "areaway" || p.kind === "station") && show.underground) {
+    } else if (POINT_KINDS.has(p.kind) && (p.kind === "rat" ? show.rats : p.kind === "structure" ? show.pipes : show.underground)) {
+      const d = Math.hypot(p.x[0] - mx, p.y[0] - my) - (p.kind === "rat" ? 0.5 : 0);
+      if (d <= Math.max(reach * 1.5, markSide(p) / 2) && d < bestD) {
+        best = p;
+        bestD = d;
+      }
+    } else if ((p.kind === "areaway" || p.kind === "station" || p.kind === "vault") && show.underground) {
       // A strip a few metres wide, or a platform: inside it, or near enough its edge at this zoom.
       const d = inside(p, mx, my) ? 0 : distanceToLine(p, mx, my, reach);
       if (d <= reach && d < bestD) {
@@ -324,6 +394,12 @@ export function gardenSide(p: Place): number {
   return p.sqft ? Math.max(8, Math.sqrt(p.sqft) * 0.3048) : 20;
 }
 
+/** A point place's mark, metres across: an outfall as wide as its pipe, the rest a fixed size. */
+export function markSide(p: Place): number {
+  if (p.kind === "outfall") return Math.max(1.5, (p.inches ?? 12) * 0.0254 * 1.5);
+  return p.kind === "rat" ? 1 : p.kind === "structure" ? 1.5 : 2;
+}
+
 /** How many of the trees stand inside a park or zone. */
 export function treesInside(place: Place, mx: Float32Array, my: Float32Array, n: number): number {
   const [w, s, e, nn] = place.box;
@@ -335,4 +411,101 @@ export function treesInside(place: Place, mx: Float32Array, my: Float32Array, n:
     if (inside(place, x, y)) count++;
   }
   return count;
+}
+
+// --- in words -------------------------------------------------------------------
+
+const fmt = (n: number) => n.toLocaleString("en-US");
+
+export const acresLabel = (acres: number | undefined) =>
+  acres === undefined ? null : `${acres < 10 ? acres.toFixed(1) : fmt(Math.round(acres))} acres`;
+
+/** A park, restoration zone, garden, creek, areaway, track, vault, drain, outfall or rat, in a line for the status bar, or the walk's crosshair. */
+export function describePlace(p: Place): string {
+  switch (p.kind) {
+    case "park":
+      return [p.name ?? "Park", acresLabel(p.acres)].filter(Boolean).join(" · ");
+    case "restoration":
+      return [
+        p.zone ?? "Restoration zone",
+        p.name ? `forest restoration in ${p.name}` : "forest restoration",
+        p.phase !== undefined ? RESTORATION_PHASES[p.phase]?.toLowerCase() : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    case "garden":
+      return [`${p.name ?? "Community"} P-Patch`, p.address, p.plots ? `${p.plots} plots` : null].filter(Boolean).join(" · ");
+    case "areaway":
+      return ["Areaway", p.name, p.deep ? `${feet(p.deep)} ft down` : null, p.status].filter(Boolean).join(" · ");
+    case "rail":
+      return [railLine(p), p.profile].filter(Boolean).join(" · ");
+    case "station":
+      return [p.name ?? "Link station", p.underground ? "underground" : null].filter(Boolean).join(" · ");
+    case "vault":
+      return [p.name ?? "Vault", p.sqft ? `${fmt(p.sqft)} sq ft` : null, p.deep ? `${feet(p.deep)} ft deep` : null, p.ownedBy]
+        .filter(Boolean)
+        .join(" · ");
+    case "injection":
+      return ["Drilled drain", p.name].filter(Boolean).join(" · ");
+    case "outfall":
+      return [`${capitalize(p.flow ?? "pipe")} outfall`, p.into ? `into ${p.into}` : null, p.pipe, p.cso].filter(Boolean).join(" · ");
+    case "rat":
+      return ["Sewer rat", p.seen ? ratDate(p.seen) : null, p.address, p.deep ? `${feet(p.deep)} ft down` : null]
+        .filter(Boolean)
+        .join(" · ");
+    case "structure":
+      return [p.name ?? "Sewer structure", p.trunk, p.deep ? `${feet(p.deep)} ft deep` : null].filter(Boolean).join(" · ");
+    case "pipe":
+      return [pipeTitle(p), p.inches ? `${p.inches} in` : null, p.material, pipeDepth(p), p.since ? `laid ${p.since}` : null]
+        .filter(Boolean)
+        .join(" · ");
+    default:
+      return `${p.name ?? "Unnamed creek"}${p.piped ? " · piped here" : ""}`;
+  }
+}
+
+/** "2021-06-14" → "June 14, 2021". */
+export function ratDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+export const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+/** Feet to a tenth at most: SDOT's measurements come with float noise on the end. */
+export const feet = (n: number) => String(Math.round(n * 10) / 10);
+
+/** Which Link line a stretch of track carries, from the project that built it. */
+export function railLine(p: Place): string {
+  if (p.name === "OMF") return "Link maintenance yard";
+  if (p.name === "East Link") return "Link 2 Line";
+  return "Link 1 Line";
+}
+
+/** What a pipe is, in a few words: "Combined sewer", "Storm drain force main", "Abandoned sanitary sewer", "Henderson Street Trunk". */
+export function pipeTitle(p: Place): string {
+  const flow = p.flow ?? "sewer";
+  switch (p.pipeKind) {
+    case "county":
+      return p.name ?? "King County sewer trunk";
+    case "force":
+      return `${capitalize(flow)} force main`;
+    case "detention":
+      return "Detention pipe";
+    case "abandoned":
+      return `Abandoned ${flow}`;
+    case "stub":
+      return `${capitalize(flow)} stub`;
+    default:
+      return capitalize(flow);
+  }
+}
+
+/** "6.1–8.4 ft down", or "7 ft down" where the two ends are as deep or only one is known. */
+export function pipeDepth(p: Place): string | null {
+  const a = p.upDeep;
+  const b = p.downDeep;
+  if (a && b && Math.abs(a - b) >= 0.5) return `${feet(Math.min(a, b))}–${feet(Math.max(a, b))} ft down`;
+  const d = a || b;
+  return d ? `${feet(d)} ft down` : null;
 }
