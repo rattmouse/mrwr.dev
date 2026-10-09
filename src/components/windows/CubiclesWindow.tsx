@@ -32,6 +32,7 @@ import {
   hallDoorsOpen,
   nextMonitorScale,
   outsideIsLight,
+  bestDayWorked,
   setMonitorScale,
   aimAtDoor,
   aimAtScreen,
@@ -213,7 +214,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
   // Out through one of the hallway's doors (hallDoorsOpen): the office gives
   // way to trees.exe's city, with you stood in it (TreesWalk) at the door's
   // place in DROP_INS, until you come back.
-  const [outside, setOutside] = useState<{ door: number; light: boolean } | null>(null);
+  const [outside, setOutside] = useState<{ door: number; light: boolean; full: boolean } | null>(null);
   const outsideRef = useRef(false);
   /** Re-measures the glass after upgrade.exe has swapped the monitor. */
   const refitRef = useRef<() => void>(() => {});
@@ -279,7 +280,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     stickRef.current = { x: 0, y: 0 };
     setStick({ x: 0, y: 0 });
     setPrompt(null);
-    setOutside({ door, light: outsideIsLight() });
+    setOutside({ door, light: outsideIsLight(), full: bestDayWorked() === "hard" });
   }, []);
   const comeBack = useCallback(() => {
     const door = outside?.door ?? 0;
@@ -785,7 +786,14 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       )}
 
       {outside && (
-        <TreesWalk key={outside.door} active={active} onLeave={comeBack} light={outside.light} landing={DROP_INS[outside.door]} />
+        <TreesWalk
+          key={outside.door}
+          active={active}
+          onLeave={comeBack}
+          light={outside.light}
+          full={outside.full}
+          landing={DROP_INS[outside.door]}
+        />
       )}
 
       {phase === "seated" && !outside && (

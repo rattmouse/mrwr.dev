@@ -65,7 +65,10 @@
         "Changed: layer buttons moved from toolbar to control panel (./trees). Spaced evenly",
         "Changed: Age histogram drawn behind the year slider (./trees)",
         "Changed: 2.5D+ marked red on the Show knob (./trees). The slow, sunlit view",
-        "Added: right-click ring menu (./trees). Trees and Map rings for coloring, playback and panel settings"
+        "Added: right-click ring menu (./trees). Trees and Map rings for coloring, playback and panel settings",
+        "Added: arced day and year slider in the right-click menu (./trees). Drag to scrub the timeline",
+        "Changed: clicking a picked tree or place again clears it (./trees)",
+        "Changed: tree card drags by its title bar and snaps to a map corner (./trees)"
       ]
     },
     {

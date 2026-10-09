@@ -31,7 +31,7 @@ import {
   Trees,
   UwTrees,
 } from "@/lib/trees";
-import { dayLabel, doy, isConifer, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
+import { dayLabel, doy, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { loadTerrain, Terrain } from "@/lib/terrain";
 import { buildGrid, gridSpan } from "@/lib/treesGrid";
 import { loadPlaces, parkAt, Place, placeAt, Places, RESTORATION_PHASES, treesInside } from "@/lib/places";
@@ -65,6 +65,16 @@ import {
   crownOutline,
 } from "@/lib/treesTilt";
 import { GUYS_SHEET, GuySheet, guyBounds, loadGuys, tintGuys } from "@/lib/guys";
+import {
+  CONIFER_COLOR,
+  CROWN_BROADLEAF,
+  CROWN_CONIFER,
+  hexRgb,
+  plantedColor,
+  speciesGroups,
+  TreeGroup,
+  YEAR_MIN,
+} from "@/lib/treeColors";
 import { WALKER_STALE_MS, WalkerAt, walkerChannel, WalkerMessage } from "@/lib/treesWalker";
 
 /**
@@ -103,10 +113,8 @@ const NO_KEY = 0xffff;
 const PICKED: RGB = [0, 255, 102];
 /** A removed street tree, in the year it came down. */
 const FELLED: RGB = [236, 64, 48];
-/** The LiDAR trees in the Species view: they have no species, so they stay in the background. */
-const CROWN_BROADLEAF: RGB = [84, 98, 82];
-const CROWN_CONIFER: RGB = [40, 104, 74];
-const YEAR_MIN = 1950;
+/** How long the walker's figure stays each painted guy before the next, ms. */
+const GUY_CYCLE_MS = 300;
 /** Dates in these years are mostly the city's first inventory, not plantings. */
 const INVENTORY = [1990, 1992];
 
@@ -115,56 +123,11 @@ const SUNK: React.CSSProperties = {
   borderColor: "#808080 #ffffff #ffffff #808080",
 };
 
-const GROUP_COLORS = [
-  "#ff6b3d",
-  "#ff8fc0",
-  "#c86ae0",
-  "#f2f2e6",
-  "#c99a4a",
-  "#7fd6e8",
-  "#e84a5f",
-  "#f5e663",
-  "#a98cff",
-  "#5fa8ff",
-  "#8fe36b",
-];
-const CONIFER_COLOR = "#2fa86b";
-const OTHER_COLOR = "#7d8a80";
-
-const GENUS_NAMES: Record<string, string> = {
-  Acer: "Maples",
-  Prunus: "Cherries & plums",
-  Malus: "Apples",
-  Cornus: "Dogwoods",
-  Quercus: "Oaks",
-  Pyrus: "Pears",
-  Crataegus: "Hawthorns",
-  Betula: "Birches",
-  Magnolia: "Magnolias",
-  Fraxinus: "Ashes",
-  Carpinus: "Hornbeams",
-  Tilia: "Lindens",
-  Amelanchier: "Serviceberries",
-  Liquidambar: "Sweetgums",
-  Styrax: "Snowbells",
-  Ulmus: "Elms",
-};
-
 /** ImageData's pixels, read as one little-endian u32 each. */
 const pack = (c: RGB, a = 255) =>
   ((a << 24) | (Math.round(c[2]) << 16) | (Math.round(c[1]) << 8) | Math.round(c[0])) >>> 0;
 const GHOST_PACKED = pack(GHOST);
 const FELLED_PACKED = pack(FELLED);
-const hexRgb = (hex: string): RGB => [
-  parseInt(hex.slice(1, 3), 16),
-  parseInt(hex.slice(3, 5), 16),
-  parseInt(hex.slice(5, 7), 16),
-];
-const mixRgb = (a: RGB, b: RGB, t: number): RGB => [
-  a[0] + (b[0] - a[0]) * t,
-  a[1] + (b[1] - a[1]) * t,
-  a[2] + (b[2] - a[2]) * t,
-];
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -190,7 +153,7 @@ type Prepared = {
   };
   speciesCount: Int32Array;
   phen: ReturnType<typeof phenology>[];
-  groups: { key: string; label: string; color: string; count: number }[];
+  groups: TreeGroup[];
   groupOf: Uint8Array;
   yearMax: number;
   yearCounts: Int32Array;
@@ -243,29 +206,7 @@ function prepare(trees: Trees): Prepared {
   const speciesCount = new Int32Array(trees.species.length);
   for (let i = 0; i < n; i++) speciesCount[trees.species16[i]]++;
 
-  const genusCount = new Map<string, number>();
-  trees.species.forEach((sp, s) => {
-    if (isConifer(sp.genus) || sp.genus === "Unknown") return;
-    genusCount.set(sp.genus, (genusCount.get(sp.genus) ?? 0) + speciesCount[s]);
-  });
-  const top = [...genusCount].sort((a, b) => b[1] - a[1]).slice(0, GROUP_COLORS.length);
-  const groups: Prepared["groups"] = top.map(([genus, count], k) => ({
-    key: genus,
-    label: GENUS_NAMES[genus] ?? genus,
-    color: GROUP_COLORS[k],
-    count,
-  }));
-  const coniferIdx = groups.length;
-  groups.push({ key: "conifers", label: "Conifers", color: CONIFER_COLOR, count: 0 });
-  const otherIdx = groups.length;
-  groups.push({ key: "other", label: "Everything else", color: OTHER_COLOR, count: 0 });
-  const groupOf = new Uint8Array(trees.species.length);
-  trees.species.forEach((sp, s) => {
-    const k = groups.findIndex((g) => g.key === sp.genus);
-    const idx = k >= 0 ? k : isConifer(sp.genus) ? coniferIdx : otherIdx;
-    groupOf[s] = idx;
-    if (k < 0) groups[idx].count += speciesCount[s];
-  });
+  const { groups, groupOf } = speciesGroups(trees, speciesCount);
 
   const yearCounts = new Int32Array(yearMax - YEAR_MIN + 1);
   let unknownYear = 0;
@@ -296,12 +237,6 @@ function prepare(trees: Trees): Prepared {
   };
 }
 
-/** A whole-number year's trees: newest near-white, a few years on bright green, settling to dark. */
-function plantedColor(age: number): RGB {
-  if (age <= 0) return [255, 248, 196];
-  if (age < 3) return mixRgb([170, 240, 110], [120, 200, 90], (age - 1) / 2);
-  return mixRgb([120, 200, 90], [56, 112, 64], Math.min(1, (age - 3) / 12));
-}
 
 type View = { cx: number; cy: number; s: number };
 
@@ -532,6 +467,8 @@ export default function TreesWindow({
   const [hoverAsked, setHover] = useState<number | null>(null);
   // A park, zone, garden or creek, picked or pointed at where there's no tree.
   const [selectedPlaceAsked, setSelectedPlace] = useState<Place | null>(null);
+  // Which corner of the map the tree card was last dropped in, for the next one too.
+  const [cardCorner, setCardCorner] = useState<CardCorner>("top-right");
   const [hoverPlaceAsked, setHoverPlace] = useState<Place | null>(null);
 
   // Playback stops on a change of view. Worked out while rendering rather than
@@ -1357,7 +1294,7 @@ export default function TreesWindow({
             ctx.fillStyle = "rgba(0,0,0,0.45)";
             ctx.fill();
           }
-          // One of the painted guys (guys.ts), feet at (fx, fy): red, on a dark edge so he shows on any ground.
+          // One of the painted guys (guys.ts), feet at (fx, fy): a yellower green than any tree, on a dark edge so he shows on any ground.
           const sheet = guysRef.current;
           if (sheet) {
             const b = guyBounds(walkerPoseRef.current);
@@ -1368,7 +1305,7 @@ export default function TreesWindow({
             for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
               ctx.drawImage(edge, b.x, b.y, b.w, b.h, fx - gw / 2 + ox, fy - gh + oy, gw, gh);
             }
-            ctx.drawImage(tintGuys(sheet, "#ff3b30"), b.x, b.y, b.w, b.h, fx - gw / 2, fy - gh, gw, gh);
+            ctx.drawImage(tintGuys(sheet, "#7cfc00"), b.x, b.y, b.w, b.h, fx - gw / 2, fy - gh, gw, gh);
           }
           ctx.restore();
         }
@@ -1506,6 +1443,16 @@ export default function TreesWindow({
       const message = event.data;
       // Another trees.exe moving the walker: theirs will come back as an "at" like any other.
       if (message?.type === "move") return;
+      // The walk's settings: its layers, Sun and coloring are TreesProgram's to take up; the rest are here.
+      if (message?.type === "map") {
+        const t = message.trees;
+        if (!t) return;
+        if (t.day !== undefined) setDay(t.day);
+        if (t.year !== undefined) setYear(t.year);
+        if (t.group !== undefined) setGroup(t.group);
+        if (t.playing !== undefined) setPlaying(t.playing);
+        return;
+      }
       window.clearTimeout(stale);
       if (message?.type === "at") {
         if (!walkerRef.current) walkerPoseRef.current = Math.floor(Math.random() * GUYS_SHEET.count);
@@ -1522,8 +1469,16 @@ export default function TreesWindow({
       } else walkerRef.current = null;
       requestDraw();
     };
+    // The figure never stays one guy: it steps through the whole painted sheet while the walker's out.
+    const cycle = window.setInterval(() => {
+      const walker = walkerRef.current;
+      if (!walker || !guysRef.current || performance.now() - walker.t >= WALKER_STALE_MS) return;
+      walkerPoseRef.current = (walkerPoseRef.current + 1) % GUYS_SHEET.count;
+      requestDraw();
+    }, GUY_CYCLE_MS);
     return () => {
       window.clearTimeout(stale);
+      window.clearInterval(cycle);
       walkerChannelRef.current = null;
       channel.close();
     };
@@ -1945,9 +1900,11 @@ export default function TreesWindow({
     gesture.current = null;
     if (g && !g.moved && e.type === "pointerup") {
       const p = local(e);
+      // Clicking what's already picked puts it down again.
       const tree = pick(p.x, p.y);
-      setSelected(tree);
-      setSelectedPlace(tree === null ? pickPlace(p.x, p.y) : null);
+      const place = tree === null ? pickPlace(p.x, p.y) : null;
+      setSelected((cur) => (tree !== null && tree === cur ? null : tree));
+      setSelectedPlace((cur) => (place !== null && place === cur ? null : place));
     }
   };
 
@@ -2354,8 +2311,10 @@ export default function TreesWindow({
         ) : wantCrowns && trees ? (
           <LoadingPanel label="Loading the city's other 850,000 trees" progress={crownsProgress} corner />
         ) : null}
-        {selectedCard && <TreeCard card={selectedCard} onClose={() => setSelected(null)} />}
-        {!selectedCard && selectedPlaceCard && <TreeCard card={selectedPlaceCard} onClose={() => setSelectedPlace(null)} />}
+        {selectedCard && <TreeCard card={selectedCard} corner={cardCorner} onCorner={setCardCorner} onClose={() => setSelected(null)} />}
+        {!selectedCard && selectedPlaceCard && (
+          <TreeCard card={selectedPlaceCard} corner={cardCorner} onCorner={setCardCorner} onClose={() => setSelectedPlace(null)} />
+        )}
 
       </div>
 
@@ -2944,13 +2903,91 @@ type CardInfo = {
   boldFirstNote?: boolean;
 };
 
-function TreeCard({ card, onClose }: { card: CardInfo; onClose: () => void }) {
+/** The tree card's resting places: a corner of the map, CARD_GAP in from both edges. */
+type CardCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+const CARD_GAP = 6;
+
+/**
+ * The picked tree's (or place's) details, over a corner of the map. Dragged by
+ * its title bar it follows the pointer, kept on the map, and let go it snaps
+ * to whichever corner its middle is nearest — as Sounds' scope does.
+ */
+function TreeCard({
+  card,
+  corner,
+  onCorner,
+  onClose,
+}: {
+  card: CardInfo;
+  corner: CardCorner;
+  onCorner: (corner: CardCorner) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  // Mid-drag: where the card is, in the map's pixels, and where the pointer took hold of it.
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const holdRef = useRef<{ dx: number; dy: number } | null>(null);
+  const boxes = () => {
+    const el = ref.current;
+    const parent = el?.offsetParent;
+    return el && parent ? { card: el.getBoundingClientRect(), map: parent.getBoundingClientRect() } : null;
+  };
+  const clamp = (x: number, y: number) => {
+    const b = boxes();
+    if (!b) return { x, y };
+    return {
+      x: Math.max(CARD_GAP, Math.min(b.map.width - b.card.width - CARD_GAP, x)),
+      y: Math.max(CARD_GAP, Math.min(b.map.height - b.card.height - CARD_GAP, y)),
+    };
+  };
+  const [vertical, horizontal] = corner.split("-");
+  const at: React.CSSProperties = drag
+    ? { left: drag.x, top: drag.y }
+    : { [vertical]: CARD_GAP, [horizontal]: CARD_GAP };
   return (
     <Window
-      style={{ position: "absolute", top: 6, right: 6, width: 248, maxWidth: "calc(100% - 12px)", zIndex: 3 }}
+      ref={ref}
+      style={{ position: "absolute", ...at, width: 248, maxWidth: `calc(100% - ${CARD_GAP * 2}px)`, zIndex: 3 }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <WindowHeader style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+      <WindowHeader
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 4,
+          cursor: drag ? "grabbing" : "grab",
+          touchAction: "none",
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0 || (e.target as Element).closest("button")) return;
+          const b = boxes();
+          if (!b) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          holdRef.current = { dx: e.clientX - b.card.left, dy: e.clientY - b.card.top };
+          setDrag({ x: b.card.left - b.map.left, y: b.card.top - b.map.top });
+        }}
+        onPointerMove={(e) => {
+          const hold = holdRef.current;
+          const b = boxes();
+          if (!hold || !b) return;
+          setDrag(clamp(e.clientX - b.map.left - hold.dx, e.clientY - b.map.top - hold.dy));
+        }}
+        onPointerUp={() => {
+          const b = boxes();
+          holdRef.current = null;
+          if (b) {
+            const cx = b.card.left + b.card.width / 2 - b.map.left;
+            const cy = b.card.top + b.card.height / 2 - b.map.top;
+            onCorner(`${cy < b.map.height / 2 ? "top" : "bottom"}-${cx < b.map.width / 2 ? "left" : "right"}`);
+          }
+          setDrag(null);
+        }}
+        onPointerCancel={() => {
+          holdRef.current = null;
+          setDrag(null);
+        }}
+      >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.kind}</span>
         <Button size="sm" square onClick={onClose} aria-label="Close">
           <span className="close-icon" />

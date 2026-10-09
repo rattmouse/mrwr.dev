@@ -5,10 +5,15 @@ import { Button, ProgressBar, Window, WindowContent } from "react95";
 import { Joystick } from "@/components/windows/MpkPanel";
 import { Crowns, loadCrowns, loadTrees, Trees } from "@/lib/trees";
 import { dayLabel, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
+import { CONIFER_COLOR, CROWN_BROADLEAF, CROWN_CONIFER, hexRgb, plantedColor, speciesGroups, YEAR_MIN } from "@/lib/treeColors";
+import { clockLabel, lightFrom, seattleInstant, sunPosition } from "@/lib/sun";
+import type { TreesMode } from "@/components/windows/TreesWindow";
 import { loadTerrain, Terrain } from "@/lib/terrain";
 import { loadPlaces, Places } from "@/lib/places";
 import { groundZ, makeGround, treeForms } from "@/lib/treesTilt";
-import { walkerChannel, WalkerMessage } from "@/lib/treesWalker";
+import { walkerChannel, WalkerLayers, WalkerMap, WalkerMessage } from "@/lib/treesWalker";
+import TreesRingMenu, { RingNode } from "@/components/windows/TreesRingMenu";
+import { coloringItems, dayItem, layerItems, playItem, treesRing } from "@/components/windows/treesMenu";
 import {
   EYE,
   PITCH_LIMIT,
@@ -37,6 +42,12 @@ import {
  *
  * Wherever you are, trees.exe hears about it (treesWalker.ts) and draws you
  * on its map.
+ *
+ * Right-click brings up trees.exe's ring menu, with what applies out here:
+ * the year's playback and its Day slider, and the layers, plus a way back in.
+ * Once a Hard day has been worked (`full`), Type and Age's colorings — Age
+ * with its own years to play through — and the Sun, which lights the walk by
+ * its hour, come too.
  *
  * It owns the whole cubicle window while it's up, and loads its own copy of
  * the trees: trees.exe's is in the iframe on the desk, a frame away.
@@ -79,6 +90,8 @@ const LIGHT: Body = { gravity: 2.4, jump: 16, walk: 6.5, run: 22 };
 const TELL_MS = 100;
 /** The year goes round as trees.exe's Season view plays it: about thirty seconds a turn. */
 const DAYS_PER_SECOND = 12;
+/** Age's years go by as trees.exe's do: three a second. */
+const YEARS_PER_SECOND = 3;
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -91,6 +104,8 @@ export type Landing = { lat: number; lon: number; yaw: number; pitch: number };
 type Scene = WalkWorld & {
   nStreet: number;
   species16: Uint16Array;
+  /** Year planted − 1900, 0 undated: Age's. */
+  year: Uint8Array;
   phen: ReturnType<typeof phenology>[];
   /** The canopy's conifers, 1 each; null until the canopy is in. */
   conifer: Uint8Array | null;
@@ -141,6 +156,7 @@ function buildWorld({ trees, terrain }: Data, crowns: Crowns | null): Scene {
     ...gridTrees({ widthM, heightM, ground, n, mx, my, gz, height, crown, shape, color, bare }),
     nStreet: nS,
     species16: trees.species16,
+    year: trees.year,
     phen: trees.species.map(phenology),
     conifer: crowns?.conifer ?? null,
   };
@@ -169,6 +185,61 @@ function paintSeason(scene: Scene, day: number) {
   }
 }
 
+/** What's drawn, the right-click menu's Layers: trees.exe's five. */
+type WalkLayers = WalkerLayers;
+const LAYER_NAMES: { key: keyof WalkLayers; label: string; title: string }[] = [
+  { key: "street", label: "Street", title: "The city's street, park and campus trees" },
+  { key: "canopy", label: "Canopy", title: "Every other tree, from the 2021 LiDAR survey" },
+  { key: "parks", label: "Parks", title: "Parks, restoration zones and P-Patch gardens on the ground" },
+  { key: "water", label: "Water", title: "Creeks" },
+  { key: "underground", label: "Underground", title: "The areaways and Link light rail" },
+];
+
+/** How the trees are coloured, other than Season's: Type's legend and the kind picked out of it, or Age's year. */
+type Look = { mode: TreesMode; group: number | null; year: number };
+type Legend = { colors: Uint32Array; groupOf: Uint8Array; conifer: number };
+
+/**
+ * Type's or Age's colours, as trees.exe paints them — except that a tree
+ * trees.exe would draw faintly (another kind than the one picked out, or not
+ * planted yet) isn't drawn at all, there being no dark map behind it here.
+ */
+function paintLook(scene: Scene, look: Look, legend: Legend) {
+  const { color, bare, nStreet, species16, year, conifer } = scene;
+  bare.fill(0);
+  if (look.mode === "species") {
+    for (let i = 0; i < nStreet; i++) {
+      const g = legend.groupOf[species16[i]];
+      color[i] = look.group === null || look.group === g ? legend.colors[g] : 0;
+    }
+    if (!conifer) return;
+    const coneOn = look.group === null || look.group === legend.conifer;
+    const cone = pack(look.group === null ? CROWN_CONIFER : hexRgb(CONIFER_COLOR));
+    const broad = look.group === null ? pack(CROWN_BROADLEAF) : 0;
+    for (let c = 0; c < conifer.length; c++) color[nStreet + c] = conifer[c] ? (coneOn ? cone : 0) : broad;
+    return;
+  }
+  // Age: the dated street trees standing by the year, the newest brightest; the undated canopy stays out of it.
+  for (let i = 0; i < nStreet; i++) {
+    const y = year[i];
+    color[i] = y && 1900 + y <= look.year ? pack(plantedColor(look.year - 1900 - y)) : 0;
+  }
+  color.fill(0, nStreet);
+}
+
+/**
+ * The Sun's light on the whole scene at an hour: full and white at midday,
+ * gold and lower near sunrise and sunset, blue and dim at night. Channel
+ * multipliers for the finished frame.
+ */
+function sunTint(year: number, day: number, minutes: number): [number, number, number] {
+  const light = lightFrom(sunPosition(seattleInstant(year, day, minutes)));
+  const lit = 0.22 + 0.78 * light.day;
+  const gold = light.day > 0 ? Math.max(0, 1 - light.altitude / 20) * light.day : 0;
+  const night = 1 - light.day;
+  return [lit * (1 + 0.18 * gold) * (1 - 0.25 * night), lit * (1 - 0.04 * gold) * (1 - 0.1 * night), lit * (1 - 0.35 * gold) * (1 + 0.35 * night)];
+}
+
 function groundAt(world: WalkWorld, x: number, y: number) {
   return world.ground ? groundZ(world.ground, x, y) : 0;
 }
@@ -178,6 +249,7 @@ export default function TreesWalk({
   onLeave,
   landing,
   light = false,
+  full = false,
 }: {
   active: boolean;
   onLeave: () => void;
@@ -185,6 +257,8 @@ export default function TreesWalk({
   landing: Landing;
   /** Hard's low gravity, high jump and fast legs. */
   light?: boolean;
+  /** A Hard day's been worked: every coloring, and the Sun, on the menu. */
+  full?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -320,6 +394,8 @@ export default function TreesWalk({
 
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    // Only the left button looks about; the right one brings up the menu.
+    if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
   };
@@ -348,7 +424,138 @@ export default function TreesWalk({
   /* --------------------------------------------------------------- loop */
 
   const [prompt, setPrompt] = useState<string | null>(null);
-  const [date, setDate] = useState<string | null>(null);
+  // The day the trees are coloured for, and whether the year is going round
+  // (from landing, until the menu's Pause). The loop keeps its own copies in
+  // refs, so the menu can scrub and pause it without restarting it.
+  const [today, setToday] = useState<number | null>(null);
+  const dayRef = useRef(todayDoy());
+  const [playing, setPlaying] = useState(true);
+  const playingRef = useRef(true);
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+  const [layers, setLayers] = useState<WalkLayers>({ street: true, canopy: true, parks: true, water: true, underground: true });
+  const layersRef = useRef(layers);
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+  // Hard's extras: Type and Age's colorings — Age with its own year to play
+  // through — and the Sun's hour, null while it's left as it was.
+  const [look, setLook] = useState<Look>({ mode: "season", group: null, year: new Date().getFullYear() });
+  const lookRef = useRef(look);
+  useEffect(() => {
+    lookRef.current = look;
+  }, [look]);
+  const [sunHour, setSunHour] = useState<number | null>(null);
+  const sunRef = useRef<number | null>(null);
+  useEffect(() => {
+    sunRef.current = sunHour;
+  }, [sunHour]);
+  const legend = useMemo(() => {
+    if (!data) return null;
+    const { trees } = data;
+    const counts = new Int32Array(trees.species.length);
+    for (let i = 0; i < trees.count; i++) counts[trees.species16[i]]++;
+    const { groups, groupOf } = speciesGroups(trees, counts);
+    const nowYear = new Date().getFullYear();
+    let yearMax = YEAR_MIN;
+    for (let i = 0; i < trees.count; i++) {
+      const y = trees.year[i];
+      if (y && 1900 + y <= nowYear) yearMax = Math.max(yearMax, 1900 + y);
+    }
+    return {
+      groups,
+      yearMax,
+      paint: {
+        colors: Uint32Array.from(groups, (g) => pack(hexRgb(g.color))),
+        groupOf,
+        conifer: groups.findIndex((g) => g.key === "conifers"),
+      } satisfies Legend,
+    };
+  }, [data]);
+  const legendRef = useRef(legend);
+  useEffect(() => {
+    legendRef.current = legend;
+  }, [legend]);
+  // The menu's settings go to trees.exe too, wherever it's open, so its map shows what the walk does.
+  const mapChannelRef = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    const channel = walkerChannel();
+    mapChannelRef.current = channel;
+    return () => {
+      mapChannelRef.current = null;
+      channel?.close();
+    };
+  }, []);
+  const tellMap = useCallback((message: Omit<WalkerMap, "type">) => {
+    mapChannelRef.current?.postMessage({ type: "map", ...message } satisfies WalkerMap);
+  }, []);
+  const setMode = useCallback(
+    (mode: TreesMode) => {
+      setPlaying(false);
+      setLook((cur) => ({ ...cur, mode, group: null }));
+      tellMap({ trees: { mode, group: null, playing: false } });
+    },
+    [tellMap],
+  );
+  const togglePlay = useCallback(() => {
+    // Age at its last year starts again from its first, as trees.exe's does.
+    const lg = legendRef.current;
+    let year = lookRef.current.year;
+    if (!playingRef.current && lookRef.current.mode === "planted" && lg && year >= lg.yearMax) {
+      year = YEAR_MIN;
+      setLook((cur) => ({ ...cur, year }));
+    }
+    const playing = !playingRef.current;
+    setPlaying(playing);
+    // Where it's got to as well, so the two start (or stop) together.
+    tellMap({ trees: { playing, day: Math.floor(dayRef.current), year } });
+  }, [tellMap]);
+  const scrubYear = useCallback(
+    (year: number) => {
+      setPlaying(false);
+      setLook((cur) => ({ ...cur, year }));
+      tellMap({ trees: { year, playing: false } });
+    },
+    [tellMap],
+  );
+  const pickGroup = useCallback(
+    (k: number) => {
+      const group = lookRef.current.group === k ? null : k;
+      setLook((cur) => ({ ...cur, group }));
+      tellMap({ trees: { group } });
+    },
+    [tellMap],
+  );
+  const toggleLayer = useCallback(
+    (key: keyof WalkLayers) => {
+      const next = { ...layersRef.current, [key]: !layersRef.current[key] };
+      setLayers(next);
+      tellMap({ layers: next });
+    },
+    [tellMap],
+  );
+  const pickSunHour = useCallback(
+    (hour: number) => {
+      const next = sunRef.current === hour ? null : hour;
+      setSunHour(next);
+      // Back to plain daylight here leaves trees.exe's Sun where it was.
+      if (next !== null) tellMap({ sunHour: next });
+    },
+    [tellMap],
+  );
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // The menu's Day slider: the year stops where it's put, as trees.exe's does.
+  const scrubDay = useCallback(
+    (d: number) => {
+      setPlaying(false);
+      dayRef.current = d;
+      setToday(d);
+      tellMap({ trees: { day: d, playing: false } });
+    },
+    [tellMap],
+  );
   const [landed, setLanded] = useState(false);
   const describeRef = useRef<(i: number) => string | null>(() => null);
   useEffect(() => {
@@ -393,9 +600,14 @@ export default function TreesWalk({
     let raf = 0;
     let last = performance.now();
     let bob = 0;
-    // The year, from today, and which day and which world the trees were last coloured for.
-    let day = todayDoy();
+    // Which day, which world and which layers the trees were last coloured for.
     let paintedDay = -1;
+    let paintedLayers: WalkLayers | null = null;
+    let paintedLook: Look | null = null;
+    /** Age's year, counted up in fractions while it plays. */
+    let ageClock = 0;
+    let tint: [number, number, number] | null = null;
+    let tintFor = "";
     let paintedWorld: Scene | null = null;
     /** Metres a second upward. */
     let rise = 0;
@@ -500,14 +712,38 @@ export default function TreesWalk({
         eye = { ...cam, z: cam.z + (bob ? Math.sin(bob) * 0.04 : 0) };
       }
 
-      // Today's trees as you come down; the year only starts going round once you've landed.
-      if (!dropRef.current) day = (day + dt * DAYS_PER_SECOND) % 365;
-      const today = Math.floor(day);
-      if (today !== paintedDay || w !== paintedWorld) {
-        paintSeason(w, today);
-        paintedDay = today;
+      // Today's trees as you come down; the year only starts going round once
+      // you've landed, and stops while the menu has it paused.
+      const look = lookRef.current;
+      const legend = legendRef.current;
+      if (!dropRef.current && playingRef.current) {
+        if (look.mode === "season") dayRef.current = (dayRef.current + dt * DAYS_PER_SECOND) % 365;
+        else if (look.mode === "planted" && legend) {
+          ageClock += dt * YEARS_PER_SECOND;
+          if (ageClock >= 1) {
+            ageClock = 0;
+            const next = Math.min(legend.yearMax, look.year + 1);
+            setLook((cur) => ({ ...cur, year: next }));
+            if (next >= legend.yearMax) setPlaying(false);
+          }
+        }
+      }
+      const day = Math.floor(dayRef.current);
+      const shownLayers = layersRef.current;
+      // Season's colours change with the day; Type's and Age's don't, so they're painted only when the look does.
+      const stale = look.mode === "season" ? day !== paintedDay : look !== paintedLook;
+      if (stale || w !== paintedWorld || shownLayers !== paintedLayers || look.mode !== paintedLook?.mode) {
+        if (look.mode !== "season" && legend) paintLook(w, look, legend.paint);
+        else paintSeason(w, day);
+        paintedLook = look;
+        // A colour of 0 isn't drawn: the street trees come first in the world, the canopy after.
+        const nStreet = Math.min(w.nStreet, w.n);
+        if (!shownLayers.street) w.color.fill(0, 0, nStreet);
+        if (!shownLayers.canopy) w.color.fill(0, nStreet, w.n);
+        paintedDay = day;
         paintedWorld = w;
-        setDate(dayLabel(today));
+        paintedLayers = shownLayers;
+        setToday(day);
       }
 
       // trees.exe, wherever it's open, puts you on its map.
@@ -525,7 +761,25 @@ export default function TreesWalk({
         });
       }
 
-      renderWalk(frame, eye, w, placesRef.current);
+      renderWalk(frame, eye, w, placesRef.current, layersRef.current);
+      // The Sun at its hour, over everything: worked out again only when the hour or the day moves.
+      const hour = sunRef.current;
+      if (hour !== null) {
+        const key = `${hour}/${day}`;
+        if (key !== tintFor) {
+          tint = sunTint(new Date().getFullYear(), day, hour * 60);
+          tintFor = key;
+        }
+        const [kr, kg, kb] = tint!;
+        const buf = frame.buf;
+        for (let p = 0; p < buf.length; p++) {
+          const c = buf[p];
+          const r = Math.min(255, (c & 255) * kr);
+          const g = Math.min(255, ((c >>> 8) & 255) * kg);
+          const b = Math.min(255, ((c >>> 16) & 255) * kb);
+          buf[p] = ((c & 0xff000000) | (b << 16) | (g << 8) | r) >>> 0;
+        }
+      }
       ctx.putImageData(image, 0, 0);
 
       // Whatever tree the crosshair is on.
@@ -557,8 +811,116 @@ export default function TreesWalk({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (landed) setMenu({ x: event.clientX, y: event.clientY });
+        }}
         style={{ display: "block", width: "100%", height: "100%", imageRendering: "pixelated", cursor: "crosshair" }}
       />
+      {/* Put away with the cubicle window when it goes inactive. */}
+      {menu && active && today !== null && (
+        <TreesRingMenu
+          x={menu.x}
+          y={menu.y}
+          start={90}
+          onDismiss={closeMenu}
+          wedges={[
+            {
+              label: "Trees",
+              value: look.mode === "season" ? "Season" : look.mode === "species" ? "Type" : "Age",
+              ring: treesRing(
+                coloringItems(look.mode, setMode, (mode) => full || mode === "season", "work a Hard day first"),
+                playItem(
+                  playing,
+                  togglePlay,
+                  look.mode !== "species",
+                  look.mode === "species" ? "Play: Season and Age only" : playing ? "Pause" : look.mode === "planted" ? "Play the years" : "Play the year",
+                ),
+                look.mode === "species"
+                  ? {
+                      label: "Types",
+                      title: "Pick out one kind of tree",
+                      disabled: !legend,
+                      ring: {
+                        step: 360 / Math.max(1, legend?.groups.length ?? 1),
+                        start: -90,
+                        items: (legend?.groups ?? []).map((g, k) => ({
+                          label: g.label,
+                          title: look.group === k ? `${g.label}: show every tree again` : `${g.label}: show only these`,
+                          paint: g.color,
+                          faded: look.group !== null && look.group !== k,
+                          role: "menuitemcheckbox",
+                          on: look.group === k,
+                          keepOpen: true,
+                          onSelect: () => pickGroup(k),
+                        })),
+                      },
+                    }
+                  : look.mode === "planted"
+                    ? {
+                        label: "Year",
+                        value: String(look.year),
+                        title: "Drag along the arc to move through the years",
+                        keepOpen: true,
+                        scrub: {
+                          value: look.year,
+                          min: YEAR_MIN,
+                          max: legend?.yearMax ?? look.year,
+                          step: 1,
+                          ticks: Array.from({ length: Math.floor((legend?.yearMax ?? YEAR_MIN) / 10) - YEAR_MIN / 10 + 1 }, (_, k) => YEAR_MIN + k * 10),
+                          onChange: scrubYear,
+                        },
+                      }
+                    : dayItem(today, scrubDay),
+              ),
+            },
+            {
+              label: "Map",
+              value: "Walk",
+              ring: {
+                step: 45,
+                items: [
+                  {
+                    label: "Layers",
+                    value: `${LAYER_NAMES.filter((l) => layers[l.key] && !(l.key === "canopy" && look.mode === "planted")).length}/${LAYER_NAMES.length}`,
+                    ring: {
+                      step: 30,
+                      items: layerItems(
+                        LAYER_NAMES.map((l) => ({
+                          ...l,
+                          on: layers[l.key],
+                          // The canopy has no planting dates, so Age leaves it out anyway — as trees.exe does.
+                          disabled: l.key === "canopy" && look.mode === "planted",
+                          toggle: () => toggleLayer(l.key),
+                        })),
+                      ),
+                    },
+                  },
+                  {
+                    label: "Sun",
+                    value: sunHour === null ? "Off" : `${sunHour}:00`,
+                    disabled: !full,
+                    title: full ? (sunHour === null ? "Light the walk by the sun at an hour" : `${clockLabel(sunHour * 60)}, Seattle time`) : "Sun: work a Hard day first",
+                    ring: {
+                      step: 15,
+                      start: -90 - 15 / 2,
+                      items: Array.from({ length: 24 }, (_, h) => ({
+                        label: String(h),
+                        title: sunHour === h ? "Back to plain daylight" : `${clockLabel(h * 60)}, Seattle time`,
+                        role: "menuitemradio",
+                        on: sunHour === h,
+                        keepOpen: true,
+                        onSelect: () => pickSunHour(h),
+                      })),
+                    },
+                  },
+                  { label: "Leave", title: "Back to the office (Esc)", onSelect: onLeave } satisfies RingNode,
+                ],
+              },
+            },
+          ]}
+        />
+      )}
 
       {!world && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -647,7 +1009,7 @@ export default function TreesWalk({
               pointerEvents: "none",
             }}
           >
-            {date}
+            {today === null ? null : dayLabel(today)}
             <br />
             {light ? "You feel very light" : "It smells like rain"}
             <br />

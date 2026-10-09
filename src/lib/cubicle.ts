@@ -50,9 +50,31 @@ export const hasClockedOut = () => clockedOutAs() !== null;
 export function markClockedOut(difficulty: Difficulty) {
   try {
     window.localStorage.setItem(CLOCKED_OUT_KEY, difficulty);
+    if (RANK[difficulty] > RANK[bestDayWorked() ?? "easy"]) window.localStorage.setItem(BEST_DAY_KEY, difficulty);
   } catch {
     // No storage, no record: they'll have to work another day.
   }
+}
+
+/**
+ * The hardest day ever worked to 5 o'clock, unlike clockedOutAs's latest:
+ * what the walk outside the hallway's doors (TreesWalk) lets you do. A day
+ * clocked out before this was kept still counts, through clockedOutAs.
+ */
+const BEST_DAY_KEY = "cubicles:best-day";
+const RANK: Record<Difficulty, number> = { easy: 0, medium: 1, hard: 2 };
+export function bestDayWorked(): Difficulty | null {
+  const latest = clockedOutAs();
+  let best: string | null = null;
+  try {
+    best = window.localStorage.getItem(BEST_DAY_KEY);
+  } catch {
+    // No storage: the latest day is all there is.
+  }
+  const kept = best === "easy" || best === "medium" || best === "hard" ? best : null;
+  if (!kept) return latest;
+  if (!latest) return kept;
+  return RANK[kept] >= RANK[latest] ? kept : latest;
 }
 
 /** Same route, for bash.exe's eyes.exe: the player's eyes go wrong, or come right again. */
