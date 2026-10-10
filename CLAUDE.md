@@ -104,6 +104,15 @@ Orientation notes for working in this repo.
   makes the dir, you drop the (uncommitted) file in by hand. Unset ⇒ notifier
   is a no-op. In-memory only — a restart drops sessions mid-flight, but the
   NDJSON archive still has every record.
+  With `telegram`, each session message has Approve / Deny buttons, which
+  `server.js` reads by long-polling the bot (`getUpdates`; `TG_REVIEW=0`
+  turns it off). Approve appends the session to
+  `$PROD_BASE/shared/search-history-approved.json`, served at
+  `/search-history/live` and merged into the dropdown client-side
+  (`src/lib/liveSearchHistory.ts`) — the one runtime fetch the history makes,
+  and only from its own server. Deny adds it to the hide list (with its entry
+  timestamps, `ats`, which `refresh-search-history.mjs` also matches on).
+  `deploy.sh` counts approved sessions as already published.
 - `src/data/probes.json` is the same deal again: gitignored, build-time only,
   refreshed by `scripts/content/refresh-probes.sh` (also run by `deploy.sh`).
   The build imports it, so the script always writes the file, empty when prod

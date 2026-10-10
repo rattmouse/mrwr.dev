@@ -8,6 +8,7 @@ import { Z } from "@/constants/zIndex";
 import { useSearchPlayback } from "@/components/common/SearchPlayback";
 import type { SearchEntryLine } from "@/lib/searchPlayback";
 import type { SearchHistorySession } from "@/lib/searchHistory.types";
+import { useLiveSearchHistory } from "@/lib/liveSearchHistory";
 import { formatRelativeCompact } from "@/lib/relativeTime";
 
 const MAX_ROWS = 8;
@@ -145,9 +146,10 @@ type SearchBoxProps = {
   onOpen?: (session: SearchHistorySession, text: string) => void;
 };
 
-export default function SearchBox({ history, onOpen }: SearchBoxProps) {
+export default function SearchBox({ history: builtHistory, onOpen }: SearchBoxProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const history = useLiveSearchHistory(builtHistory, open);
   const [activeIndex, setActiveIndex] = useState(-1);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);

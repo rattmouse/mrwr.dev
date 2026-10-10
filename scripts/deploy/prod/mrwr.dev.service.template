@@ -16,6 +16,12 @@ Environment=SEARCH_LOG_FILE=__APP_DIR__/shared/search-log.ndjson
 Environment=TRIPWIRE_LOG_FILE=__APP_DIR__/shared/tripwire.ndjson
 # Hand-placed on prod, never committed; absent ⇒ /.env is a plain 404.
 Environment=DOTENV_FILE=__APP_DIR__/shared/dotenv
+# Telegram search review (server.js): approved sessions served live at
+# /search-history/live, denied ones added to the hide list deploy.sh's
+# refresh reads, and the sessions awaiting a button press.
+Environment=SEARCH_HISTORY_APPROVED_FILE=__APP_DIR__/shared/search-history-approved.json
+Environment=SEARCH_HISTORY_HIDDEN_FILE=__APP_DIR__/shared/search-history-hidden.json
+Environment=SEARCH_REVIEW_FILE=__APP_DIR__/shared/search-review.json
 # Optional search-session notifier config (SEARCH_NOTIFY_KIND=telegram|ntfy|
 # webhook plus its secrets). Under /etc so SELinux labels it something PID 1
 # may read (a file under __APP_DIR__/ i.e. /root inherits admin_home_t, which

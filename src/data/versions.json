@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.2.3",
+      "version": "7.2.4",
       "era": "claude",
       "name": "Trees panels",
       "date": "2026-10-09",
@@ -24,7 +24,8 @@
         "Added: game controller support (marbles.exe). Sticks roll and aim, A jumps, Y restarts",
         "Added: game controller support (./trees, paint.exe). Stick pans, triggers zoom",
         "Added: game controller support (midi.exe). Left stick drives the thumbstick",
-        "Added: game controller Start menu and taskbar. Back opens, d-pad moves, A picks, B backs out"
+        "Added: game controller Start menu and taskbar. Back opens, d-pad moves, A picks, B backs out",
+        "Changed: approved searches appear in the search dropdown without a redeploy"
       ]
     },
     {

@@ -28,7 +28,7 @@ import { createRequire } from "node:module";
 
 // Sessions on the hide list (--hidden; see hide-search-history.sh) never make it
 // into the file.
-import { loadHiddenIds } from "./hide-search-history.mjs";
+import { loadHidden } from "./hide-search-history.mjs";
 
 const require = createRequire(import.meta.url);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -228,9 +228,14 @@ function main() {
   // Fail closed: if the hide list can't be read, ship nothing rather than
   // resurface sessions that were meant to stay hidden.
   let hiddenIds = new Set();
+  // Entry timestamps of sessions denied from Telegram (server.js), so a search
+  // stays hidden even if this pass groups it under a different id.
+  let hiddenAts = new Set();
   if (args.hidden) {
     try {
-      hiddenIds = loadHiddenIds(args.hidden);
+      const hidden = loadHidden(args.hidden);
+      hiddenIds = new Set(hidden.map((h) => h.id));
+      hiddenAts = new Set(hidden.flatMap((h) => (Array.isArray(h.ats) ? h.ats : [])));
     } catch (err) {
       warn(`could not read hide list ${args.hidden}: ${err.message}; writing []`);
       writeFileSync(OUT_PATH, "[]\n");
@@ -239,7 +244,9 @@ function main() {
   }
 
   const grouped = group(records, args.idleGap).map(toSession);
-  const notHidden = grouped.filter((s) => !hiddenIds.has(s.id));
+  const notHidden = grouped.filter(
+    (s) => !hiddenIds.has(s.id) && !s.entries.some((e) => e.at && hiddenAts.has(e.at))
+  );
   // Undated sessions can't prove they're recent, so the cutoff drops them too.
   const cutoffMs = args.maxAgeDays > 0 ? Date.now() - args.maxAgeDays * 86_400_000 : Number.NEGATIVE_INFINITY;
   const visible = notHidden.filter((s) => {
