@@ -67,7 +67,11 @@ Orientation notes for working in this repo.
   LiDAR crowns, terrain, `places.bin.gz` — parks, restoration zones,
   P-Patches, creeks, SPU drainage and King County sewer structures — and
   `pipes.bin.gz`, SPU's and King County's pipes for the walk's Pipes layer,
-  which trees.exe also draws while the walk has it on) is gitignored and build-time only, refreshed by
+  which trees.exe also draws while the walk has it on, and `region.bin.gz`,
+  coarse 3DEP elevation for western Washington behind the Mountains layer's
+  contour rings and Tilt ranges, and `parklands.bin.gz`, national, state and
+  King County park boundaries across that region, in `places.bin.gz`'s
+  format) is gitignored and build-time only, refreshed by
   `scripts/content/refresh-trees.sh` (run by `deploy.sh`; skips files under a
   week old, `--force` to refetch). `src/data/phenology-npn.json`, which tunes
   the Season view's almanac to USA-NPN observations, is the opposite:

@@ -8,6 +8,8 @@
 import { dataUrl, fetchGzip, Progress, readHeader } from "@/lib/trees";
 
 export const TERRAIN_URL = dataUrl("/trees/terrain.bin.gz");
+/** The mountains around the city, coast to Cascade crest, on coarse cells: same layout, its own magic. */
+export const REGION_URL = dataUrl("/trees/region.bin.gz");
 
 export type Terrain = {
   w: number;
@@ -20,9 +22,17 @@ export type Terrain = {
   zMax: number;
 };
 
-export async function loadTerrain(signal?: AbortSignal, onProgress?: Progress): Promise<Terrain> {
-  const buf = await fetchGzip(TERRAIN_URL, "TER2", signal, onProgress);
-  const { meta, body } = readHeader<{ w: number; h: number; bbox: Terrain["bbox"]; zStep: number }>(buf, "TER2");
+export function loadTerrain(signal?: AbortSignal, onProgress?: Progress): Promise<Terrain> {
+  return loadHeights(TERRAIN_URL, "TER2", signal, onProgress);
+}
+
+export function loadRegion(signal?: AbortSignal, onProgress?: Progress): Promise<Terrain> {
+  return loadHeights(REGION_URL, "RGN1", signal, onProgress);
+}
+
+async function loadHeights(url: string, magic: string, signal?: AbortSignal, onProgress?: Progress): Promise<Terrain> {
+  const buf = await fetchGzip(url, magic, signal, onProgress);
+  const { meta, body } = readHeader<{ w: number; h: number; bbox: Terrain["bbox"]; zStep: number }>(buf, magic);
   const { w, h, zStep } = meta;
   const n = w * h;
   const bytes = new Uint8Array(buf);

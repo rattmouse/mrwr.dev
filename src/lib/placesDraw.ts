@@ -32,6 +32,11 @@ const pack = (r: number, g: number, b: number) =>
 const FLAT_PARK = pack(46, 98, 44);
 const FLAT_RESTORATION = pack(74, 104, 34);
 const FLAT_PARK_EDGE = pack(84, 146, 76);
+/** The parks past the city, dimmer than Seattle's own, the national parks edged paler. */
+const FLAT_PARKLAND = pack(30, 64, 32);
+const FLAT_PARKLAND_EDGE = pack(66, 124, 62);
+const FLAT_NATIONAL = pack(36, 62, 30);
+const FLAT_NATIONAL_EDGE = pack(150, 178, 100);
 const CREEK = pack(80, 150, 210);
 const CREEK_PIPED = pack(46, 74, 100);
 const GARDEN = pack(150, 196, 80);
@@ -131,9 +136,24 @@ export function drawFlatPlaces(
 ) {
   buf.fill(bg);
   const o = places.overlay;
-  if (show.parks) fillOverlay(buf, W, H, s, ox, oy, o, stride);
   const toX = (mx: number) => mx * s + ox;
   const toY = (my: number) => oy - my * s;
+  // The parks past the city under everything, the national ones first so a state or county park inside one shows.
+  if (show.parks) {
+    for (const national of [true, false]) {
+      for (const p of places.list) {
+        if (p.kind !== "parkland" || (p.agency === "national") !== national) continue;
+        fillPolygon(buf, W, H, p, toX, toY, national ? FLAT_NATIONAL : FLAT_PARKLAND);
+      }
+    }
+    fillOverlay(buf, W, H, s, ox, oy, o, stride);
+    for (const p of places.list) {
+      if (p.kind !== "parkland") continue;
+      // Under a few pixels across, a city park is a speck: no edge to draw.
+      if ((p.box[2] - p.box[0]) * s < 3 && p.agency !== "national") continue;
+      flatLines(buf, W, H, p, toX, toY, p.agency === "national" ? FLAT_NATIONAL_EDGE : FLAT_PARKLAND_EDGE, 1, 0);
+    }
+  }
   const thick = s > 1.5 ? 2 : 1;
   for (const p of places.list) {
     if (p.kind === "park" && show.parks) flatLines(buf, W, H, p, toX, toY, FLAT_PARK_EDGE, 1, 0);

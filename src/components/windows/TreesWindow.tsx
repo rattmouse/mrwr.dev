@@ -32,13 +32,18 @@ import {
   UwTrees,
 } from "@/lib/trees";
 import { dayLabel, doy, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
-import { loadTerrain, Terrain } from "@/lib/terrain";
+import { loadRegion, loadTerrain, Terrain } from "@/lib/terrain";
+import { contours, Contours, drawRings, terrainRect } from "@/lib/region";
 import { buildGrid, gridSpan } from "@/lib/treesGrid";
 import {
   acresLabel,
   describePlace,
   feet,
   loadPlaces,
+  parklandAgency,
+  parklandMask,
+  PARKLANDS_URL,
+  withParklands,
   parkAt,
   pipeDepth,
   pipeTitle,
@@ -136,6 +141,10 @@ const LOOK_PX = 34;
 const LOOK_HALF = (35 * Math.PI) / 180;
 /** How long the walker's figure stays each painted guy before the next, ms. */
 const GUY_CYCLE_MS = 300;
+/** The walker's figure, CSS pixels tall. */
+const GUY_H = 36;
+/** How quickly Follow's view glides after the walker: about two thirds of the way in this many ms. */
+const FOLLOW_MS = 140;
 /** Dates in these years are mostly the city's first inventory, not plantings. */
 const INVENTORY = [1990, 1992];
 
@@ -450,6 +459,8 @@ export type TreesWindowProps = {
   rats: boolean;
   /** SPU's sewers and storm drains, and King County's trunks and structures, at their depths: on while the walk has its Pipes layer on. */
   pipes: boolean;
+  /** The mountains around the city once zoomed out: contour rings on the flat map, the ranges standing in Tilt. */
+  mountains: boolean;
   /** Light Tilt by the sun at `minutes` past midnight, Seattle time, instead of from the map's north-west. */
   sun: boolean;
   minutes: number;
@@ -483,6 +494,7 @@ export default function TreesWindow({
   underground,
   rats,
   pipes,
+  mountains,
   sun,
   minutes,
   onNow,
@@ -630,13 +642,55 @@ export default function TreesWindow({
     [terrain, trees, prepared],
   );
 
+  // The mountains around the city: fetched once the map has settled, as the
+  // ground is, but only while the layer's on.
+  const [region, setRegion] = useState<Terrain | null>(null);
+  const [regionError, setRegionError] = useState(false);
+  const fetchingRegion = mountains && (tilt || prefetchGround) && !region && !regionError;
+  useEffect(() => {
+    if (!fetchingRegion) return;
+    const abort = new AbortController();
+    loadRegion(abort.signal)
+      .then(setRegion)
+      .catch(() => {
+        if (!abort.signal.aborted) setRegionError(true);
+      });
+    return () => abort.abort();
+  }, [fetchingRegion]);
+  const shownRegion = mountains ? region : null;
+  const regionRect = useMemo(
+    () => (region && trees && prepared ? terrainRect(region, trees.bbox, prepared.widthM, prepared.heightM) : null),
+    [region, trees, prepared],
+  );
+  // Tilt's mountains: the same kind of ground as the city's, coarser, snow up high.
+  const regionGround = useMemo<Ground | null>(
+    () => (region && trees && prepared ? makeGround(region, trees.bbox, prepared.widthM, prepared.heightM, null, true) : null),
+    [region, trees, prepared],
+  );
+  // The flat map's rings: every 100 m across the region, and every 20 m on the city's own finer ground.
+  const allRegionRings = useMemo<Contours | null>(
+    () => (region && trees && prepared ? contours(region, trees.bbox, prepared.widthM, prepared.heightM, 100) : null),
+    [region, trees, prepared],
+  );
+  const regionRings = mountains ? allRegionRings : null;
+  const cityRings = useMemo<Contours | null>(
+    () => (mountains && terrain && trees && prepared ? contours(terrain, trees.bbox, prepared.widthM, prepared.heightM, 20) : null),
+    [mountains, terrain, trees, prepared],
+  );
   // The parks, gardens, creeks, areaways and drainage: small, so they follow the trees straight in.
+  // The parks past the city — national, state and King County's — ride along with them, a moment later.
   const [places, setPlaces] = useState<Places | null>(null);
   useEffect(() => {
     if (!trees || !prepared) return;
     const abort = new AbortController();
-    loadPlaces(trees, prepared.widthM, prepared.heightM, abort.signal)
-      .then(setPlaces)
+    const { widthM, heightM } = prepared;
+    loadPlaces(trees, widthM, heightM, abort.signal)
+      .then((city) => {
+        setPlaces(city);
+        return loadPlaces(trees, widthM, heightM, abort.signal, undefined, PARKLANDS_URL).then((lands) => {
+          if (!abort.signal.aborted) setPlaces(withParklands(city, lands, widthM, heightM));
+        });
+      })
       .catch(() => {});
     return () => abort.abort();
   }, [trees, prepared]);
@@ -679,6 +733,18 @@ export default function TreesWindow({
       light && terrain && trees && prepared ? makeGround(terrain, trees.bbox, prepared.widthM, prepared.heightM, light) : ground,
     [light, terrain, trees, prepared, ground],
   );
+  // The parks past the city, as which of the mountains' cells to tint.
+  const regionParks = useMemo(
+    () => (places && region && regionRect ? parklandMask(places.list, region.w, region.h, regionRect) : null),
+    [places, region, regionRect],
+  );
+  const litRegion = useMemo<Ground | null>(() => {
+    const g =
+      light && region && trees && prepared
+        ? makeGround(region, trees.bbox, prepared.widthM, prepared.heightM, light, true)
+        : regionGround;
+    return g && parks && regionParks ? { ...g, parkMask: regionParks } : g;
+  }, [light, region, trees, prepared, regionGround, parks, regionParks]);
   // The LiDAR's other 850k trees: the biggest file by far, so it follows the
   // street trees in, once the map is up, or straight away if Tilt asks.
   const [crowns, setCrowns] = useState<Crowns | null>(null);
@@ -906,8 +972,13 @@ export default function TreesWindow({
     const { w, h } = sizeRef.current;
     if (!prepared) return [0.001, 40];
     const fitS = Math.min(w / prepared.widthM, h / prepared.heightM);
+    // With the mountains on, out as far as the whole of them.
+    if (shownRegion && regionRect) {
+      const regionS = Math.min(w / (regionRect.x1 - regionRect.x0), h / (regionRect.y1 - regionRect.y0));
+      return [Math.min(fitS * 0.5, regionS * 0.9), 40];
+    }
     return [fitS * 0.5, 40];
-  }, [prepared]);
+  }, [prepared, shownRegion, regionRect]);
 
   /** The point on the ground (at sea level, in Tilt) under a spot on the canvas. */
   const toWorld = (px: number, py: number, v: View) => {
@@ -988,7 +1059,8 @@ export default function TreesWindow({
       const stride = Math.max(1, Math.round((rough ? 3 : 2) * dpr));
       const key =
         `${W}x${H} ${tiltView.S} ${v.cx} ${v.cy} ${pitch} ${heading} ${ground ? "g" : "-"} ${stride} ` +
-        `${sunKey ?? "map"} ${showPlaces ? `${parks} ${water} ${underground} ${rats} ${pipes && pipeData ? 1 : 0}` : "-"}`;
+        `${sunKey ?? "map"} ${showPlaces ? `${parks} ${water} ${underground} ${rats} ${pipes && pipeData ? 1 : 0}` : "-"} ` +
+        `${shownRegion ? "m" : "-"}${litRegion?.parkMask ? "p" : "-"}`;
       let layer = groundLayerRef.current;
       if (!layer || layer.key !== key) {
         if (!layer || layer.buf.length !== W * H) {
@@ -996,6 +1068,9 @@ export default function TreesWindow({
         }
         const overlay = places && parks ? places.overlay : null;
         renderGround(layer.buf, layer.depth, tiltView, litGround, prepared.widthM, prepared.heightM, pack(BG), stride, overlay);
+        if (shownRegion && litRegion && regionRect) {
+          renderGround(layer.buf, layer.depth, tiltView, litRegion, prepared.widthM, prepared.heightM, pack(BG), stride, null, regionRect);
+        }
         if (showPlaces && places) drapePlaces(layer.buf, layer.depth, tiltView, litGround, places, { parks, water, underground, rats, pipes }, light ? 0.3 + 0.7 * light.day : 1, pipeData);
         layer.key = key;
         layer.W = W;
@@ -1003,7 +1078,9 @@ export default function TreesWindow({
       }
       buf.set(layer.buf);
       if (selectedPlace) {
-        outlinePlace(buf, W, H, selectedPlace, pack(PICKED), null, { view: tiltView, depth: layer.depth, g: litGround });
+        // A park past the city stands on the mountains' ground, not the city's.
+        const under = selectedPlace.kind === "parkland" && shownRegion && litRegion ? litRegion : litGround;
+        outlinePlace(buf, W, H, selectedPlace, pack(PICKED), null, { view: tiltView, depth: layer.depth, g: under });
       }
       // The sun's light on the trees, and their shadows on whatever ground is bare.
       let lit = MAP_LIGHT;
@@ -1124,16 +1201,24 @@ export default function TreesWindow({
         }
       }
       drawTiltTrees(buf, layer.depth, tiltView, packed, drawColors, drawBare, GHOST_PACKED, sub, from, to, lit);
-    } else if (!tilt && showPlaces && places && v) {
+    } else if (!tilt && ((showPlaces && places) || regionRings || cityRings) && v) {
       const s = v.s * dpr;
       const ox = W / 2 - v.cx * s;
       const oy = H / 2 + v.cy * s;
       const stride = movingRef.current ? 2 : 1;
-      const key = `${W}x${H} ${s} ${ox} ${oy} ${parks} ${water} ${underground} ${rats} ${pipes && pipeData ? 1 : 0} ${stride}`;
+      const rings = !!(regionRings || cityRings);
+      const key =
+        `${W}x${H} ${s} ${ox} ${oy} ${showPlaces ? `${parks} ${water} ${underground} ${rats} ${pipes && pipeData ? 1 : 0}` : "-"} ` +
+        `${stride} ${regionRings ? "r" : "-"}${cityRings ? "c" : "-"}`;
       let layer = flatLayerRef.current;
       if (!layer || layer.key !== key) {
         if (!layer || layer.buf.length !== W * H) layer = { key, buf: new Uint32Array(W * H) };
-        drawFlatPlaces(layer.buf, W, H, s, ox, oy, places, { parks, water, underground, rats, pipes }, pack(BG), stride, pipeData);
+        if (showPlaces && places) {
+          drawFlatPlaces(layer.buf, W, H, s, ox, oy, places, { parks, water, underground, rats, pipes }, pack(BG), stride, pipeData);
+        } else layer.buf.fill(pack(BG));
+        if (rings) {
+          drawRings(layer.buf, W, H, s, ox, oy, v.s, regionRings, cityRings, prepared ? [prepared.widthM, prepared.heightM] : null);
+        }
         layer.key = key;
         flatLayerRef.current = layer;
       }
@@ -1414,7 +1499,7 @@ export default function TreesWindow({
           const sheet = guysRef.current;
           if (sheet) {
             const b = guyBounds(walkerPoseRef.current);
-            const gh = 36;
+            const gh = GUY_H;
             const gw = (b.w / b.h) * gh;
             walkerHitRef.current = { x0: fx - gw / 2 - 3, y0: fy - gh - 3, x1: fx + gw / 2 + 3, y1: fy + 3, gx: fx, gy };
             const edge = tintGuys(sheet, "rgba(0,0,0,0.85)");
@@ -1510,6 +1595,11 @@ export default function TreesWindow({
     light,
     sunKey,
     litGround,
+    shownRegion,
+    litRegion,
+    regionRect,
+    regionRings,
+    cityRings,
     turn,
     squash,
   ]);
@@ -1882,7 +1972,11 @@ export default function TreesWindow({
       } else {
         at = toWorld(px, py, v);
       }
-      if (at.x < 0 || at.y < 0 || at.x > prepared.widthM || at.y > prepared.heightM) return null;
+      // Past the city's edge there's only the parks beyond it.
+      if (at.x < 0 || at.y < 0 || at.x > prepared.widthM || at.y > prepared.heightM) {
+        const far = parks ? placeAt(places, { parks, water: false, underground: false, rats: false, pipes: false }, at.x, at.y, reach) : null;
+        return far?.kind === "parkland" ? far : null;
+      }
       const found = placeAt(places, { parks, water, underground, rats, pipes }, at.x, at.y, reach);
       // A pipe under a park beats the park; anything smaller beats the pipe.
       if (pipes && pipeData && (!found || found.kind === "park" || found.kind === "restoration")) {
@@ -1920,24 +2014,64 @@ export default function TreesWindow({
     return !!hit && px >= hit.x0 && px <= hit.x1 && py >= hit.y0 && py <= hit.y1;
   };
 
-  /** The view slid, at the same zoom, so the walker stands in the middle of it. */
-  const centreOnWalker = () => {
-    const v = viewRef.current;
+  /**
+   * Where the view's centre goes, at its zoom, for the walker's figure to
+   * stand in the middle of the canvas: not the ground under them at sea level
+   * but the figure itself, half its height up from its feet, and in Tilt
+   * lifted with them up their hill (and their jump).
+   */
+  const walkerCentre = (v: View): { cx: number; cy: number } | null => {
     const walker = walkerRef.current;
-    if (!v || !walker || !trees || !prepared) return;
+    if (!walker || !trees || !prepared) return null;
     const { south, north, west, east } = trees.bbox;
-    const cx = ((walker.at.lon - west) / (east - west)) * prepared.widthM;
-    const cy = ((walker.at.lat - south) / (north - south)) * prepared.heightM;
-    if (Math.abs(cx - v.cx) + Math.abs(cy - v.cy) < 0.01) return;
-    beginStretch();
-    viewRef.current = { ...v, cx, cy };
-    fittedRef.current = false;
-    moved();
-    requestDraw();
+    const mx = ((walker.at.lon - west) / (east - west)) * prepared.widthM;
+    const my = ((walker.at.lat - south) / (north - south)) * prepared.heightM;
+    if (!tilt) return { cx: mx, cy: my + GUY_H / 2 / v.s };
+    // Feet on screen sit (v_w − cv)·s·sin above the middle for being further off, and z·s·cos·EXAG for their height.
+    const [u, vw] = rot(heading, mx, my);
+    const sin = Math.sin(pitchRad);
+    const cv = vw + (walker.at.z * Math.cos(pitchRad) * EXAG) / sin + GUY_H / 2 / (v.s * sin);
+    const [cx, cy] = unrot(heading, u, cv);
+    return { cx, cy };
+  };
+  const walkerCentreRef = useRef(walkerCentre);
+  useEffect(() => {
+    walkerCentreRef.current = walkerCentre;
+  });
+
+  // Follow glides the view after the walker a frame at a time, rather than
+  // jumping it at each of their ten-a-second reports. Drawn rough while it
+  // moves — real frames, not a stretched copy of the last — and sharp once
+  // they've stopped and it has caught up.
+  const followFrameRef = useRef(0);
+  const centreOnWalker = () => {
+    if (followFrameRef.current) return;
+    let last = performance.now();
+    const step = () => {
+      followFrameRef.current = 0;
+      const v = viewRef.current;
+      const to = v && followingRef.current ? walkerCentreRef.current(v) : null;
+      if (!v || !to) return;
+      const now = performance.now();
+      const k = 1 - Math.exp(-(now - last) / FOLLOW_MS);
+      last = now;
+      const dx = to.cx - v.cx;
+      const dy = to.cy - v.cy;
+      // Within a third of a pixel: there.
+      const done = Math.hypot(dx, dy) * v.s < 0.3;
+      viewRef.current = done ? { ...v, ...to } : { ...v, cx: v.cx + dx * k, cy: v.cy + dy * k };
+      stretchRef.current = null;
+      fittedRef.current = false;
+      moved();
+      requestDraw();
+      if (!done) followFrameRef.current = requestAnimationFrame(step);
+    };
+    followFrameRef.current = requestAnimationFrame(step);
   };
   useEffect(() => {
     centreRef.current = centreOnWalker;
   });
+  useEffect(() => () => cancelAnimationFrame(followFrameRef.current), []);
 
   // What the walker's looking at, picked out here: a tree, or a place or pipe, if this map has it to show.
   useEffect(() => {
@@ -2982,6 +3116,22 @@ function placeCard(p: Place, trees: number): CardInfo {
     if (v !== null && v !== undefined && v !== "") rows.push([k, String(v)]);
   };
   switch (p.kind) {
+    case "parkland":
+      add("Kind", p.category);
+      add("Run by", parklandAgency(p));
+      add("Area", acresLabel(p.acres));
+      return {
+        kind: "Park",
+        title: p.name ?? "Park",
+        rows,
+        notes: [
+          p.agency === "national"
+            ? "A unit of the National Park System, from the Park Service's own boundary data."
+            : p.agency === "state"
+              ? "A Washington state park, from State Parks' boundary data."
+              : "A park from King County's inventory of every park in the county; Seattle's own are drawn from the city's finer data.",
+        ],
+      };
     case "park":
       add("Area", acresLabel(p.acres));
       add("Trees", `${fmt(trees)} inventoried`);

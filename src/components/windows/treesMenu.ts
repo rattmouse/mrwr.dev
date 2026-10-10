@@ -18,7 +18,7 @@ export const rects = (list: [number, number, number, number][]) =>
  * The layer buttons' icons, for when trees.exe's panel is too narrow for
  * their names, and on the menu's Layers ring: a street tree by the curb, a
  * clump of canopy, a park bench, water, a pit under the pavement, a warp
- * pipe, and a rat.
+ * pipe, a rat, and a mountain with snow on top.
  */
 export const LAYER_ICONS: Record<string, string> = {
   Street: "M4 1h4v1h1v1h1v3H9v1H3V6H2V3h1V2h1z" + rects([[5, 7, 2, 3], [0, 10, 12, 1]]),
@@ -55,6 +55,19 @@ export const LAYER_ICONS: Record<string, string> = {
     [0, 4, 1, 2],
     [4, 8, 1, 1],
     [8, 8, 1, 1],
+  ]),
+  // A peak, its snowcap marked off by a gap at the snowline, and a lower one behind it to the right.
+  Mountains: rects([
+    [4, 2, 1, 1],
+    [3, 3, 3, 1],
+    [2, 4, 1, 1],
+    [6, 4, 1, 1],
+    [2, 5, 5, 1],
+    [9, 5, 1, 1],
+    [1, 6, 7, 1],
+    [8, 6, 3, 1],
+    [1, 7, 11, 1],
+    [0, 8, 12, 2],
   ]),
 };
 
