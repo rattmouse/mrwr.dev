@@ -14,6 +14,8 @@
         "Changed: Reset button replaced with a push knob (./trees)",
         "Changed: selection details moved to an info section under the layers (./trees)",
         "Fixed: windows off-centre on the desk browser after maximizing (cubicles.exe)",
+        "Changed: player height raised to 6 ft 2 in (cubicles.exe). Eye level now above the partitions",
+        "Added: Analyzer (App). Uses super intelligence to open files of any type",
         "Added: Mountains layer (./trees). Western Washington contour rings in 2D, ranges in 2.5D",
         "Added: national, state and King County park boundaries under Parks (./trees)",
         "Changed: 2.5D ground wireframe replaced with elevation rings (./trees)"
