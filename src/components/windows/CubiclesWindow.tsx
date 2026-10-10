@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button, Window, WindowContent, WindowHeader } from "react95";
 import { Joystick } from "@/components/windows/MpkPanel";
+import { IDLE, Pad, padMenu, useGamepad } from "@/lib/gamepad";
 import { makeView, applyT, normalise, rgb, vec, Vec3 } from "@/lib/marbles3d";
 import {
   DOOR_RANGE,
@@ -193,6 +194,8 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
   };
   const keysRef = useRef<Set<string>>(new Set());
   const stickRef = useRef({ x: 0, y: 0 });
+  /** The game controller, as of this frame — see useGamepad below. */
+  const padRef = useRef<Pad>(IDLE);
   // Only the focused window hears the keyboard. Held keys are let go the moment
   // it loses the focus, or they'd stay held down while you're somewhere else.
   const focusedRef = useRef(active);
@@ -298,6 +301,16 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     setOutside(null);
   }, [outside]);
 
+  /** E, or A on a pad: whichever door or desk you're looking at. */
+  const interact = useCallback(() => {
+    const pose = poseRef.current;
+    const look = gaze(pose.yaw, pose.pitch);
+    const hall = aimAtHallDoor(pose.pos, look);
+    if (hall !== null) tryHallDoor(hall);
+    else if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
+    else if (atTheDoor(pose.pos, look)) tryDoor();
+  }, [sit, tryHallDoor]);
+
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
       target instanceof HTMLElement &&
@@ -315,12 +328,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       }
       if (phaseRef.current !== "standing") return;
       if (event.code === "KeyE") {
-        const pose = poseRef.current;
-        const look = gaze(pose.yaw, pose.pitch);
-        const hall = aimAtHallDoor(pose.pos, look);
-        if (hall !== null) tryHallDoor(hall);
-        else if (aimAtScreen(pose.pos, look, USE_RANGE)) sit("seated");
-        else if (atTheDoor(pose.pos, look)) tryDoor();
+        interact();
         event.preventDefault();
         return;
       }
@@ -342,7 +350,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [sit, tryHallDoor]);
+  }, [sit, interact]);
 
   /* --------------------------------------------------------- the pointer */
 
@@ -415,6 +423,31 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
     phaseRef.current = "standing";
     setPhase("standing");
   }, []);
+
+  const introRef = useRef<HTMLDivElement | null>(null);
+
+  // A game controller: the left stick (or d-pad) walks and the right one looks
+  // about, both read by the loop below; A is E, and B gets up from the desk.
+  // Sat down, the page in the browser may be hearing the pad too, so once it
+  // has the focus it's Back instead — the desktop's own Start button, which
+  // the browser's page doesn't take (see gamepad.ts).
+  useGamepad(active && !outside, (pad) => {
+    padRef.current = pad;
+    if (phaseRef.current === "intro") {
+      if (!padMenu(introRef.current, pad) && pad.pressed("Start")) start();
+      return;
+    }
+    if (phaseRef.current === "seated") {
+      const inBrowser = document.activeElement instanceof HTMLIFrameElement;
+      if (pad.pressed("Back") || (!inBrowser && pad.pressed("B"))) {
+        // Out of the browser, or it'd go on hearing the pad while you walk.
+        if (inBrowser) (document.activeElement as HTMLElement).blur();
+        sit("standing");
+      }
+      return;
+    }
+    if (!sitRef.current && pad.pressed("A")) interact();
+  });
 
   /* ------------------------------------------------------------ the loop */
 
@@ -500,9 +533,15 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         }
       } else if (phaseRef.current === "standing") {
         const pose = poseRef.current;
-        let yaw = pose.yaw - ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0)) * TURN * dt;
+        const pad = padRef.current;
+        let yaw = pose.yaw - ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0) + pad.look.x) * TURN * dt;
+        const pitch = clamp(pose.pitch + pad.look.y * TURN * 0.6 * dt, -PITCH_LIMIT, PITCH_LIMIT);
         let dx = (held("KeyD") ? 1 : 0) - (held("KeyA") ? 1 : 0);
         let dz = (held("KeyW", "ArrowUp") ? 1 : 0) - (held("KeyS", "ArrowDown") ? 1 : 0);
+        if (pad.move.x || pad.move.y) {
+          dx = pad.move.x;
+          dz = -pad.move.y;
+        }
         const push = stickRef.current;
         if (Math.hypot(push.x, push.y) > STICK_DEAD_ZONE) {
           dx = push.x;
@@ -522,6 +561,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
         poseRef.current = {
           ...pose,
           yaw,
+          pitch,
           pos: vec(walked.x, EYE_STANDING + (moving ? Math.sin(bobRef.current) * 0.022 : 0), walked.z),
         };
       }
@@ -816,6 +856,7 @@ export default function CubiclesWindow({ active = true }: { active?: boolean }) 
 
       {phase === "intro" && (
         <div
+          ref={introRef}
           style={{
             position: "absolute",
             inset: 0,

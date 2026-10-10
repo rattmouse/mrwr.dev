@@ -22,6 +22,7 @@ import {
   type Marble,
 } from "@/lib/marblesCourse";
 import { buildCourse, type Course } from "@/lib/marblesLayout";
+import { IDLE, type Pad, useGamepad } from "@/lib/gamepad";
 import {
   collectBlocks,
   collectGhost,
@@ -218,6 +219,15 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
   }, [active]);
   /** Raised by a press of the jump key, lowered by the frame that spends it. */
   const jumpRef = useRef(false);
+  /** The game controller, as of this frame. */
+  const padRef = useRef<Pad>(IDLE);
+  // The left stick or d-pad rolls and the right stick swings the camera, both
+  // read by the loop; A jumps, Y starts over, and the shoulders are Q and E.
+  useGamepad(active, (pad) => {
+    padRef.current = pad;
+    if (pad.pressed("A")) jumpRef.current = true;
+    if (pad.pressed("Y")) restartRef.current = true;
+  });
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null);
   // A finger held on the canvas rolls the ball forward; there is no keyboard to
   // do it with, and dragging is already steering the camera.
@@ -392,11 +402,15 @@ const MarblesWindow = forwardRef<MarblesWindowHandle, MarblesWindowProps>(functi
       }
 
       const held = (...codes: string[]) => codes.some((c) => keys.has(c));
-      const forward = (held("KeyW", "ArrowUp") ? 1 : 0) - (held("KeyS", "ArrowDown") ? 1 : 0);
-      const right = (held("KeyD", "ArrowRight") ? 1 : 0) - (held("KeyA", "ArrowLeft") ? 1 : 0);
-      const spin = (held("KeyE") ? 1 : 0) - (held("KeyQ") ? 1 : 0);
-      if (spin !== 0) {
+      const pad = padRef.current;
+      const padded = pad.move.x !== 0 || pad.move.y !== 0;
+      const forward = padded ? -pad.move.y : (held("KeyW", "ArrowUp") ? 1 : 0) - (held("KeyS", "ArrowDown") ? 1 : 0);
+      const right = padded ? pad.move.x : (held("KeyD", "ArrowRight") ? 1 : 0) - (held("KeyA", "ArrowLeft") ? 1 : 0);
+      const spin =
+        (held("KeyE") || pad.held("RB") ? 1 : 0) - (held("KeyQ") || pad.held("LB") ? 1 : 0) - pad.look.x;
+      if (spin !== 0 || pad.look.y !== 0) {
         cam.yaw += spin * 1.8 * dt;
+        cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.pitch + pad.look.y * 1.2 * dt));
         cam.idle = 0;
       } else {
         cam.idle += dt;
