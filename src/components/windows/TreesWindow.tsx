@@ -141,6 +141,10 @@ const LOOK_PX = 34;
 const LOOK_HALF = (35 * Math.PI) / 180;
 /** How long the walker's figure stays each painted guy before the next, ms. */
 const GUY_CYCLE_MS = 300;
+/** The walker's figure, CSS pixels tall. */
+const GUY_H = 36;
+/** How quickly Follow's view glides after the walker: about two thirds of the way in this many ms. */
+const FOLLOW_MS = 140;
 /** Dates in these years are mostly the city's first inventory, not plantings. */
 const INVENTORY = [1990, 1992];
 
@@ -1495,7 +1499,7 @@ export default function TreesWindow({
           const sheet = guysRef.current;
           if (sheet) {
             const b = guyBounds(walkerPoseRef.current);
-            const gh = 36;
+            const gh = GUY_H;
             const gw = (b.w / b.h) * gh;
             walkerHitRef.current = { x0: fx - gw / 2 - 3, y0: fy - gh - 3, x1: fx + gw / 2 + 3, y1: fy + 3, gx: fx, gy };
             const edge = tintGuys(sheet, "rgba(0,0,0,0.85)");
@@ -2010,24 +2014,64 @@ export default function TreesWindow({
     return !!hit && px >= hit.x0 && px <= hit.x1 && py >= hit.y0 && py <= hit.y1;
   };
 
-  /** The view slid, at the same zoom, so the walker stands in the middle of it. */
-  const centreOnWalker = () => {
-    const v = viewRef.current;
+  /**
+   * Where the view's centre goes, at its zoom, for the walker's figure to
+   * stand in the middle of the canvas: not the ground under them at sea level
+   * but the figure itself, half its height up from its feet, and in Tilt
+   * lifted with them up their hill (and their jump).
+   */
+  const walkerCentre = (v: View): { cx: number; cy: number } | null => {
     const walker = walkerRef.current;
-    if (!v || !walker || !trees || !prepared) return;
+    if (!walker || !trees || !prepared) return null;
     const { south, north, west, east } = trees.bbox;
-    const cx = ((walker.at.lon - west) / (east - west)) * prepared.widthM;
-    const cy = ((walker.at.lat - south) / (north - south)) * prepared.heightM;
-    if (Math.abs(cx - v.cx) + Math.abs(cy - v.cy) < 0.01) return;
-    beginStretch();
-    viewRef.current = { ...v, cx, cy };
-    fittedRef.current = false;
-    moved();
-    requestDraw();
+    const mx = ((walker.at.lon - west) / (east - west)) * prepared.widthM;
+    const my = ((walker.at.lat - south) / (north - south)) * prepared.heightM;
+    if (!tilt) return { cx: mx, cy: my + GUY_H / 2 / v.s };
+    // Feet on screen sit (v_w − cv)·s·sin above the middle for being further off, and z·s·cos·EXAG for their height.
+    const [u, vw] = rot(heading, mx, my);
+    const sin = Math.sin(pitchRad);
+    const cv = vw + (walker.at.z * Math.cos(pitchRad) * EXAG) / sin + GUY_H / 2 / (v.s * sin);
+    const [cx, cy] = unrot(heading, u, cv);
+    return { cx, cy };
+  };
+  const walkerCentreRef = useRef(walkerCentre);
+  useEffect(() => {
+    walkerCentreRef.current = walkerCentre;
+  });
+
+  // Follow glides the view after the walker a frame at a time, rather than
+  // jumping it at each of their ten-a-second reports. Drawn rough while it
+  // moves — real frames, not a stretched copy of the last — and sharp once
+  // they've stopped and it has caught up.
+  const followFrameRef = useRef(0);
+  const centreOnWalker = () => {
+    if (followFrameRef.current) return;
+    let last = performance.now();
+    const step = () => {
+      followFrameRef.current = 0;
+      const v = viewRef.current;
+      const to = v && followingRef.current ? walkerCentreRef.current(v) : null;
+      if (!v || !to) return;
+      const now = performance.now();
+      const k = 1 - Math.exp(-(now - last) / FOLLOW_MS);
+      last = now;
+      const dx = to.cx - v.cx;
+      const dy = to.cy - v.cy;
+      // Within a third of a pixel: there.
+      const done = Math.hypot(dx, dy) * v.s < 0.3;
+      viewRef.current = done ? { ...v, ...to } : { ...v, cx: v.cx + dx * k, cy: v.cy + dy * k };
+      stretchRef.current = null;
+      fittedRef.current = false;
+      moved();
+      requestDraw();
+      if (!done) followFrameRef.current = requestAnimationFrame(step);
+    };
+    followFrameRef.current = requestAnimationFrame(step);
   };
   useEffect(() => {
     centreRef.current = centreOnWalker;
   });
+  useEffect(() => () => cancelAnimationFrame(followFrameRef.current), []);
 
   // What the walker's looking at, picked out here: a tree, or a place or pipe, if this map has it to show.
   useEffect(() => {
