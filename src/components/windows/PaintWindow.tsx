@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { Turn, UPRIGHT, isUpright, pointIn, sizeIn, toScreen, turnMatrix, unturn } from "@/lib/windowTurn";
+import { useGamepad } from "@/lib/gamepad";
 import { ColorAdjust, adjustColors } from "@/lib/colorAdjust";
 import PaintAdjustPanel from "@/components/windows/PaintAdjustPanel";
 import PaintGrabOverlay from "@/components/windows/PaintGrabOverlay";
@@ -2653,6 +2654,20 @@ const PaintWindow = forwardRef<PaintWindowHandle, PaintWindowProps>(function Pai
       setPanning(false);
     }
   }, [active]);
+
+  // A game controller: the left stick or d-pad walks the view about the
+  // picture the way WASD does, a click of the stick tripling it the way Shift
+  // does, and the triggers zoom, right in and left out.
+  useGamepad(active, (pad, dt) => {
+    if (pad.move.x || pad.move.y) {
+      const step = unturn(turnRef.current, pad.move.x, pad.move.y);
+      const distance = (pad.held("L3") ? 3 : 1) * WALK_SPEED * dt;
+      const v = viewRef.current;
+      applyView(clampView(v.z, v.x - step.x * distance, v.y - step.y * distance));
+    }
+    if (pad.repeat("RT")) zoomBy(ZOOM_STEP);
+    if (pad.repeat("LT")) zoomBy(1 / ZOOM_STEP);
+  });
 
   useEffect(() => {
     /** Whether a key or a paste aimed at `target` is paint.exe's, and how much of it. */

@@ -98,6 +98,7 @@ import {
   YEAR_MIN,
 } from "@/lib/treeColors";
 import { WALKER_STALE_MS, WalkerAt, walkerChannel, WalkerLook, WalkerMessage } from "@/lib/treesWalker";
+import { useGamepad } from "@/lib/gamepad";
 
 /**
  * trees.exe's map: every street tree in Seattle as a dot, with no basemap —
@@ -2351,6 +2352,27 @@ export default function TreesWindow({
       window.removeEventListener("blur", onBlur);
     };
   }, [active, panBy]);
+
+  // A game controller: the left stick or d-pad slides the map like WASD and
+  // the triggers zoom, right in and left out, about the middle; A plays or
+  // pauses, B lets go of what's picked, and the shoulders turn Tilt like Q and E.
+  useGamepad(active, (pad, dt) => {
+    const { w, h } = sizeRef.current;
+    if (pad.move.x || pad.move.y) {
+      const speed = Math.min(w, h) * 0.8 * dt;
+      setFollowing(false);
+      panBy(pad.move.x * speed, pad.move.y * speed);
+    }
+    const zoom = pad.rt - pad.lt;
+    if (Math.abs(zoom) > 0.05) zoomAt(w / 2, h / 2, Math.pow(1.6, zoom * 2 * dt));
+    if (pad.pressed("A")) togglePlay();
+    if (pad.pressed("B")) {
+      setSelected(null);
+      setSelectedPlace(null);
+    }
+    if (tilt && pad.pressed("LB")) onTurn(-1);
+    if (tilt && pad.pressed("RB")) onTurn(1);
+  });
 
   // --- readouts -------------------------------------------------------------
 

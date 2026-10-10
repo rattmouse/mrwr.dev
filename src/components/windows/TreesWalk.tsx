@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ProgressBar, Window, WindowContent } from "react95";
 import { Joystick } from "@/components/windows/MpkPanel";
+import { IDLE, Pad, useGamepad } from "@/lib/gamepad";
 import { Crowns, loadCrowns, loadTrees, Trees } from "@/lib/trees";
 import { dayLabel, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeasons";
 import { CONIFER_COLOR, CROWN_BROADLEAF, CROWN_CONIFER, hexRgb, plantedColor, speciesGroups, YEAR_MIN } from "@/lib/treeColors";
@@ -487,6 +488,21 @@ export default function TreesWalk({
     };
   }, [onLeave]);
 
+  // A game controller: the left stick or d-pad walks and the right one looks
+  // about, read by the loop; A is Space and B is E, pressed or (with Super)
+  // held, the right trigger or a click of the stick runs, and Start goes in.
+  // (Back is the desktop's Start menu.)
+  const padRef = useRef<Pad>(IDLE);
+  useGamepad(active, (pad) => {
+    padRef.current = pad;
+    if (pad.pressed("Start")) {
+      onLeave();
+      return;
+    }
+    if (pad.pressed("A")) jumpRef.current = true;
+    if (pad.pressed("B")) diveRef.current = true;
+  });
+
   const dragRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     // Only the left button looks about; the right one brings up the menu.
@@ -790,10 +806,17 @@ export default function TreesWalk({
         const flying = noclipRef.current;
         const body = flying ? { ...BODY, ...NOCLIP } : BODY;
         const dive = DIVE;
-        cam.yaw += ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0)) * TURN * dt;
+        const pad = padRef.current;
+        const running = held("ShiftLeft", "ShiftRight") || pad.held("RT") || pad.held("L3");
+        cam.yaw += ((held("ArrowRight") ? 1 : 0) - (held("ArrowLeft") ? 1 : 0) + pad.look.x) * TURN * dt;
+        cam.pitch = clamp(cam.pitch - pad.look.y * TURN * 0.6 * dt, -PITCH_LIMIT, PITCH_LIMIT);
         const airborne = !grounded;
         let side = (held("KeyD") ? 1 : 0) - (held("KeyA") ? 1 : 0);
         let ahead = (held("KeyW", "ArrowUp") ? 1 : 0) - (held("KeyS", "ArrowDown") ? 1 : 0);
+        if (pad.move.x || pad.move.y) {
+          side = pad.move.x;
+          ahead = -pad.move.y;
+        }
         const push = stickRef.current;
         if (Math.hypot(push.x, push.y) > STICK_DEAD_ZONE) {
           side = push.x;
@@ -801,7 +824,7 @@ export default function TreesWalk({
         }
         const amount = Math.hypot(side, ahead);
         if (amount > 1e-3) {
-          const speed = (held("ShiftLeft", "ShiftRight") ? body.run : body.walk) * Math.min(1, amount) * dt;
+          const speed = (running ? body.run : body.walk) * Math.min(1, amount) * dt;
           const sx = side / amount;
           const sa = ahead / amount;
           const dx = (Math.sin(cam.yaw) * sa + Math.cos(cam.yaw) * sx) * speed;
@@ -816,14 +839,14 @@ export default function TreesWalk({
             cam.y += dy;
           } else if (ok(cam.x + dx, cam.y)) cam.x += dx;
           else if (ok(cam.x, cam.y + dy)) cam.y += dy;
-          bob = airborne ? 0 : bob + dt * (held("ShiftLeft", "ShiftRight") ? 11 : 7.5);
+          bob = airborne ? 0 : bob + dt * (running ? 11 : 7.5);
         } else bob = 0;
         const ground = groundAt(w, cam.x, cam.y);
         const floor = ground + EYE;
         if (flying) {
           // Up on Space, down on E or Q, held; through anything, but no deeper than a dive goes.
-          const climb = (held("Space") ? 1 : 0) - (held("KeyE", "KeyQ") ? 1 : 0);
-          cam.z += climb * (held("ShiftLeft", "ShiftRight") ? NOCLIP.climbFast : NOCLIP.climb) * dt;
+          const climb = (held("Space") || pad.held("A") ? 1 : 0) - (held("KeyE", "KeyQ") || pad.held("B") ? 1 : 0);
+          cam.z += climb * (running ? NOCLIP.climbFast : NOCLIP.climb) * dt;
           cam.z = Math.max(cam.z, ground - DIVE_DEEPEST);
           rise = 0;
           // Let go of it in the air and you fall; under the ground, you're stood back up on it.

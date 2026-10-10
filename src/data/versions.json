@@ -3,7 +3,7 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.2.2",
+      "version": "7.2.3",
       "era": "claude",
       "name": "Trees panels",
       "date": "2026-10-09",
@@ -18,7 +18,13 @@
         "Added: Analyzer (App). Uses super intelligence to open files of any type",
         "Added: Mountains layer (./trees). Western Washington contour rings in 2D, ranges in 2.5D",
         "Added: national, state and King County park boundaries under Parks (./trees)",
-        "Changed: 2.5D ground wireframe replaced with elevation rings (./trees)"
+        "Changed: 2.5D ground wireframe replaced with elevation rings (./trees)",
+        "Added: game controller support (cubicles.exe). Left stick walks, right stick looks, A uses",
+        "Added: game controller support (tasks.exe). Stick moves, Start pauses, d-pad and A for menus",
+        "Added: game controller support (marbles.exe). Sticks roll and aim, A jumps, Y restarts",
+        "Added: game controller support (./trees, paint.exe). Stick pans, triggers zoom",
+        "Added: game controller support (midi.exe). Left stick drives the thumbstick",
+        "Added: game controller Start menu and taskbar. Back opens, d-pad moves, A picks, B backs out"
       ]
     },
     {

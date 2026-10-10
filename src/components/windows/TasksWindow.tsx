@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button, GroupBox, Separator, Window, WindowContent, WindowHeader } from "react95";
 import { Joystick } from "@/components/windows/MpkPanel";
+import { IDLE, Pad, padMenu, useGamepad } from "@/lib/gamepad";
 import { markClockedOut } from "@/lib/cubicle";
 import { GuySheet, loadGuys, tintGuys } from "@/lib/guys";
 import {
@@ -378,6 +379,8 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
   const sheetRef = useRef<GuySheet | null>(null);
   const keysRef = useRef<Set<string>>(new Set());
   const stickRef = useRef({ x: 0, y: 0 });
+  /** The game controller, as of this frame — see useGamepad below. */
+  const padRef = useRef<Pad>(IDLE);
   // Only the focused window hears the keyboard. Held keys are let go the moment
   // it loses the focus, or they'd stay held down while you're somewhere else.
   const focusedRef = useRef(active);
@@ -517,6 +520,25 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
     setPhase("playing");
   }, []);
 
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // A game controller: the left stick or d-pad moves, read by the loop below;
+  // Start goes on break and back. Between days, and on a break, the d-pad
+  // steps through the card's buttons and A presses one; B ends a break too.
+  useGamepad(active, (pad) => {
+    padRef.current = pad;
+    const now = runRef.current.phase;
+    if (now === "playing") {
+      if (pad.pressed("Start")) pause();
+      return;
+    }
+    if (now === "paused" && (pad.pressed("Start") || pad.pressed("B"))) {
+      resume();
+      return;
+    }
+    padMenu(menuRef.current, pad);
+  });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
@@ -553,6 +575,11 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
       if (run.phase === "playing") {
         let dx = (held("KeyD", "ArrowRight") ? 1 : 0) - (held("KeyA", "ArrowLeft") ? 1 : 0);
         let dy = (held("KeyS", "ArrowDown") ? 1 : 0) - (held("KeyW", "ArrowUp") ? 1 : 0);
+        const pad = padRef.current;
+        if (pad.move.x || pad.move.y) {
+          dx = pad.move.x;
+          dy = pad.move.y;
+        }
         const stick = stickRef.current;
         if (Math.hypot(stick.x, stick.y) > STICK_DEAD_ZONE) {
           dx = stick.x;
@@ -630,6 +657,7 @@ export default function TasksWindow({ active = true }: { active?: boolean }) {
 
       {phase !== "playing" && (
         <div
+          ref={menuRef}
           style={{
             position: "absolute",
             inset: 0,

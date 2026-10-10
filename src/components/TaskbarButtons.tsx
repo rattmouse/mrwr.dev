@@ -25,6 +25,9 @@ const COMPACT_QUERY = "(max-width: 560px)";
 
 type ContextMenuState = { id: WindowId; x: number; y: number };
 
+/** The ring round a taskbar button a game controller is on — a focused button's, made out from the sofa. */
+export const PAD_RING: React.CSSProperties = { outline: "2px dotted #000080", outlineOffset: -5 };
+
 /**
  * The right-click menu on a taskbar button — the window's own controls, plus
  * Center to fetch it back into the middle of the desktop. It opens where you
@@ -130,11 +133,14 @@ export default function TaskbarButtons({
   focused,
   onTaskClick,
   onTaskAction,
+  padAt = null,
 }: {
   tasks: TaskbarItem[];
   focused: WindowId | null;
   onTaskClick: (id: WindowId) => void;
   onTaskAction: (id: WindowId, action: WindowAction) => void;
+  /** The window a game controller is on, walking the taskbar (see StartMenu). */
+  padAt?: WindowId | null;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
@@ -196,8 +202,10 @@ export default function TaskbarButtons({
     hidden = tasks.filter((t) => !onBar.has(t.id));
   }
 
-  // Nothing left to overflow — there's no menu of nothing to show.
-  const overflowOpen = menuOpen && hidden.length > 0;
+  // Nothing left to overflow — there's no menu of nothing to show. A pad on a
+  // window that's only in there opens it, to show where it's got to.
+  const padHidden = hidden.some((t) => t.id === padAt);
+  const overflowOpen = (menuOpen || padHidden) && hidden.length > 0;
 
   return (
     <div
@@ -238,6 +246,7 @@ export default function TaskbarButtons({
               padding: compact ? 0 : "0 6px",
               overflow: "hidden",
               fontWeight: held ? "bold" : "normal",
+              ...(padAt === task.id ? PAD_RING : null),
             }}
           >
             <img
@@ -304,7 +313,11 @@ export default function TaskbarButtons({
                 setMenuOpen(false);
               }}
               onContextMenu={openContextMenu(task.id)}
-              style={{ gap: 8, justifyContent: "flex-start" }}
+              style={{
+                gap: 8,
+                justifyContent: "flex-start",
+                ...(padAt === task.id ? { background: "#000080", color: "#ffffff" } : null),
+              }}
             >
               <img src={PROGRAMS[task.id].icon} width={16} height={16} alt="" aria-hidden style={{ imageRendering: "pixelated" }} />
               <span>{PROGRAMS[task.id].title}</span>

@@ -20,6 +20,7 @@ import {
 } from "@/lib/midiSynth";
 import { decodeSmf, encodeSmf } from "@/lib/smf";
 import { loadSettings, oneOf, saveSettings } from "@/lib/savedSettings";
+import { useGamepad } from "@/lib/gamepad";
 import {
   BankPad,
   BrandBar,
@@ -1869,6 +1870,19 @@ const MidiWindow = forwardRef<MidiWindowHandle, MidiWindowProps>(function MidiWi
 
   // Springs back to centre on release, like the stick it stands in for.
   const stickRelease = useCallback(() => stickMove(0, 0), [stickMove]);
+
+  // A game controller's left stick works the thumbstick. Only a change is
+  // sent, so a pad sat at rest doesn't keep pulling back to centre a stick
+  // that incoming MIDI has moved.
+  const padStickRef = useRef({ x: 0, y: 0 });
+  useGamepad(active && !playing, (pad) => {
+    const was = padStickRef.current;
+    const { x, y } = pad.move;
+    if (x === was.x && y === was.y) return;
+    padStickRef.current = { x, y };
+    // The pad's y runs down; the MPK's runs up.
+    stickMove(x, -y);
+  });
 
   const bumpOctave = useCallback((dir: 1 | -1) => {
     octaveShiftRef.current = Math.max(-3, Math.min(3, octaveShiftRef.current + dir));
