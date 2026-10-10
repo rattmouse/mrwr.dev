@@ -8,10 +8,11 @@ import { dayLabel, phenology, RGB, seasonColor, todayDoy } from "@/lib/treeSeaso
 import { CONIFER_COLOR, CROWN_BROADLEAF, CROWN_CONIFER, hexRgb, plantedColor, speciesGroups, YEAR_MIN } from "@/lib/treeColors";
 import { clockLabel, lightFrom, seattleInstant, sunPosition } from "@/lib/sun";
 import type { TreesMode } from "@/components/windows/TreesWindow";
-import { loadTerrain, Terrain } from "@/lib/terrain";
-import { describePlace, loadPlaces, Places } from "@/lib/places";
+import { loadRegion, loadTerrain, Terrain } from "@/lib/terrain";
+import { describePlace, loadPlaces, parklandMask, PARKLANDS_URL, Places } from "@/lib/places";
+import { terrainRect } from "@/lib/region";
 import { loadPipes, pipePlace, Pipes } from "@/lib/pipes";
-import { groundZ, makeGround, treeForms } from "@/lib/treesTilt";
+import { Ground, groundZ, makeGround, treeForms } from "@/lib/treesTilt";
 import { walkerChannel, WalkerLayers, WalkerLook, WalkerMap, WalkerMessage } from "@/lib/treesWalker";
 import TreesRingMenu, { RingNode } from "@/components/windows/TreesRingMenu";
 import { coloringItems, dayItem, layerItems, playItem, treesRing } from "@/components/windows/treesMenu";
@@ -359,6 +360,28 @@ export default function TreesWalk({
     loadPlaces(data.trees, widthM, heightM, abort.signal)
       .then((loaded) => {
         placesRef.current = loaded;
+      })
+      .catch(() => {});
+    return () => abort.abort();
+  }, [data, widthM, heightM]);
+
+  // The mountains round the city, out to the Olympics and the Cascades, on the
+  // horizon once they're in; and the parks past the city, tinted on them.
+  type Far = { g: Ground; rect: { x0: number; y0: number; x1: number; y1: number } };
+  const farRef = useRef<{ plain: Far; parked: Far | null } | null>(null);
+  useEffect(() => {
+    if (!data || !widthM) return;
+    const abort = new AbortController();
+    const box = data.trees.bbox;
+    loadRegion(abort.signal)
+      .then((region) => {
+        const rect = terrainRect(region, box, widthM, heightM);
+        const plain = { g: makeGround(region, box, widthM, heightM, null, true), rect };
+        farRef.current = { plain, parked: null };
+        return loadPlaces(data.trees, widthM, heightM, abort.signal, undefined, PARKLANDS_URL).then((lands) => {
+          const parkMask = parklandMask(lands.list, region.w, region.h, rect);
+          farRef.current = { plain, parked: { g: { ...plain.g, parkMask }, rect } };
+        });
       })
       .catch(() => {});
     return () => abort.abort();
@@ -947,7 +970,9 @@ export default function TreesWalk({
         });
       }
 
-      renderWalk(frame, eye, w, placesRef.current, layersRef.current, pipesRef.current, followers, caught);
+      const far = farRef.current;
+      const farShown = far ? (layersRef.current.parks && far.parked) || far.plain : null;
+      renderWalk(frame, eye, w, placesRef.current, layersRef.current, pipesRef.current, followers, caught, farShown);
       // The Sun at its hour, over everything: worked out again only when the hour or the day moves.
       const hour = sunRef.current;
       if (hour !== null) {

@@ -61,9 +61,13 @@ export type Ground = {
   waterColor: number;
   /** What the land between the wireframe's lines is drawn as. */
   fillColor: number;
+  /** Or, for the mountains, a color a cell: the slopes shaded, so the ranges read between the lines too. */
+  fills: Uint32Array | null;
   /** Parks, and the restoration zones in them, drawn solid in their own greens. */
   parkColor: number;
   restorationColor: number;
+  /** The mountains' cells inside a park past the city, tinted green; else absent. */
+  parkMask?: Uint8Array | null;
   /** Cells the hills shade from the sun, when it's the sun lighting them; else null. */
   shadow: Uint8Array | null;
   zMax: number;
@@ -83,8 +87,15 @@ const PARK: [number, number, number] = [46, 98, 44];
 const RESTORATION: [number, number, number] = [74, 104, 34];
 /** A slope's light, squeezed for the wireframe: a line on a slope facing away still has to show. */
 const wireShade = (shade: number) => 0.55 + 0.45 * shade;
-/** The fewest device pixels between the wireframe's lines: closer, and it skips to every other one; further, and it splits each cell. */
-const WIRE_GAP = 3;
+/** The most elevation rings one step of a column draws: a cliff can cross more, and the rest blur into these. */
+const RING_CROSSINGS = 4;
+/** The rings' spacings, metres of height. */
+const RING_STEPS = [1, 2, 5, 10, 20, 50, 100, 250, 500];
+
+/** How far apart the elevation rings are at `mpp` metres a device pixel: about a pixel's worth of ground, rounded up to a tidy height. */
+export function ringInterval(mpp: number): number {
+  return RING_STEPS.find((r) => r >= mpp * 0.6) ?? RING_STEPS[RING_STEPS.length - 1];
+}
 const SIDE_WATER = pack(18, 32, 52);
 const FLAT_LAND = pack(60, 68, 52);
 
@@ -104,6 +115,8 @@ export function makeGround(
   widthM: number,
   heightM: number,
   light: Light | null = null,
+  /** The mountains: their wireframe whitened toward snow up high, rather than every cell over 140 m the same. */
+  alpine = false,
 ): Ground {
   const { w, h, z, water } = t;
   const tb = t.bbox;
@@ -121,6 +134,7 @@ export function makeGround(
   const slopes = slopesOf(t, cellW, cellH);
   const { nx, ny, inv, k: height } = slopes;
   const wire = new Uint32Array(w * h);
+  const fills = alpine ? new Uint32Array(w * h) : null;
   if (!light) {
     for (let i = 0; i < w * h; i++) {
       if (water[i]) {
@@ -132,7 +146,8 @@ export function makeGround(
       const k = height[i];
       color[i] = pack((52 + k * 30) * shade, (62 + k * 18) * shade, (44 + k * 6) * shade);
       const lit = wireShade(shade);
-      wire[i] = pack(WIRE[0] * lit, WIRE[1] * lit, WIRE[2] * lit);
+      wire[i] = alpine ? snowy(z[i], lit, 0, 0, 0) : pack(WIRE[0] * lit, WIRE[1] * lit, WIRE[2] * lit);
+      if (fills) fills[i] = snowy(z[i], shade * 0.42, 0, 0, 0);
     }
     return {
       w,
@@ -142,6 +157,7 @@ export function makeGround(
       wire,
       waterColor: WATER,
       fillColor: pack(...FILL),
+      fills,
       parkColor: pack(...PARK),
       restorationColor: pack(...RESTORATION),
       shadow: null,
@@ -177,14 +193,30 @@ export function makeGround(
     const b = (44 + k * 6) * shade * keep + nb;
     color[i] = ((255 << 24) | ((b + 0.5) << 16) | ((g + 0.5) << 8) | (r + 0.5)) >>> 0;
     const lit = wireShade(shade) * keep;
-    wire[i] = pack(WIRE[0] * lit + nr, WIRE[1] * lit + ng, WIRE[2] * lit + nb);
+    wire[i] = alpine ? snowy(z[i], lit, nr, ng, nb) : pack(WIRE[0] * lit + nr, WIRE[1] * lit + ng, WIRE[2] * lit + nb);
+    if (fills) fills[i] = snowy(z[i], shade * keep * 0.42, nr, ng, nb);
   }
   const waterColor = pack(26 * dim * keep + nr, 50 * dim * keep + ng, 84 * dim * keep + nb);
   const toned = (c: [number, number, number]) => pack(c[0] * dim * keep + nr, c[1] * dim * keep + ng, c[2] * dim * keep + nb);
   const fillColor = toned(FILL);
   const parkColor = toned(PARK);
   const restorationColor = toned(RESTORATION);
-  return { w, h, z, color, wire, waterColor, fillColor, parkColor, restorationColor, shadow, zMax: t.zMax, ax, bx, ay, by };
+  return { w, h, z, color, wire, waterColor, fillColor, fills, parkColor, restorationColor, shadow, zMax: t.zMax, ax, bx, ay, by };
+}
+
+/** Bare rock above the trees, and snow above that, for the mountains' wireframe. */
+const ROCK: [number, number, number] = [92, 86, 66];
+const SNOW: [number, number, number] = [200, 208, 220];
+
+/** The wireframe's line at height z, lit by `lit`, green below the treeline, rock, then snow; plus night's color. */
+function snowy(z: number, lit: number, nr: number, ng: number, nb: number): number {
+  const rock = Math.max(0, Math.min(1, (z - 1200) / 700));
+  const snow = Math.max(0, Math.min(1, (z - 1900) / 700));
+  const c = [0, 1, 2].map((k) => {
+    const base = WIRE[k] + (ROCK[k] - WIRE[k]) * rock;
+    return base + (SNOW[k] - base) * snow;
+  });
+  return pack(Math.min(255, c[0] * lit + nr), Math.min(255, c[1] * lit + ng), Math.min(255, c[2] * lit + nb));
 }
 
 type Slopes = { cellW: number; cellH: number; nx: Float32Array; ny: Float32Array; inv: Float32Array; k: Float32Array };
@@ -405,10 +437,19 @@ export function renderGround(
   stride = 1,
   /** Parks and restoration zones, tinted into the ground. */
   overlay: Overlay | null = null,
+  /**
+   * Drawing the mountains around the city instead: `g` covers this rect, the
+   * city's own rect (widthM × heightM) is left to the pass that drew it first,
+   * and nothing is cleared — a pixel is only drawn where it's nearer than
+   * what's there already.
+   */
+  around: { x0: number; y0: number; x1: number; y1: number } | null = null,
 ) {
   const { W, H, S, cu, cv, ux, uy, vx, vy } = view;
-  buf.fill(bg);
-  depth.fill(Infinity);
+  if (!around) {
+    buf.fill(bg);
+    depth.fill(Infinity);
+  }
   const ss = S * view.sin;
   const sc = S * view.cos * EXAG;
   const vBottom = cv - H / 2 / ss;
@@ -418,7 +459,10 @@ export function renderGround(
   // screens tall — but the walk skips ground that can't show a block at a time.
   const reach = (((g ? g.zMax : 0) + SLAB) * sc) / ss;
   const vStart = vBottom - reach;
-  const dv = stride / ss;
+  // The mountains' cells are hundreds of metres across: a step a pixel deep
+  // close in would walk a long way for nothing, so never less than a third of one.
+  const cellM = g ? 1 / Math.max(Math.abs(g.ax), Math.abs(g.ay)) : 0;
+  const dv = around ? Math.max(stride / ss, cellM / 3) : stride / ss;
   const slabPx = SLAB * sc;
   const steps = Math.ceil((vTop - vStart) / dv);
   const gw = g ? g.w : 0;
@@ -433,20 +477,19 @@ export function renderGround(
   const dfx = g ? g.ax * vx : 0;
   const dfy = g ? g.ay * vy : 0;
   const zCeil = g ? g.zMax : 0;
-  // The wireframe runs along the grid's cell lines — every one, or every
-  // other, every fourth… far out, or halving and quartering the cells close
-  // in — whichever keeps them about WIRE_GAP to twice that apart at this zoom,
-  // foreshortened as they are by the angle.
-  let every = 1;
-  if (g) {
-    const cellPx = (S / Math.max(Math.abs(g.ax), Math.abs(g.ay))) * view.sin;
-    while (every * cellPx < WIRE_GAP && every < 1 << 12) every *= 2;
-    while (every * cellPx >= WIRE_GAP * 2 && every > 1 / 64) every /= 2;
-  }
-  // How far, in lines, a column spans across: a line running up the screen is
-  // on a column when it falls within half of that.
-  const halfX = g ? (Math.abs(g.ax * ux) / S / every) * stride * 0.5 : 0;
-  const halfY = g ? (Math.abs(g.ay * uy) / S / every) * stride * 0.5 : 0;
+  // The elevation rings: every `ring` metres of height, a tighter spacing the
+  // closer in, every fifth brighter. The same for the city and the mountains
+  // round it at any one zoom, so they meet at the seam.
+  const ring = ringInterval(1 / S);
+  // Half a column's width in metres: a ring running up the screen is on the
+  // column where the ground's within that much of it, by its slope across.
+  const halfCol = (stride / S) * 0.5;
+  const crossed = new Int32Array(RING_CROSSINGS);
+  const crossedIndex = new Uint8Array(RING_CROSSINGS);
+  const xLo = around ? around.x0 : 0;
+  const xHi = around ? around.x1 : widthM;
+  const yLo = around ? around.y0 : 0;
+  const yHi = around ? around.y1 : heightM;
 
   for (let x = 0; x < W; x += stride) {
     const u = cu + (x + stride * 0.5 - W / 2) / S;
@@ -454,8 +497,7 @@ export function renderGround(
     let yb = H;
     let inside = false;
     // Where the step before sat in lines and on screen, to catch a line crossed between the two.
-    let lastX = NaN;
-    let lastY = NaN;
+    let lastQ = NaN;
     let lastTop = NaN;
     // Down the column the world point moves in a straight line, away from the viewer.
     const mx0 = ux * u + vx * vStart;
@@ -465,24 +507,30 @@ export function renderGround(
     // Only the steps on the city: a close view's long walk can start well off it.
     let kFrom = 0;
     let kTo = steps;
-    for (const [p0, dp, lim] of [
-      [mx0, stepX, widthM],
-      [my0, stepY, heightM],
+    for (const [p0, dp, lo, hi] of [
+      [mx0, stepX, xLo, xHi],
+      [my0, stepY, yLo, yHi],
     ]) {
       if (dp === 0) {
-        if (p0 < 0 || p0 > lim) kTo = -1;
+        if (p0 < lo || p0 > hi) kTo = -1;
         continue;
       }
-      const a = -p0 / dp;
-      const b = (lim - p0) / dp;
+      const a = (lo - p0) / dp;
+      const b = (hi - p0) / dp;
       kFrom = Math.max(kFrom, Math.ceil(Math.min(a, b)));
       kTo = Math.min(kTo, Math.floor(Math.max(a, b)));
     }
     for (let k = kFrom; k <= kTo; k++) {
       const mx = mx0 + k * stepX;
       const my = my0 + k * stepY;
-      if (mx < 0 || my < 0 || mx > widthM || my > heightM) {
+      if (mx < xLo || my < yLo || mx > xHi || my > yHi) {
         inside = false;
+        continue;
+      }
+      // The city's own ground is drawn already, and finer: no slab edge where the mountains meet it.
+      if (around && mx >= 0 && my >= 0 && mx <= widthM && my <= heightM) {
+        inside = true;
+        lastQ = NaN;
         continue;
       }
       const v = vStart + k * dv;
@@ -492,7 +540,7 @@ export function renderGround(
       const clear = yGround - zCeil * sc - yb;
       if (clear >= 0) {
         inside = true;
-        lastX = NaN;
+        lastQ = NaN;
         k += Math.floor(clear / ss / dv);
         continue;
       }
@@ -517,7 +565,7 @@ export function renderGround(
         const lift = yGround - pz[by * pw + bx] * sc - yb;
         if (lift >= 0) {
           inside = true;
-          lastX = NaN;
+          lastQ = NaN;
           let jump = lift / ss;
           if (dfx > 0) jump = Math.min(jump, (((bx + 1) << PEAK_SHIFT) - fx) / dfx);
           else if (dfx < 0) jump = Math.min(jump, (fx - (bx << PEAK_SHIFT)) / -dfx);
@@ -549,31 +597,33 @@ export function renderGround(
         }
       }
       const yTop = yGround - z * sc;
-      // On a line running up the screen (the whole span), or crossing one
-      // that runs across it since the step before (one pixel, where it fell).
-      let onLine = false;
-      let yLine = -1;
+      // On a ring running up the screen (the whole span), or crossing ones
+      // that run across it since the step before (a pixel apiece, where they fell).
+      let onLine = 0;
+      let nCrossed = 0;
       if (g && !wet) {
-        const lx = (g.ax * mx + g.bx) / every;
-        const ly = (g.ay * my + g.by) / every;
-        const ex = lx - Math.round(lx);
-        const ey = ly - Math.round(ly);
-        onLine = (ex < 0 ? -ex : ex) < halfX || (ey < 0 ? -ey : ey) < halfY;
-        if (!onLine && lastX === lastX) {
-          let t = -1;
-          const fx = Math.floor(lx);
-          const fy = Math.floor(ly);
-          // The line crossed is the higher of the two floors, whichever way the step went.
-          const px = Math.floor(lastX);
-          const py = Math.floor(lastY);
-          if (fx !== px) t = (Math.max(fx, px) - lastX) / (lx - lastX);
-          if (fy !== py) t = Math.max(t, (Math.max(fy, py) - lastY) / (ly - lastY));
-          if (t >= 0) yLine = Math.round(lastTop + (yTop - lastTop) * Math.min(1, t));
+        const q = z / ring;
+        const near = Math.round(q);
+        if (near > 0) {
+          // The slope across the screen, from the four cells round the point.
+          const dzdx = ((gz[ci + 1] - gz[ci]) * (1 - ty) + (gz[ci + gw + 1] - gz[ci + gw]) * ty) * g.ax;
+          const dzdy = ((gz[ci + gw] - gz[ci]) * (1 - tx) + (gz[ci + gw + 1] - gz[ci + 1]) * tx) * g.ay;
+          const across = dzdx * ux + dzdy * uy;
+          const off = (q - near) * ring;
+          if ((off < 0 ? -off : off) < (across < 0 ? -across : across) * halfCol) onLine = near % 5 === 0 ? 2 : 1;
         }
-        lastX = lx;
-        lastY = ly;
+        if (!onLine && lastQ === lastQ) {
+          const lo = Math.floor(Math.min(lastQ, q)) + 1;
+          const hi = Math.floor(Math.max(lastQ, q));
+          for (let m = Math.max(1, lo); m <= hi && nCrossed < RING_CROSSINGS; m++) {
+            const t = (m - lastQ) / (q - lastQ);
+            crossed[nCrossed] = Math.round(lastTop + (yTop - lastTop) * t);
+            crossedIndex[nCrossed++] = m % 5 === 0 ? 1 : 0;
+          }
+        }
+        lastQ = q;
         lastTop = yTop;
-      } else lastX = NaN;
+      } else lastQ = NaN;
       if (yTop >= yb) {
         inside = true;
         continue;
@@ -597,8 +647,13 @@ export function renderGround(
           const gg = (((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd) / sum;
           const bb = (((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd) / sum;
           color = ((255 << 24) | ((bb + 0.5) << 16) | ((gg + 0.5) << 8) | (r + 0.5)) >>> 0;
-          fill = g.fillColor;
+          fill = g.fills ? g.fills[ci + (tx > 0.5 ? 1 : 0) + (ty > 0.5 ? gw : 0)] : g.fillColor;
         }
+      }
+      // A park past the city: the mountains' cells tinted, below the snow.
+      if (g && g.parkMask && !wet && z < 1800 && g.parkMask[ci + (tx > 0.5 ? 1 : 0) + (ty > 0.5 ? gw : 0)]) {
+        color = placeTint(color, OVERLAY_PARK);
+        fill = placeTint(fill, OVERLAY_PARK);
       }
       if (overlay && !wet) {
         const o = overlayAt(overlay, mx, my);
@@ -615,14 +670,24 @@ export function renderGround(
       const yEnd = inside ? yb : Math.min(yb, Math.ceil(yGround + slabPx));
       const y0 = Math.max(0, Math.floor(yTop));
       const faceFrom = inside ? yEnd : Math.min(yEnd, y0 + 2);
-      if (yLine >= 0) yLine = Math.max(y0, Math.min(yEnd - 1, yLine));
+      const bright = onLine === 2 || nCrossed ? shadeColor(color, 1.45) : color;
       for (let y = y0; y < yEnd; y++) {
         const p = y * W + x;
-        const c = y < faceFrom ? (onLine || y === yLine ? color : fill) : wet ? SIDE_WATER : SIDE;
+        if (around && depth[p] < v) continue;
+        const c = y < faceFrom ? (onLine ? (onLine === 2 ? bright : color) : fill) : wet ? SIDE_WATER : SIDE;
         for (let t = 0; t < span; t++) {
           buf[p + t] = c;
           depth[p + t] = v;
         }
+      }
+      // The rings crossed since the step before, clamped into this step's span.
+      for (let n = 0; n < nCrossed; n++) {
+        const y = Math.max(y0, Math.min(Math.min(yEnd, faceFrom) - 1, crossed[n]));
+        if (y < 0 || y >= H) continue;
+        const p = y * W + x;
+        if (around && depth[p] < v) continue;
+        const c = crossedIndex[n] ? bright : color;
+        for (let t = 0; t < span; t++) buf[p + t] = c;
       }
       yb = y0;
       inside = true;

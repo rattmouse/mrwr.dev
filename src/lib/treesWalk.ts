@@ -15,19 +15,23 @@
  * so they can go in any order. Only the ones within REACH are drawn, out of a
  * coarse grid; the fog has nearly swallowed them by then.
  *
- * The ground is Tilt's wireframe: its dark fill, its green lines along the
- * terrain grid (every cell, or every other, or halved, whichever keeps them a
- * few pixels apart at that distance), the parks solid green, and the creeks,
- * gardens, track and areaways draped over it (placesDraw.ts).
+ * The ground is Tilt's: its dark fill, its green elevation rings (a tidy
+ * height a few pixels' worth at that distance apart, every fifth brighter),
+ * the parks solid green, and the creeks, gardens, track and areaways draped
+ * over it (placesDraw.ts).
  *
- * Off the edge of the city's rectangle is the table the diorama stands on.
+ * Off the edge of the city's rectangle are the mountains round it, coarser,
+ * out to the Olympics and the Cascades, sunk by the curve of the Earth; past
+ * those, the table the diorama stands on. The ground is ringed with its
+ * elevation rather than gridded: a ring every metre or two underfoot, every
+ * few hundred on Rainier.
  *
  * Everything here works on a raw Uint32 ImageData buffer, like treesTilt.ts.
  */
 
 import type { Ground } from "@/lib/treesTilt";
-import { crownBall, groundZ, WATER } from "@/lib/treesTilt";
-import { OVERLAY_RESTORATION, overlayAt, Places } from "@/lib/places";
+import { crownBall, groundZ, placeTint, ringInterval, WATER } from "@/lib/treesTilt";
+import { OVERLAY_PARK, OVERLAY_RESTORATION, overlayAt, Places } from "@/lib/places";
 import { drapeWalkPlaces, PlacesShown, ratTurn, spinRat } from "@/lib/placesDraw";
 import type { Pipes } from "@/lib/pipes";
 
@@ -38,11 +42,13 @@ export const PITCH_LIMIT = 0.6;
 /** Vertical field of view, radians. */
 const FOV = 1.05;
 const NEAR = 0.4;
-/** The furthest ground drawn, and the furthest trees, in metres. */
-const FAR = 3200;
-const REACH = 1500;
-/** Metres for the fog to take about two thirds of a colour. */
-const FOG = 700;
+/** The furthest ground drawn — far enough for Baker and St. Helens — and the furthest trees, in metres. */
+const FAR = 260000;
+const REACH = 3000;
+/** Metres of air to take about two thirds of a colour into the haze: none to speak of in the city, a blue cast on Rainier. */
+const FOG = 300000;
+/** The Earth's radius, stretched by a sixth for the air bending light over the horizon: what the mountains sink behind. */
+const EARTH_R = 6371000 * (7 / 6);
 /** The tree grid's cell, metres. */
 const CELL = 64;
 /** How far below sea level the table under the diorama is. */
@@ -59,11 +65,18 @@ const FLAT_LAND = pack(60, 68, 52);
 const TRUNK = pack(70, 52, 40);
 /** Stood on it, Tilt's wireframe wants to be a little lighter than seen from up high. */
 const GROUND_LIGHT = 1.35;
-/** The fewest pixels between the wireframe's lines. */
-const WIRE_GAP = 9;
-/** The most wireframe lines one step of a column can cross. */
-const RUNS = 6;
-/** Places further than this aren't draped: past it they're under a pixel and fogged out. */
+/** Above this a park's green tint is left off: snow is snow, whoever's park it's in. */
+const SNOWLINE = 1800;
+/** About how many pixels of height apart the elevation rings are, at any distance. */
+const RING_PX = 3;
+/** How much brighter than the ground's own lighting the rings are drawn, and the fifth ones brighter again. */
+const RING_LIGHT = 2.1;
+const INDEX_LIGHT = 1.5;
+/** Within this many metres the rings are two pixels thick. */
+const RING_THICK = 400;
+/** The most rings one step of a column draws. */
+const RING_CROSSINGS = 4;
+/** Places further than this aren't draped: past it they're under a pixel. */
 const PLACE_REACH = 1200;
 /** The map's water is a dark navy for under the trees' dots; stood on the shore it's a lake, and blue. */
 const LAKE = [58, 112, 172] as const;
@@ -76,7 +89,9 @@ const STEPS = (() => {
   for (let z = NEAR; z < FAR; z += Math.max(0.08, z * 0.016)) zs.push(z);
   const z = Float32Array.from(zs);
   const fog = Float32Array.from(zs, (d) => 1 - Math.exp(-d / FOG));
-  return { z, fog, n: zs.length };
+  // How far the ground has dropped away round the curve of the Earth by then.
+  const drop = Float32Array.from(zs, (d) => (d * d) / (2 * EARTH_R));
+  return { z, fog, drop, n: zs.length };
 })();
 
 function fogged(c: number, k: number): number {
@@ -168,38 +183,6 @@ function shade(c: number, k: number): number {
   return pack(Math.min(255, (c & 255) * k), Math.min(255, ((c >>> 8) & 255) * k), Math.min(255, ((c >>> 16) & 255) * k));
 }
 
-/**
- * Where a column passes over lines of the wireframe between two steps: a
- * grid coordinate going from `a` to `b`, in lines, and the column's half
- * width in the same, `hw`. Each stretch within `hw` of a whole number goes
- * into `runs` as fractions of the way from `a` to `b`, after the `n` already
- * there; returns how many there are now.
- */
-function lineRuns(a: number, b: number, hw: number, runs: Float32Array, n: number): number {
-  const d = b - a;
-  const lo = Math.ceil((a < b ? a : b) - hw);
-  const hi = Math.floor((a < b ? b : a) + hw);
-  for (let m = lo; m <= hi && n < RUNS; m++) {
-    let t0: number;
-    let t1: number;
-    if (d > -1e-9 && d < 1e-9) {
-      if (Math.abs(m - b) >= hw) continue;
-      t0 = 0;
-      t1 = 1;
-    } else {
-      t0 = (m - hw - a) / d;
-      t1 = (m + hw - a) / d;
-      if (t0 > t1) [t0, t1] = [t1, t0];
-      if (t1 < 0 || t0 > 1) continue;
-      if (t0 < 0) t0 = 0;
-      if (t1 > 1) t1 = 1;
-    }
-    runs[n * 2] = t0;
-    runs[n * 2 + 1] = t1;
-    n++;
-  }
-  return n;
-}
 
 // --- the world --------------------------------------------------------------------
 
@@ -326,6 +309,8 @@ export function renderWalk(
   /** The rats dived down to and caught, trailing after you; `caught` holds their places' indexes, not drawn in their pipes. */
   followers: RatFollower[] = [],
   caught?: Set<number>,
+  /** The mountains round the city, and their grid's bbox in the city's metres, once they're in. */
+  far: { g: Ground; rect: { x0: number; y0: number; x1: number; y1: number } } | null = null,
 ) {
   const { W, H, buf, depth, treeDepth, id, place, pipe } = frame;
   const f = H / 2 / Math.tan(FOV / 2);
@@ -346,53 +331,34 @@ export function renderWalk(
 
   const zs = STEPS.z;
   const fogs = STEPS.fog;
+  const drops = STEPS.drop;
   // Screen pixels per metre of height at each step's distance.
   const fz = new Float32Array(STEPS.n);
   for (let k = 0; k < STEPS.n; k++) fz[k] = f / zs[k];
   const nSteps = STEPS.n;
-  const zCeil = g ? g.zMax : 0;
-  const gw = g ? g.w : 0;
-  const gh = g ? g.h : 0;
-  const gz = g ? g.z : null;
-  const gc = g ? g.color : null;
-  const ax = g ? g.ax : 0;
-  const bx = g ? g.bx : 0;
-  const ay = g ? g.ay : 0;
-  const by = g ? g.by : 0;
+  const rg = far ? far.g : null;
+  const rect = far ? far.rect : null;
+  const zCeil = Math.max(g ? g.zMax : 0, rg ? rg.zMax : 0);
 
   // The fog colour, a channel apiece, for mixing each step into it inline.
   const hazeR = HAZE[0];
   const hazeG = HAZE[1];
   const hazeB = HAZE[2];
 
-  // The wireframe's spacing at each step, in grid cells: lines across the
-  // screen a few pixels apart, and lines going away from you a few pixels
-  // apart where they cross the ground, foreshortened by how high the eye is
-  // above it. Powers of two, so the lines nearer in include the further ones'.
+  // The rings' spacing at each step, metres of height, and half a column's
+  // width there in metres: a ring running away up the screen is on the column
+  // where the ground's within that much of it, by its slope across.
   const overlay = places && show.parks ? places.overlay : null;
-  const every = new Float32Array(nSteps);
-  const halfX = new Float32Array(nSteps);
-  const halfY = new Float32Array(nSteps);
-  if (g) {
-    const perM = Math.max(Math.abs(ax), Math.abs(ay));
-    const lift = Math.max(EYE, cam.z - groundZ(g, cam.x, cam.y));
-    for (let k = 0; k < nSteps; k++) {
-      const z = zs[k];
-      // Pixels per cell across, and down the screen.
-      const across = fz[k] / perM;
-      const down = (fz[k] * lift) / z / perM;
-      const px = Math.min(across, down);
-      let e = 1;
-      while (e * px < WIRE_GAP && e < 1 << 12) e *= 2;
-      while (e * px >= WIRE_GAP * 2 && e > 1 / 64) e /= 2;
-      every[k] = e;
-      // Half a column's width, in lines: a line is on the column within it.
-      halfX[k] = (Math.abs(ax * rx) / fz[k] / e) * 0.5;
-      halfY[k] = (Math.abs(ay * ry) / fz[k] / e) * 0.5;
-    }
+  const ringAt = new Float32Array(nSteps);
+  const halfCol = new Float32Array(nSteps);
+  for (let k = 0; k < nSteps; k++) {
+    // Underfoot, finer than the map ever goes: a quarter or half metre, or a gentle street would show none.
+    const want = (zs[k] / f) * RING_PX;
+    ringAt[k] = want <= 0.25 ? 0.25 : want <= 0.5 ? 0.5 : ringInterval(want);
+    halfCol[k] = (zs[k] / f) * (zs[k] < RING_THICK ? 1 : 0.5);
   }
-  // The rows each step's span crosses a line on, as fractions of the way from the step before.
-  const runs = new Float32Array(RUNS * 2);
+  const crossRow = new Int32Array(RING_CROSSINGS);
+  const crossIndex = new Uint8Array(RING_CROSSINGS);
 
   // Down in the ground itself (Dive), the surface is overhead.
   const below = !!g && cam.z < groundZ(g, cam.x, cam.y);
@@ -402,16 +368,17 @@ export function renderWalk(
     const dx = fx + rx * t;
     const dy = fy + ry * t;
     let yb = H;
-    // Where the step before sat on the grid and on screen: the wireframe's
-    // lines are found between the two.
-    let lastX = NaN;
-    let lastY = NaN;
+    // The height and screen row of the step before: the rings are found between the two.
+    let lastH = NaN;
     let lastTop = NaN;
     for (let k = 0; k < nSteps; k++) {
       const z = zs[k];
       const wx = cam.x + dx * z;
       const wy = cam.y + dy * z;
-      const off = wx < 0 || wy < 0 || wx > widthM || wy > heightM;
+      const inCity = wx >= 0 && wy >= 0 && wx <= widthM && wy <= heightM;
+      // Whose ground this step is on: the city's, the mountains' round it, or neither — the table.
+      const G = inCity ? g : rg && rect && wx >= rect.x0 && wx <= rect.x1 && wy >= rect.y0 && wy <= rect.y1 ? rg : null;
+      const off = !inCity && !G;
       // The height first, and the colour only if this step shows: far out,
       // dozens of steps share one row of pixels and only the first is seen.
       // Inlined like renderGround's: this runs for every step of every column.
@@ -421,13 +388,16 @@ export function renderWalk(
       let ty = 0;
       let wet = false;
       if (off) h = -TABLE_DEPTH;
-      else if (gz && gc) {
-        let gx = ax * wx + bx;
-        let gy = ay * wy + by;
+      else if (G) {
+        const gz = G.z;
+        const gc = G.color;
+        const gw = G.w;
+        let gx = G.ax * wx + G.bx;
+        let gy = G.ay * wy + G.by;
         if (gx < 0) gx = 0;
         else if (gx > gw - 1.001) gx = gw - 1.001;
         if (gy < 0) gy = 0;
-        else if (gy > gh - 1.001) gy = gh - 1.001;
+        else if (gy > G.h - 1.001) gy = G.h - 1.001;
         const x0 = gx | 0;
         const y0 = gy | 0;
         tx = gx - x0;
@@ -448,30 +418,42 @@ export function renderWalk(
           h = top + (bottom - top) * ty;
         }
       }
-      const ys = horizon - (h - cam.z) * fz[k];
+      const ys = horizon - (h - drops[k] - cam.z) * fz[k];
       const y0 = ys <= 0 ? 0 : Math.ceil(ys);
-      // Where the column, a pixel wide, passed over a line of the wireframe
-      // since the step before: a line across the screen for a row, one running
-      // away up it for as much of the span as it stays in the column.
-      let nRuns = 0;
-      if (gc && !off && !wet) {
-        const gx = ax * wx + bx;
-        const gy = ay * wy + by;
-        if (lastX === lastX) {
-          const e = every[k];
-          nRuns = lineRuns(lastX / e, gx / e, halfX[k], runs, 0);
-          nRuns = lineRuns(lastY / e, gy / e, halfY[k], runs, nRuns);
-        }
-        lastX = gx;
-        lastY = gy;
-      } else lastX = NaN;
       const fromTop = lastTop;
       lastTop = ys;
+      // On a ring running up the screen (the whole span), or crossing ones
+      // that run across it since the step before (a row apiece, where they fell).
+      let onLine = 0;
+      let nCross = 0;
+      if (G && !wet) {
+        const r = ringAt[k];
+        const q = h / r;
+        const near = Math.round(q);
+        if (near > 0) {
+          const gz = G.z;
+          const gw = G.w;
+          const dzdx = ((gz[ci + 1] - gz[ci]) * (1 - ty) + (gz[ci + gw + 1] - gz[ci + gw]) * ty) * G.ax;
+          const dzdy = ((gz[ci + gw] - gz[ci]) * (1 - tx) + (gz[ci + gw + 1] - gz[ci + 1]) * tx) * G.ay;
+          const across = dzdx * rx + dzdy * ry;
+          const offH = (q - near) * r;
+          if ((offH < 0 ? -offH : offH) < (across < 0 ? -across : across) * halfCol[k]) onLine = near % 5 === 0 ? 2 : 1;
+        }
+        if (!onLine && lastH === lastH) {
+          const qa = lastH / r;
+          const hi = Math.floor(qa > q ? qa : q);
+          for (let m = Math.max(1, Math.floor(qa < q ? qa : q) + 1); m <= hi && nCross < RING_CROSSINGS; m++) {
+            crossRow[nCross] = Math.round(fromTop + (ys - fromTop) * ((m - qa) / (q - qa)));
+            crossIndex[nCross++] = m % 5 === 0 ? 1 : 0;
+          }
+        }
+        lastH = h;
+      } else lastH = NaN;
       if (y0 < yb) {
         let r: number;
         let gg: number;
         let bb: number;
-        if (off || !gc) {
+        if (off || !G) {
           const c = off ? TABLE : FLAT_LAND;
           r = c & 255;
           gg = (c >>> 8) & 255;
@@ -481,49 +463,62 @@ export function renderWalk(
           gg = LAKE[1];
           bb = LAKE[2];
         } else {
-          // The line's colour from the land cells round it, leaving the water
-          // out, or the parks' own green; the fill between, dark.
-          let fill = g!.fillColor;
+          let fill: number;
           let line: number;
-          const o = overlay ? overlayAt(overlay, wx, wy) : 0;
-          if (o) {
-            fill = o & OVERLAY_RESTORATION ? g!.restorationColor : g!.parkColor;
-            line = shade(fill, 1.3);
+          const nearest = ci + (tx > 0.5 ? 1 : 0) + (ty > 0.5 ? G.w : 0);
+          if (G === rg) {
+            // The mountains: their rings rock and snow up high, and between
+            // them the same a shade darker, so a peak stands white on the sky.
+            line = G.wire[nearest];
+            if (G.parkMask && G.parkMask[nearest] && h < SNOWLINE) line = placeTint(line, OVERLAY_PARK);
+            fill = shade(line, 0.85);
           } else {
-            const gw2 = g!.wire;
-            const wa = gc[ci] === WATER ? 0 : (1 - tx) * (1 - ty);
-            const wb = gc[ci + 1] === WATER ? 0 : tx * (1 - ty);
-            const wc = gc[ci + gw] === WATER ? 0 : (1 - tx) * ty;
-            const wd = gc[ci + gw + 1] === WATER ? 0 : tx * ty;
-            const sum = wa + wb + wc + wd || 1;
-            const a = gw2[ci];
-            const b = gw2[ci + 1];
-            const c = gw2[ci + gw];
-            const d = gw2[ci + gw + 1];
-            line = pack(
-              ((a & 255) * wa + (b & 255) * wb + (c & 255) * wc + (d & 255) * wd) / sum,
-              (((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd) / sum,
-              (((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd) / sum,
-            );
+            // The ring's colour from the land cells round it, leaving the water
+            // out, or the parks' own green; the fill between, dark.
+            fill = G.fillColor;
+            const o = overlay ? overlayAt(overlay, wx, wy) : 0;
+            if (o) {
+              fill = o & OVERLAY_RESTORATION ? G.restorationColor : G.parkColor;
+              line = shade(fill, 1.3);
+            } else {
+              const gc = G.color;
+              const gw = G.w;
+              const gw2 = G.wire;
+              const wa = gc[ci] === WATER ? 0 : (1 - tx) * (1 - ty);
+              const wb = gc[ci + 1] === WATER ? 0 : tx * (1 - ty);
+              const wc = gc[ci + gw] === WATER ? 0 : (1 - tx) * ty;
+              const wd = gc[ci + gw + 1] === WATER ? 0 : tx * ty;
+              const sum = wa + wb + wc + wd || 1;
+              const a = gw2[ci];
+              const b = gw2[ci + 1];
+              const c = gw2[ci + gw];
+              const d = gw2[ci + gw + 1];
+              line = pack(
+                ((a & 255) * wa + (b & 255) * wb + (c & 255) * wc + (d & 255) * wd) / sum,
+                (((a >>> 8) & 255) * wa + ((b >>> 8) & 255) * wb + ((c >>> 8) & 255) * wc + ((d >>> 8) & 255) * wd) / sum,
+                (((a >>> 16) & 255) * wa + ((b >>> 16) & 255) * wb + ((c >>> 16) & 255) * wc + ((d >>> 16) & 255) * wd) / sum,
+              );
+            }
           }
           const fog = fogs[k];
-          const lineOut = fogged(shade(line, GROUND_LIGHT), fog);
-          const fillOut = fogged(shade(fill, GROUND_LIGHT), fog);
+          const lineOut = fogged(shade(line, GROUND_LIGHT * RING_LIGHT), fog);
+          const brightOut = fogged(shade(line, GROUND_LIGHT * RING_LIGHT * INDEX_LIGHT), fog);
+          const fillOut = onLine ? (onLine === 2 ? brightOut : lineOut) : fogged(shade(fill, GROUND_LIGHT), fog);
           for (let y = y0; y < yb; y++) {
             const p = y * W + x;
             buf[p] = fillOut;
             depth[p] = z;
           }
-          for (let n = 0; n < nRuns; n++) {
-            const a = fromTop + (ys - fromTop) * runs[n * 2];
-            const b = fromTop + (ys - fromTop) * runs[n * 2 + 1];
-            const r0 = Math.max(y0, Math.floor(a < b ? a : b));
-            const r1 = Math.min(yb - 1, Math.max(r0, Math.ceil(a < b ? b : a) - 1));
-            for (let y = r0; y <= r1; y++) buf[y * W + x] = lineOut;
+          const thick = z < RING_THICK;
+          for (let n = 0; n < nCross; n++) {
+            const y = Math.max(y0, Math.min(yb - 1, crossRow[n]));
+            const c = crossIndex[n] ? brightOut : lineOut;
+            buf[y * W + x] = c;
+            if (thick && y + 1 < yb) buf[(y + 1) * W + x] = c;
           }
           yb = y0;
           if (yb <= 0) break;
-          if (zCeil >= cam.z ? horizon - (zCeil - cam.z) * fz[k] >= yb : horizon >= yb) break;
+          if (zCeil - drops[k] >= cam.z ? horizon - (zCeil - drops[k] - cam.z) * fz[k] >= yb : horizon >= yb) break;
           continue;
         }
         const fog = wet && !off ? fogs[k] * LAKE_FOG : fogs[k];
@@ -542,7 +537,7 @@ export function renderWalk(
         if (yb <= 0) break;
       }
       // Nothing further out can climb above what's drawn: stop.
-      if (zCeil >= cam.z ? horizon - (zCeil - cam.z) * fz[k] >= yb : horizon >= yb) break;
+      if (zCeil - drops[k] >= cam.z ? horizon - (zCeil - drops[k] - cam.z) * fz[k] >= yb : horizon >= yb) break;
     }
     for (let y = 0; y < yb; y++) {
       const p = y * W + x;

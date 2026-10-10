@@ -66,6 +66,21 @@
 //                            west (or, starting a row, the one above)
 //   water u8[w*h]            1 = open water (lake or Sound)
 //
+// And public/trees/region.bin.gz — the mountains around them, for the flat
+// map's contour rings and Tilt's ranges past the city's edge: the same 3DEP
+// elevation, the same layout under its own magic ("RGN1"), but on cells of
+// 0.005° (about 380 × 560 m) from the coast to the Cascade crest, Canada to
+// the Columbia — the Olympics, the Cascades and the volcanoes. zStep is 2 m,
+// and only the sea and the bigger flat lakes are marked water. Also separate,
+// also best-effort.
+//
+// And public/trees/parklands.bin.gz — the parks past Seattle's own across the
+// same region: the National Park Service's units, Washington State Parks, and
+// King County's parks (the county's own, and every other city's but
+// Seattle's, which places.bin.gz has). Laid out exactly as places.bin.gz is
+// (packPlaces), every feature kind "parkland" with an `agency` of national,
+// state, county or city. Also separate, also best-effort.
+//
 // And public/trees/places.bin.gz — the parks, Green Seattle Partnership
 // restoration zones, P-Patch gardens, creeks, the areaways under the
 // sidewalks and Link light rail, drawn under the trees (format at
@@ -84,6 +99,7 @@ const ADDR_PATH = resolve(ROOT, "public/trees/addresses.bin.gz");
 const REMOVED_PATH = resolve(ROOT, "public/trees/removed.bin.gz");
 const CROWNS_PATH = resolve(ROOT, "public/trees/crowns.bin.gz");
 const PLACES_PATH = resolve(ROOT, "public/trees/places.bin.gz");
+const PARKLANDS_PATH = resolve(ROOT, "public/trees/parklands.bin.gz");
 const PIPES_PATH = resolve(ROOT, "public/trees/pipes.bin.gz");
 const SIDEWALK_PATH = resolve(ROOT, "public/trees/sidewalk.bin.gz");
 const UW_PATH = resolve(ROOT, "public/trees/uw.bin.gz");
@@ -92,6 +108,19 @@ const POS_SHIFT = 1;
 /** Terrain heights in half metres: plenty under 2.5× exaggeration, and half the file of decimetres. */
 const Z_STEP = 0.5;
 const TERRAIN_PATH = resolve(ROOT, "public/trees/terrain.bin.gz");
+const REGION_PATH = resolve(ROOT, "public/trees/region.bin.gz");
+/** Western Washington, coast to crest: what the map shows past the city once zoomed out. */
+const REGION_BBOX = { west: -124.8, east: -120.0, south: 45.9, north: 49.0 };
+/** Degrees to a region cell: about 380 × 560 m, Rainier a few dozen cells across. */
+const REGION_CELL = 0.005;
+/** Region heights in 2 m steps: its contours are 100 m apart, and it's a fifth smaller than metres. */
+const REGION_Z_STEP = 2;
+/** Somewhere out on the open sea; the region's water is whatever joins them at sea level. */
+const REGION_SEA_SEEDS = [
+  { lon: -124.6, lat: 47.0 }, // the Pacific
+  { lon: -123.8, lat: 48.3 }, // the Strait of Juan de Fuca
+  { lon: -122.45, lat: 47.65 }, // Puget Sound
+];
 const DEM =
   "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage";
 /**
@@ -2171,34 +2200,7 @@ async function refreshTerrain(trees) {
   const east = midX + (w * CELL_DEG) / 2;
   const south = midY - (h * CELL_DEG) / 2;
   const north = midY + (h * CELL_DEG) / 2;
-  const url =
-    `${DEM}?bbox=${west},${south},${east},${north}&bboxSR=4326&imageSR=4326&size=${w},${h}` +
-    `&format=bsq&pixelType=F32&noData=-9999&interpolation=RSP_BilinearInterpolation`;
-  // Ask where it will actually put the grid before taking it, and refuse a
-  // stretched one rather than ship ground that's out of register with the trees.
-  const extent = (await getJson(`${url}&f=json`)).extent;
-  if (Math.abs(extent.ymax - north) > CELL_DEG / 4 || Math.abs(extent.xmin - west) > CELL_DEG / 4) {
-    throw new Error(`service moved the grid to ${JSON.stringify(extent)}`);
-  }
-  let raw;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const res = await fetch(`${url}&f=image`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      raw = Buffer.from(await res.arrayBuffer());
-      // bsq is the floats, row by row from the north, then a validity bitmask.
-      if (raw.length < w * h * 4) throw new Error(`short raster: ${raw.length} bytes for ${w}x${h}`);
-      break;
-    } catch (err) {
-      if (attempt >= 3) throw err;
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-    }
-  }
-  const z = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    const v = raw.readFloatLE(i * 4);
-    z[i] = Number.isFinite(v) && v > -500 ? v : 0;
-  }
+  const z = await fetchDem({ west, south, east, north }, w, h, CELL_DEG);
 
   const water = new Uint8Array(w * h);
   const stack = [];
@@ -2251,11 +2253,59 @@ async function refreshTerrain(trees) {
     console.warn(`[trees] warning: couldn't read the trees back (${err.message}); some may stand in the water.`);
   }
 
-  // Heights in steps, then each as the change from its neighbour to the west
-  // (or above, at the start of a row): hills change slowly, so the differences
-  // are small, and gzip does far better on them.
+  const gz = packHeights("TER2", { south, north, west, east }, w, h, z, water, Z_STEP);
+  await writeAtomic(TERRAIN_PATH, gz);
+  const wet = water.reduce((a, b) => a + b, 0);
+  console.log(
+    `[trees] wrote terrain ${w}x${h}, ${Math.round((wet / (w * h)) * 100)}% water — ` +
+      `${(gz.length / 1e6).toFixed(2)}MB gzipped`,
+  );
+}
+
+/**
+ * A w×h grid of 3DEP heights across `box`, metres, row 0 north. `cell` is how
+ * far the service may move the grid before it's refused as out of register.
+ */
+async function fetchDem({ west, south, east, north }, w, h, cell) {
+  const url =
+    `${DEM}?bbox=${west},${south},${east},${north}&bboxSR=4326&imageSR=4326&size=${w},${h}` +
+    `&format=bsq&pixelType=F32&noData=-9999&interpolation=RSP_BilinearInterpolation`;
+  // Ask where it will actually put the grid before taking it, and refuse a
+  // stretched one rather than ship ground that's out of register with the trees.
+  const extent = (await getJson(`${url}&f=json`)).extent;
+  if (Math.abs(extent.ymax - north) > cell / 4 || Math.abs(extent.xmin - west) > cell / 4) {
+    throw new Error(`service moved the grid to ${JSON.stringify(extent)}`);
+  }
+  let raw;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(`${url}&f=image`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      raw = Buffer.from(await res.arrayBuffer());
+      // bsq is the floats, row by row from the north, then a validity bitmask.
+      if (raw.length < w * h * 4) throw new Error(`short raster: ${raw.length} bytes for ${w}x${h}`);
+      break;
+    } catch (err) {
+      if (attempt >= 3) throw err;
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+    }
+  }
+  const z = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const v = raw.readFloatLE(i * 4);
+    z[i] = Number.isFinite(v) && v > -500 ? v : 0;
+  }
+  return z;
+}
+
+/**
+ * Heights in steps, then each as the change from its neighbour to the west
+ * (or above, at the start of a row): hills change slowly, so the differences
+ * are small, and gzip does far better on them. Then the water mask. Gzipped.
+ */
+function packHeights(magic, bbox, w, h, z, water, zStep) {
   const q = new Int32Array(w * h);
-  for (let i = 0; i < w * h; i++) q[i] = Math.round(z[i] / Z_STEP);
+  for (let i = 0; i < w * h; i++) q[i] = Math.round(z[i] / zStep);
   const lo = Buffer.alloc(w * h);
   const hi = Buffer.alloc(w * h);
   for (let r = 0; r < h; r++) {
@@ -2266,26 +2316,139 @@ async function refreshTerrain(trees) {
       hi[i] = d >>> 8;
     }
   }
-  const gz = gzipSync(
+  return gzipSync(
     withHeader(
-      "TER2",
-      {
-        source: "USGS 3D Elevation Program (3DEP)",
-        fetched: new Date().toISOString(),
-        bbox: { south, north, west, east },
-        w,
-        h,
-        zStep: Z_STEP,
-      },
+      magic,
+      { source: "USGS 3D Elevation Program (3DEP)", fetched: new Date().toISOString(), bbox, w, h, zStep },
       Buffer.concat([lo, hi, Buffer.from(water)]),
     ),
     { level: 9 },
   );
-  await writeAtomic(TERRAIN_PATH, gz);
-  const wet = water.reduce((a, b) => a + b, 0);
+}
+
+/** Only what's inside the region, and outlines simplified to about 30 m: the region's cells are ten times that. */
+const PARKLAND_FILTER =
+  `&geometry=${REGION_BBOX.west},${REGION_BBOX.south},${REGION_BBOX.east},${REGION_BBOX.north}` +
+  "&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects";
+const PARKLAND_SIMPLIFY = "&maxAllowableOffset=0.0003&geometryPrecision=5";
+const PARKLAND_LAYERS = [
+  {
+    kind: "parkland",
+    url: "https://services1.arcgis.com/fBc8EJBxQRMcHlei/ArcGIS/rest/services/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2/query",
+    where: "1=1",
+    fields: "OBJECTID,UNIT_NAME,UNIT_TYPE",
+    attrs: (a) => ({ name: a.UNIT_NAME, agency: "national", category: a.UNIT_TYPE?.replace(/s$/, "") ?? null }),
+  },
+  {
+    kind: "parkland",
+    url: "https://services5.arcgis.com/4LKAHwqnBooVDUlX/arcgis/rest/services/ParkBoundaries/FeatureServer/2/query",
+    where: "1=1",
+    fields: "OBJECTID,LABEL_LOCAL,ParkName,Category,Acres",
+    page: 1000,
+    attrs: (a) => ({
+      name: a.LABEL_LOCAL || a.ParkName,
+      agency: "state",
+      category: a.Category,
+      acres: round(Number(a.Acres), 1) || null,
+    }),
+  },
+  {
+    kind: "parkland",
+    // Seattle's own parks are in places.bin.gz already, finer; the state's and
+    // the federal government's are in the layers above.
+    url: "https://services.arcgis.com/Ej0PsM5Aw677QF1W/arcgis/rest/services/PARK_AREA_228/FeatureServer/0/query",
+    where: "OWNER <> 'City of Seattle' AND MANAGER <> 'City of Seattle' AND OWNERTYPE NOT IN ('State', 'Federal')",
+    fields: "OBJECTID,SITENAME,OWNER,OWNERTYPE,Shape__Area",
+    page: 1000,
+    attrs: (a) => ({
+      name: a.SITENAME,
+      agency: a.OWNERTYPE === "King County Parks" || a.OWNERTYPE === "County" ? "county" : "city",
+      manager: a.OWNER,
+      acres: round(Number(a.Shape__Area) / 4046.86, 1) || null,
+    }),
+  },
+];
+
+async function refreshParklands() {
+  const byKind = [];
+  for (const layer of PARKLAND_LAYERS) {
+    const features = await fetchFeatures(layer.url, layer.where, layer.fields, PARKLAND_SIMPLIFY, PARKLAND_FILTER, layer.page);
+    byKind.push({ kind: layer.kind, layer, features });
+  }
+  const packed = packPlaces(byKind);
+  const gz = gzipSync(packed.bytes, { level: 9 });
+  await writeAtomic(PARKLANDS_PATH, gz);
   console.log(
-    `[trees] wrote terrain ${w}x${h}, ${Math.round((wet / (w * h)) * 100)}% water — ` +
-      `${(gz.length / 1e6).toFixed(2)}MB gzipped`,
+    `[trees] wrote parklands (${byKind[0].features.length} national, ${byKind[1].features.length} state, ` +
+      `${byKind[2].features.length} King County; ` +
+      `${packed.points} points) — ${(gz.length / 1e3).toFixed(0)}KB gzipped`,
+  );
+}
+
+/** The mountains around the city, on coarse cells: format at the top of this file. */
+async function refreshRegion() {
+  const { west, east, south, north } = REGION_BBOX;
+  const w = Math.round((east - west) / REGION_CELL);
+  const h = Math.round((north - south) / REGION_CELL);
+  const z = await fetchDem(REGION_BBOX, w, h, REGION_CELL);
+  const water = new Uint8Array(w * h);
+  const at = (lon, lat) => Math.floor(((north - lat) / (north - south)) * h) * w + Math.floor(((lon - west) / (east - west)) * w);
+  // The sea: whatever joins the seeds at sea level.
+  const stack = REGION_SEA_SEEDS.map((p) => at(p.lon, p.lat));
+  while (stack.length) {
+    const i = stack.pop();
+    if (water[i] || z[i] > 0.5) continue;
+    water[i] = 1;
+    const x = i % w;
+    if (x > 0) stack.push(i - 1);
+    if (x < w - 1) stack.push(i + 1);
+    if (i >= w) stack.push(i - w);
+    if (i < w * (h - 1)) stack.push(i + w);
+  }
+  // The lakes: 3DEP is hydro-flattened, so a lake is a run of cells all at one
+  // height — within a few centimetres, resampled this coarse. Only runs of a
+  // few cells, or every flat field would be a lake.
+  const flat = (i, v) => Math.abs(z[i] - v) < 0.05;
+  const seen = new Uint8Array(w * h);
+  let lakes = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i0 = y * w + x;
+      const v = z[i0];
+      if (seen[i0] || water[i0] || v <= 0.5) continue;
+      if (!(flat(i0 - 1, v) && flat(i0 + 1, v) && flat(i0 - w, v) && flat(i0 + w, v))) continue;
+      const run = [];
+      const todo = [i0];
+      seen[i0] = 1;
+      while (todo.length) {
+        const i = todo.pop();
+        run.push(i);
+        const cx = i % w;
+        for (const j of [cx > 0 ? i - 1 : -1, cx < w - 1 ? i + 1 : -1, i - w, i + w]) {
+          if (j < 0 || j >= w * h || seen[j] || !flat(j, v)) continue;
+          seen[j] = 1;
+          todo.push(j);
+        }
+      }
+      if (run.length < 4) continue;
+      lakes++;
+      for (const i of run) water[i] = 1;
+      // And the ring of cells round it that the resampling blended with the
+      // bank, as long as they're barely above the water.
+      for (const i of run) {
+        const cx = i % w;
+        for (const j of [cx > 0 ? i - 1 : -1, cx < w - 1 ? i + 1 : -1, i - w, i + w]) {
+          if (j >= 0 && j < w * h && !water[j] && z[j] - v < 1) water[j] = 2;
+        }
+      }
+      for (let i = 0; i < w * h; i++) if (water[i] === 2) water[i] = 1;
+    }
+  }
+  const gz = packHeights("RGN1", REGION_BBOX, w, h, z, water, REGION_Z_STEP);
+  await writeAtomic(REGION_PATH, gz);
+  const top = z.reduce((a, b) => Math.max(a, b), 0);
+  console.log(
+    `[trees] wrote region ${w}x${h}, highest ${Math.round(top)} m, ${lakes} lakes — ${(gz.length / 1e3).toFixed(0)}KB gzipped`,
   );
 }
 
@@ -2435,6 +2598,29 @@ async function main() {
     }
   } else {
     console.log(`[trees] ${TERRAIN_PATH} is under a week old; keeping it.`);
+  }
+
+  // The mountains don't hang on the trees' bbox: fetched on their own schedule.
+  if (!(await isFresh(REGION_PATH, "RGN1"))) {
+    try {
+      console.log("[trees] fetching the mountains around the city from USGS 3DEP...");
+      await refreshRegion();
+    } catch (err) {
+      console.warn(`[trees] warning: region refresh failed (${err.message}); the map stops at the city's edge.`);
+    }
+  } else {
+    console.log(`[trees] ${REGION_PATH} is under a week old; keeping it.`);
+  }
+
+  if (!(await isFresh(PARKLANDS_PATH, "PLC1"))) {
+    try {
+      console.log("[trees] fetching national, state and King County park boundaries...");
+      await refreshParklands();
+    } catch (err) {
+      console.warn(`[trees] warning: parklands refresh failed (${err.message}); only Seattle's parks.`);
+    }
+  } else {
+    console.log(`[trees] ${PARKLANDS_PATH} is under a week old; keeping it.`);
   }
 }
 

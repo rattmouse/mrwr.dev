@@ -65,6 +65,8 @@ export default function TreesProgram(props: ProgramProps) {
   const [water, setWater] = useState(true);
   const [underground, setUnderground] = useState(true);
   const [rats, setRats] = useState(true);
+  // Past the city's edge: the Olympics and the Cascades, as rings on the flat map and ranges in Tilt.
+  const [mountains, setMountains] = useState(true);
   // The pipes are the walk's layer: no button here, but shown while the walk has them on.
   const [pipes, setPipes] = useState(false);
   // Tilt lit by the sun at an hour of the day, Seattle time — now, to begin with.
@@ -122,7 +124,8 @@ export default function TreesProgram(props: ProgramProps) {
     },
     {
       label: "Parks",
-      title: "Seattle's parks and the trees Parks has inventoried in them, forest-restoration zones, and P-Patch gardens",
+      title:
+        "Seattle's parks and the trees Parks has inventoried in them, forest-restoration zones, and P-Patch gardens; past the city, national parks, state parks and King County's parks",
       on: parks,
       set: setParks,
     },
@@ -133,6 +136,12 @@ export default function TreesProgram(props: ProgramProps) {
         "The areaways — hollow sidewalks, mostly Pioneer Square's, left when the streets were raised after the 1889 fire — Link light rail, dashed in its tunnels, and SPU's drainage vaults, drilled drains and outfalls",
       on: underground,
       set: setUnderground,
+    },
+    {
+      label: "Mountains",
+      title: "Zoom out past the city: the Olympics and the Cascades, as contour rings on the map and standing ranges in Tilt",
+      on: mountains,
+      set: setMountains,
     },
     {
       label: "Rats",
@@ -441,6 +450,7 @@ export default function TreesProgram(props: ProgramProps) {
         underground={underground}
         rats={rats}
         pipes={pipes}
+        mountains={mountains}
         sun={sun}
         minutes={minutes}
       />

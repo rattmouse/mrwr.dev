@@ -21,6 +21,8 @@
 import { dataUrl, fetchGzip, Progress, readHeader, Trees } from "@/lib/trees";
 
 export const PLACES_URL = dataUrl("/trees/places.bin.gz");
+/** The parks past Seattle's own: national, state, King County's and its other cities', in the same layout. */
+export const PARKLANDS_URL = dataUrl("/trees/parklands.bin.gz");
 
 export type PlaceKind =
   | "park"
@@ -35,7 +37,8 @@ export type PlaceKind =
   | "outfall"
   | "rat"
   | "structure"
-  | "pipe";
+  | "pipe"
+  | "parkland";
 
 /** Which layers are on: Parks, Water, Underground, Pipes (with King County's structures), and Rats on their own. */
 export type PlacesShown = { parks: boolean; water: boolean; underground: boolean; rats: boolean; pipes: boolean };
@@ -129,6 +132,10 @@ export type Place = {
   upDeep?: number;
   downDeep?: number;
   lined?: number;
+  /** Parkland: whose it is, what sort ("National Park", "State Park"…), and for a city's, which city. */
+  agency?: "national" | "state" | "county" | "city";
+  category?: string;
+  manager?: string;
 };
 
 export type Overlay = {
@@ -171,8 +178,9 @@ export async function loadPlaces(
   heightM: number,
   signal?: AbortSignal,
   onProgress?: Progress,
+  url = PLACES_URL,
 ): Promise<Places> {
-  const buf = await fetchGzip(PLACES_URL, "PLC1", signal, onProgress);
+  const buf = await fetchGzip(url, "PLC1", signal, onProgress);
   const { meta, body } = readHeader<Meta>(buf, "PLC1");
   const bytes = new Uint8Array(buf);
   const total = meta.features.reduce((n, f) => n + f.parts.reduce((a, b) => a + b, 0), 0);
@@ -219,6 +227,12 @@ export async function loadPlaces(
   return { fetched: meta.fetched, list, overlay: rasterize(list, widthM, heightM) };
 }
 
+/** The city's places with the parklands beyond it added on, the overlay tinting whatever of them is over the city too. */
+export function withParklands(places: Places, parklands: Places, widthM: number, heightM: number): Places {
+  const list = places.list.concat(parklands.list);
+  return { fetched: places.fetched, list, overlay: rasterize(list, widthM, heightM) };
+}
+
 /** The parks and restoration zones, filled into the overlay grid even-odd, a row of cell centres at a time. */
 function rasterize(list: Place[], widthM: number, heightM: number): Overlay {
   const w = Math.ceil(widthM / OVERLAY_CELL);
@@ -226,9 +240,11 @@ function rasterize(list: Place[], widthM: number, heightM: number): Overlay {
   const bits = new Uint8Array(w * h);
   const xs: number[] = [];
   for (const place of list) {
-    const bit = place.kind === "park" ? OVERLAY_PARK : place.kind === "restoration" ? OVERLAY_RESTORATION : 0;
+    const bit = place.kind === "park" || place.kind === "parkland" ? OVERLAY_PARK : place.kind === "restoration" ? OVERLAY_RESTORATION : 0;
     if (!bit) continue;
     const { x, y, parts, box } = place;
+    // The parklands reach across the state; only those over the city's rectangle tint it.
+    if (box[2] < 0 || box[0] > widthM || box[3] < 0 || box[1] > heightM) continue;
     const r0 = Math.max(0, Math.floor(box[1] / OVERLAY_CELL - 0.5));
     const r1 = Math.min(h - 1, Math.ceil(box[3] / OVERLAY_CELL - 0.5));
     for (let r = r0; r <= r1; r++) {
@@ -382,11 +398,73 @@ export function placeAt(
   }
   if (best || !show.parks) return best;
   let park: Place | null = null;
+  let land: Place | null = null;
+  let landArea = Infinity;
   for (const p of places.list) {
     if (p.kind === "restoration" && inside(p, mx, my)) return p;
     if (!park && p.kind === "park" && inside(p, mx, my)) park = p;
+    // The smallest of the parklands round it: a county park inside a national forest is the county park.
+    if (p.kind === "parkland") {
+      const area = (p.box[2] - p.box[0]) * (p.box[3] - p.box[1]);
+      if (area < landArea && inside(p, mx, my)) {
+        land = p;
+        landArea = area;
+      }
+    }
   }
-  return park;
+  return park ?? land;
+}
+
+/** Whose a parkland is, in a word or two. */
+export function parklandAgency(p: Place): string {
+  switch (p.agency) {
+    case "national":
+      return "National Park Service";
+    case "state":
+      return "Washington State Parks";
+    case "county":
+      return "King County Parks";
+    default:
+      return p.manager ?? "City park";
+  }
+}
+
+/**
+ * The parklands rasterized onto another grid — the region's height grid — as
+ * a byte per cell (1 inside any of them), even-odd a row of cell centres at a
+ * time. `rect` is the grid's bbox in the same metres, row 0 at the north.
+ */
+export function parklandMask(list: Place[], w: number, h: number, rect: { x0: number; y0: number; x1: number; y1: number }): Uint8Array {
+  const mask = new Uint8Array(w * h);
+  const cw = (rect.x1 - rect.x0) / w;
+  const ch = (rect.y1 - rect.y0) / h;
+  const xs: number[] = [];
+  for (const place of list) {
+    if (place.kind !== "parkland") continue;
+    const { x, y, parts, box } = place;
+    const r0 = Math.max(0, Math.floor((rect.y1 - box[3]) / ch - 0.5));
+    const r1 = Math.min(h - 1, Math.ceil((rect.y1 - box[1]) / ch - 0.5));
+    for (let r = r0; r <= r1; r++) {
+      const cy = rect.y1 - (r + 0.5) * ch;
+      xs.length = 0;
+      for (let p = 0; p + 1 < parts.length; p++) {
+        const from = parts[p];
+        const to = parts[p + 1];
+        for (let i = from; i < to; i++) {
+          const j = i + 1 < to ? i + 1 : from;
+          if (y[i] <= cy === y[j] <= cy) continue;
+          xs.push(x[i] + ((cy - y[i]) / (y[j] - y[i])) * (x[j] - x[i]));
+        }
+      }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const c0 = Math.max(0, Math.ceil((xs[k] - rect.x0) / cw - 0.5));
+        const c1 = Math.min(w - 1, Math.floor((xs[k + 1] - rect.x0) / cw - 0.5));
+        for (let c = c0; c <= c1; c++) mask[r * w + c] = 1;
+      }
+    }
+  }
+  return mask;
 }
 
 /** A garden's side, metres, from its size: they're drawn as squares of about their own area. */
@@ -425,6 +503,8 @@ export function describePlace(p: Place): string {
   switch (p.kind) {
     case "park":
       return [p.name ?? "Park", acresLabel(p.acres)].filter(Boolean).join(" · ");
+    case "parkland":
+      return [p.name ?? "Park", p.category ?? parklandAgency(p), acresLabel(p.acres)].filter(Boolean).join(" · ");
     case "restoration":
       return [
         p.zone ?? "Restoration zone",
