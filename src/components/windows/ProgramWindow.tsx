@@ -17,6 +17,7 @@ import TasksProgram from "@/components/programs/TasksProgram";
 import CubiclesProgram from "@/components/programs/CubiclesProgram";
 import TreesProgram from "@/components/programs/TreesProgram";
 import BashProgram from "@/components/programs/BashProgram";
+import FacadeProgram from "@/components/programs/FacadeProgram";
 
 /**
  * The component behind every program in programs.ts. Each one draws its own
@@ -39,6 +40,7 @@ const PROGRAM_COMPONENTS: Record<ProgramWindowId, React.ComponentType<ProgramPro
   cubicles: CubiclesProgram,
   trees: TreesProgram,
   bash: BashProgram,
+  facade: FacadeProgram,
 };
 
 export default function ProgramWindow({ id, ...props }: ProgramProps & { id: ProgramWindowId }) {
