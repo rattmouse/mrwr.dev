@@ -56,7 +56,18 @@ that already exists on disk and restarts.
 
 Runtime on prod is unchanged from before: systemd (`mrwr.dev.service`) runs
 `node server.js` (a small Express static file server with a `/log-search`
-endpoint), fronted by Caddy reverse-proxying to `localhost:3000`.
+endpoint and a `/search-history/live` one), fronted by Caddy reverse-proxying
+to `localhost:3000`.
+
+With `SEARCH_NOTIFY_KIND=telegram` in `/etc/mrwr.dev/notify.env`, each
+search-session message has **Approve** / **Deny** buttons. Approve puts the
+search in the search dropdown straight away (served from
+`shared/search-history-approved.json`, no redeploy); Deny adds it to
+`shared/search-history-hidden.json`, the hide list `hide-search-history.sh`
+edits, so no build ships it. Either can be flipped from the same message.
+The next deploy doesn't ask about approved searches. `server.js` long-polls the
+bot for the presses, so nothing else may consume that bot's updates (no
+webhook, no second server with the same token); `TG_REVIEW=0` turns it off.
 
 ## One-time setup (on each machine that will deploy)
 

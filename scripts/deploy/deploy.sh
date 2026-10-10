@@ -16,7 +16,8 @@
 # in (see that file's comments).
 #
 # Before building, it lists search-history sessions the live site doesn't show
-# yet and asks y/n whether to publish them; "n" ships only what's already live.
+# yet (approved from Telegram counts as shown) and asks y/n whether to publish
+# them; "n" ships only what's already live.
 # With no terminal to ask on it answers "n"; --yes-search-history answers "y".
 
 set -euo pipefail
@@ -73,6 +74,9 @@ SEARCH_HISTORY="$REPO_ROOT/src/data/search-history.json"
 # healthy deploy, so "new" means new to the public site, whichever machine
 # deployed last.
 SEARCH_HISTORY_DEPLOYED="$PROD_BASE/shared/search-history-deployed.json"
+# Sessions approved from the Telegram notifier; server.js already serves them
+# live, so they don't need asking about either.
+SEARCH_HISTORY_APPROVED="$PROD_BASE/shared/search-history-approved.json"
 STAGE_DIR="$REPO_ROOT/.deploy/$RELEASE_ID"
 
 log "Preparing release $RELEASE_ID"
@@ -109,8 +113,11 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
     elif [[ ! -s "$SH_BASELINE" ]]; then
       warn "No record on prod of what the live site shows yet — treating every session as new."
     fi
+    SH_APPROVED=$(mktemp "${TMPDIR:-/tmp}/search-history-approved.XXXXXX")
+    ssh_prod "cat '$SEARCH_HISTORY_APPROVED' 2>/dev/null || true" > "$SH_APPROVED" \
+      || warn "Couldn't read $SEARCH_HISTORY_APPROVED from prod — asking about approved sessions too."
     set +e
-    SH_DIFF=$(node "$REPO_ROOT/scripts/content/diff-search-history.mjs" --baseline "$SH_BASELINE" --current "$SEARCH_HISTORY")
+    SH_DIFF=$(node "$REPO_ROOT/scripts/content/diff-search-history.mjs" --baseline "$SH_BASELINE" --approved "$SH_APPROVED" --current "$SEARCH_HISTORY")
     SH_STATUS=$?
     set -e
     if [[ "$SH_STATUS" -eq 10 ]]; then
@@ -130,16 +137,16 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
         warn "No terminal to ask on — leaving them out (pass --yes-search-history to publish)."
       fi
       if [[ "$SH_ANSWER" == n ]]; then
-        node "$REPO_ROOT/scripts/content/diff-search-history.mjs" --baseline "$SH_BASELINE" --current "$SEARCH_HISTORY" --drop-new
+        node "$REPO_ROOT/scripts/content/diff-search-history.mjs" --baseline "$SH_BASELINE" --approved "$SH_APPROVED" --current "$SEARCH_HISTORY" --drop-new
         log "Held back for now; to keep one out for good: scripts/content/hide-search-history.sh add <id>"
       fi
     elif [[ "$SH_STATUS" -ne 0 ]]; then
-      rm -f "$SH_BASELINE"
+      rm -f "$SH_BASELINE" "$SH_APPROVED"
       fail "Search-history check failed (exit $SH_STATUS)."
     else
       log "No new search history."
     fi
-    rm -f "$SH_BASELINE"
+    rm -f "$SH_BASELINE" "$SH_APPROVED"
   fi
 
   if [[ "$SKIP_PROJECTS" -ne 1 ]]; then

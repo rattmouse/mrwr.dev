@@ -1,7 +1,9 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { execFile } = require("child_process");
+const { setTimeout: delay } = require("timers/promises");
 
 // Malicious-search classifier. A missing module (e.g. a deploy that forgot to
 // ship search-guard.js) must not 500 every search — degrade to "nothing is
@@ -56,6 +58,29 @@ const NOTIFY_KIND = (process.env.SEARCH_NOTIFY_KIND || "").trim().toLowerCase();
 const NOTIFY_TIMEOUT_MS = 5000;
 const pendingSessions = new Map();
 
+// --- search review (telegram only) ------------------------------------------
+// With SEARCH_NOTIFY_KIND=telegram each search-session message carries Approve
+// and Deny buttons. server.js long-polls the bot for presses (getUpdates, so
+// no webhook and nothing new exposed). Approve adds the session to
+// SEARCH_HISTORY_APPROVED_FILE, which GET /search-history/live serves and the
+// search dropdown merges over its build-time history, so it is on the site
+// without a redeploy. Deny adds it to the hide list hide-search-history.sh
+// edits, so no build ships it either. deploy.sh counts approved sessions as
+// already published. TG_REVIEW=0 turns the buttons and the polling off.
+const SEARCH_HISTORY_APPROVED_FILE =
+  process.env.SEARCH_HISTORY_APPROVED_FILE || path.join(__dirname, "search-history-approved.json");
+const SEARCH_HISTORY_HIDDEN_FILE =
+  process.env.SEARCH_HISTORY_HIDDEN_FILE || path.join(__dirname, "search-history-hidden.json");
+// Sessions sent for review, by button token, so a press can find the session
+// (and the message text) again after a restart.
+const SEARCH_REVIEW_FILE = process.env.SEARCH_REVIEW_FILE || path.join(__dirname, "search-review.json");
+// Same two weeks the dropdown keeps a search for (SearchBox.tsx,
+// refresh-search-history.mjs); older approvals and review records are pruned.
+const SEARCH_HISTORY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const MAX_APPROVED_SESSIONS = 250;
+const TG_POLL_TIMEOUT_S = 50;
+const REVIEW_ENABLED = NOTIFY_KIND === "telegram" && process.env.TG_REVIEW !== "0";
+
 const OUT_DIR = path.join(__dirname, ".");
 
 // Durable, append-only archive of recorded searches. stdout still gets each
@@ -95,6 +120,29 @@ function appendSearchRecord(record) {
 
 // --- session notifier ---------------------------------------------------------
 
+function escapeHtml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// One Bot API call. Throws on a transport failure or an `ok: false` reply.
+async function telegramApi(method, body, timeoutMs = NOTIFY_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${process.env.TG_BOT_TOKEN}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }));
+    if (!data.ok) throw new Error(`${method}: ${data.description || `HTTP ${res.status}`}`);
+    return data.result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function notifyText(payload) {
   const head = payload.flagged
     ? `⚠ flagged search session${payload.categories.length ? ` (${payload.categories.join(", ")})` : ""}`
@@ -118,8 +166,9 @@ async function postNotify(kind, url, headers, body, signal) {
 
 // Sends one message through whatever SEARCH_NOTIFY_KIND points at. `ntfy` is
 // the Title/Tags/Priority headers for ntfy; `payload` is the webhook's JSON
-// body (it gets `message: text` added). Best-effort: failures log and drop.
-async function sendNotification({ text, ntfy, payload }) {
+// body (it gets `message: text` added); `telegramMarkup` is an inline keyboard
+// for telegram. Best-effort: failures log and drop.
+async function sendNotification({ text, ntfy, payload, telegramMarkup }) {
   if (!NOTIFY_KIND) return;
 
   const controller = new AbortController();
@@ -133,20 +182,13 @@ async function sendNotification({ text, ntfy, payload }) {
         console.error("search-notify: SEARCH_NOTIFY_KIND=telegram needs TG_BOT_TOKEN and TG_CHAT_ID");
         return;
       }
-      const esc = (s) =>
-        String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      await postNotify(
-        "telegram",
-        `https://api.telegram.org/bot${token}/sendMessage`,
-        { "content-type": "application/json" },
-        JSON.stringify({
-          chat_id: chatId,
-          text: `<pre>${esc(text)}</pre>`,
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        }),
-        controller.signal
-      );
+      await telegramApi("sendMessage", {
+        chat_id: chatId,
+        text: `<pre>${escapeHtml(text)}</pre>`,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...(telegramMarkup ? { reply_markup: telegramMarkup } : {}),
+      });
       return;
     }
 
@@ -192,16 +234,237 @@ async function sendNotification({ text, ntfy, payload }) {
   }
 }
 
-function notifySearchSession(payload) {
+async function notifySearchSession(payload, session) {
+  const text = notifyText(payload);
+  let telegramMarkup;
+  if (REVIEW_ENABLED) {
+    // Saved before sending, so the buttons always have something to find. A
+    // failed save sends the message without them.
+    const token = reviewToken(session.id);
+    try {
+      await rememberForReview(token, session, text);
+      telegramMarkup = reviewKeyboard(token, null);
+    } catch (err) {
+      console.error("search-review: couldn't save the session for review", err);
+    }
+  }
   return sendNotification({
-    text: notifyText(payload),
+    text,
     ntfy: {
       Title: payload.flagged ? "Flagged search session" : "New search session",
       Tags: payload.flagged ? "warning" : "mag",
       Priority: payload.flagged ? "high" : "default",
     },
     payload,
+    telegramMarkup,
   });
+}
+
+// --- search review ------------------------------------------------------------
+
+// Missing or blank ⇒ `fallback`; anything unparseable throws, so a corrupt file
+// is never mistaken for an empty one (or overwritten).
+async function readJsonFile(file, fallback) {
+  let text;
+  try {
+    text = await fs.promises.readFile(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return fallback;
+    throw err;
+  }
+  return text.trim() ? JSON.parse(text) : fallback;
+}
+
+async function writeJsonFile(file, data) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fs.promises.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
+  await fs.promises.rename(tmp, file);
+}
+
+// Review-file read-modify-writes run one at a time.
+let reviewQueue = Promise.resolve();
+function serially(fn) {
+  const run = reviewQueue.then(fn, fn);
+  reviewQueue = run.catch(() => {});
+  return run;
+}
+
+function isFresh(session, nowMs) {
+  const startedMs = Date.parse(session?.startedAt);
+  return Number.isFinite(startedMs) && nowMs - startedMs <= SEARCH_HISTORY_MAX_AGE_MS;
+}
+
+// Telegram caps callback_data at 64 bytes; session ids can be longer.
+function reviewToken(id) {
+  return crypto.createHash("sha256").update(id).digest("base64url").slice(0, 16);
+}
+
+function reviewKeyboard(token, status) {
+  if (status === "approved") return { inline_keyboard: [[{ text: "Deny instead", callback_data: `d:${token}` }]] };
+  if (status === "denied") return { inline_keyboard: [[{ text: "Approve instead", callback_data: `a:${token}` }]] };
+  return {
+    inline_keyboard: [
+      [
+        { text: "Approve", callback_data: `a:${token}` },
+        { text: "Deny", callback_data: `d:${token}` },
+      ],
+    ],
+  };
+}
+
+function sessionHeadline(session) {
+  let longest = "";
+  for (const e of session.entries || []) {
+    const text = String(e.displayQuery ?? e.query ?? "");
+    if (text.length > longest.length) longest = text;
+  }
+  return longest;
+}
+
+async function readHidden() {
+  const doc = await readJsonFile(SEARCH_HISTORY_HIDDEN_FILE, { hidden: [] });
+  if (!doc || !Array.isArray(doc.hidden)) throw new Error(`${SEARCH_HISTORY_HIDDEN_FILE} has no "hidden" array`);
+  return doc.hidden.filter((h) => h && typeof h.id === "string");
+}
+
+function rememberForReview(token, session, text) {
+  return serially(async () => {
+    const nowMs = Date.now();
+    const review = await readJsonFile(SEARCH_REVIEW_FILE, {});
+    for (const [key, item] of Object.entries(review)) {
+      if (!isFresh(item?.session, nowMs)) delete review[key];
+    }
+    review[token] = { session, text, notifiedAt: new Date(nowMs).toISOString() };
+    await writeJsonFile(SEARCH_REVIEW_FILE, review);
+  });
+}
+
+// Approve: onto the approved list, off the hide list. Deny: the reverse.
+// Returns the review record, or null when the token is unknown (pruned).
+function decideReview(token, approve) {
+  return serially(async () => {
+    const review = await readJsonFile(SEARCH_REVIEW_FILE, {});
+    const item = review[token];
+    if (!item?.session?.id) return null;
+    const { session } = item;
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+
+    const approvedRaw = await readJsonFile(SEARCH_HISTORY_APPROVED_FILE, []);
+    const approved = (Array.isArray(approvedRaw) ? approvedRaw : []).filter(
+      (s) => s && s.id !== session.id && isFresh(s, nowMs)
+    );
+    const hidden = (await readHidden()).filter((h) => h.id !== session.id);
+
+    if (approve) {
+      approved.push(session);
+      approved.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+    } else {
+      // `ats` lets refresh-search-history.mjs catch the same search even if the
+      // build carves the archive into a session with a different id.
+      hidden.push({
+        id: session.id,
+        headline: sessionHeadline(session),
+        hiddenAt: now,
+        ats: session.entries.map((e) => e.at).filter(Boolean),
+      });
+      hidden.sort((a, b) => String(a.hiddenAt).localeCompare(String(b.hiddenAt)));
+    }
+
+    await writeJsonFile(SEARCH_HISTORY_APPROVED_FILE, approved.slice(0, MAX_APPROVED_SESSIONS));
+    await writeJsonFile(SEARCH_HISTORY_HIDDEN_FILE, { hidden });
+    item.status = approve ? "approved" : "denied";
+    item.decidedAt = now;
+    await writeJsonFile(SEARCH_REVIEW_FILE, review);
+    return item;
+  });
+}
+
+async function handleReviewPress(press) {
+  const answer = (text) =>
+    telegramApi("answerCallbackQuery", { callback_query_id: press.id, text }).catch((err) =>
+      console.error("search-review: answerCallbackQuery failed", err.message)
+    );
+
+  const chatId = press.message?.chat?.id;
+  if (chatId === undefined || String(chatId) !== String(process.env.TG_CHAT_ID)) {
+    await answer("Not from the review chat");
+    return;
+  }
+  const match = /^([ad]):([\w-]{1,32})$/.exec(press.data || "");
+  if (!match) {
+    await answer("Unknown button");
+    return;
+  }
+  const approve = match[1] === "a";
+  const where = { chat_id: chatId, message_id: press.message.message_id };
+
+  let item;
+  try {
+    item = await decideReview(match[2], approve);
+  } catch (err) {
+    console.error("search-review: decision not saved", err);
+    await answer("Couldn't save that; see the server log");
+    return;
+  }
+  if (!item) {
+    await answer("Too old to review");
+    await telegramApi("editMessageReplyMarkup", { ...where, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    return;
+  }
+
+  console.log("search-review", { id: item.session.id, status: item.status });
+  await answer(approve ? "Live on the site" : "Hidden");
+  const status = approve ? "Approved: in the site's search history" : "Denied: hidden from the site";
+  await telegramApi("editMessageText", {
+    ...where,
+    text: `<pre>${escapeHtml(item.text)}</pre>\n${status}`,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    reply_markup: reviewKeyboard(match[2], item.status),
+  }).catch((err) => console.error("search-review: editMessageText failed", err.message));
+}
+
+// Long-polls for button presses. Only callback queries are asked for; a press
+// handled twice (an update replayed after a restart) just decides it again.
+async function pollReviews() {
+  let offset = 0;
+  for (;;) {
+    let updates;
+    try {
+      updates = await telegramApi(
+        "getUpdates",
+        { offset, timeout: TG_POLL_TIMEOUT_S, allowed_updates: ["callback_query"] },
+        (TG_POLL_TIMEOUT_S + 15) * 1000
+      );
+    } catch (err) {
+      // e.g. a webhook set on the bot (409) or Telegram unreachable
+      console.error("search-review: getUpdates failed", err.message);
+      await delay(30 * 1000);
+      continue;
+    }
+    for (const update of updates) {
+      offset = update.update_id + 1;
+      if (update.callback_query) {
+        await handleReviewPress(update.callback_query).catch((err) =>
+          console.error("search-review: press failed", err)
+        );
+      }
+    }
+  }
+}
+
+// What /search-history/live serves: approved, not since hidden, under two weeks old.
+async function liveSearchHistory() {
+  const [approved, hidden] = await Promise.all([
+    readJsonFile(SEARCH_HISTORY_APPROVED_FILE, []),
+    readHidden(),
+  ]);
+  const hiddenIds = new Set(hidden.map((h) => h.id));
+  const nowMs = Date.now();
+  return (Array.isArray(approved) ? approved : []).filter(
+    (s) => s && typeof s.id === "string" && !hiddenIds.has(s.id) && isFresh(s, nowMs)
+  );
 }
 
 function flushSession(key) {
@@ -222,6 +485,25 @@ function flushSession(key) {
   const flagged = buf.entries.some((e) => e.flagged);
   const categories = Array.from(new Set(buf.entries.flatMap((e) => e.categories || [])));
 
+  // The same shape refresh-search-history.mjs builds from the archive, and the
+  // same id, so an approved session lines up with the next build's copy.
+  const session = {
+    id: `${key}:${first.at}`,
+    startedAt: first.at,
+    spanMs,
+    flagged,
+    categories,
+    entries: buf.entries.map((e) => {
+      const entry = { query: e.query, at: e.at, inputDeltaMs: e.inputDeltaMs };
+      if (e.flagged) {
+        entry.flagged = true;
+        entry.categories = e.categories;
+        entry.displayQuery = defang(e.query);
+      }
+      return entry;
+    }),
+  };
+
   notifySearchSession({
     type: "search-session",
     headline: flagged ? defang(headline) : headline,
@@ -233,7 +515,7 @@ function flushSession(key) {
     flagged,
     categories,
     entries: buf.entries.map((e) => ({ query: e.flagged ? defang(e.query) : e.query, at: e.at })),
-  });
+  }, session).catch((err) => console.error("search-notify failed", err));
 }
 
 function bufferSearchEntry(sessionId, entry) {
@@ -479,6 +761,18 @@ function scheduleProbeDigest() {
 // its X-Forwarded-For so req.ip is the visitor, not 127.0.0.1.
 app.set("trust proxy", "loopback");
 
+// Approved searches, merged into the search dropdown over its build-time
+// history. Fails closed: an unreadable hide list serves nothing.
+app.get("/search-history/live", async (req, res) => {
+  let live = [];
+  try {
+    live = await liveSearchHistory();
+  } catch (err) {
+    console.error("search-history/live failed", err);
+  }
+  res.set("Cache-Control", "no-cache").json(live);
+});
+
 // Real files win over the tripwire: trees.exe's /trees/*.bin.gz would trip
 // the "backup" trap otherwise. Misses (and dotfiles, which static ignores)
 // fall through to it.
@@ -603,6 +897,8 @@ app.post("/log-search", (req, res) => {
       query,
       at: record.at,
       atMs: Date.parse(record.at) || now,
+      // what refresh-search-history.mjs reads off the archived record
+      inputDeltaMs: record.input_delta_ms ?? record.delta_ms ?? null,
       flagged,
       categories,
     });
@@ -625,5 +921,9 @@ app.listen(PORT, () => {
         ? `search-session notifier armed (kind=${NOTIFY_KIND}, idle=${Math.round(SESSION_IDLE_MS / 1000)}s)`
         : `search-notify: unknown SEARCH_NOTIFY_KIND=${NOTIFY_KIND} (want telegram | ntfy | webhook) — notifier disabled`
     );
+  }
+  if (REVIEW_ENABLED && sessionGroupingReady && process.env.TG_BOT_TOKEN && process.env.TG_CHAT_ID) {
+    console.log(`search review armed (approved=${SEARCH_HISTORY_APPROVED_FILE}, hidden=${SEARCH_HISTORY_HIDDEN_FILE})`);
+    pollReviews();
   }
 });

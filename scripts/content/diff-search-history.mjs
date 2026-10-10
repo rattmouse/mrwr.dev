@@ -5,14 +5,17 @@
 // shipping searches that aren't public yet.
 //
 // Usage:
-//   node diff-search-history.mjs --baseline FILE --current FILE
+//   node diff-search-history.mjs --baseline FILE --current FILE [--approved FILE]
 //     Lists sessions that are new (id not in the baseline) or have grown (more
 //     entries than the baseline's copy). Exit 0 = nothing new, 10 = something new.
 //   node diff-search-history.mjs --baseline FILE --current FILE --drop-new
 //     Rewrites --current so it holds only what the baseline already showed:
 //     new sessions removed, grown ones reverted to the baseline's copy.
 //
-// A missing or unreadable baseline counts as empty, so everything is "new".
+// --approved is prod's search-history-approved.json: sessions approved from the
+// Telegram notifier, which the live site already shows. They count as part of
+// the baseline. A missing or unreadable baseline counts as empty, so everything
+// is "new".
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -46,6 +49,10 @@ if (!currentPath) {
 }
 
 const baseline = new Map(readSessions(baselinePath).map((s) => [s.id, s]));
+for (const s of readSessions(opt("--approved"))) {
+  const old = baseline.get(s.id);
+  if (!old || (s.entries?.length ?? 0) > (old.entries?.length ?? 0)) baseline.set(s.id, s);
+}
 const current = readSessions(currentPath);
 const changed = current.filter((s) => {
   const old = baseline.get(s.id);

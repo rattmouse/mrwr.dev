@@ -37,10 +37,6 @@ export function loadHidden(path) {
   return data.hidden.filter((h) => h && typeof h.id === "string");
 }
 
-export function loadHiddenIds(path) {
-  return new Set(loadHidden(path).map((h) => h.id));
-}
-
 function saveHidden(path, hidden) {
   hidden.sort((a, b) => String(a.hiddenAt).localeCompare(String(b.hiddenAt)));
   writeFileSync(path, `${JSON.stringify({ hidden }, null, 2)}\n`);
