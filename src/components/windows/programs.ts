@@ -151,6 +151,14 @@ export const PROGRAMS = {
     menu: { label: "Cubicles", folder: "toys" },
     shell: { blurb: "a first-person office you can walk around." },
   },
+  facade: {
+    kind: "program",
+    title: "facade.exe",
+    icon: "../w98_certificate_red_line.ico",
+    size: { width: 760, height: 520 },
+    menu: { label: "Analyzer", folder: "app" },
+    shell: { blurb: "super intelligence that opens files of any type." },
+  },
   about: {
     kind: "document",
     title: "about.txt",

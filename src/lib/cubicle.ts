@@ -145,7 +145,8 @@ export const FLOOR = { minX: -5.6, maxX: 8.5, minZ: -3, maxZ: 7 };
  */
 export const DOOR = { x: 1.5, halfW: 0.47, bottom: 0, top: 2.05, z: 6.92 };
 
-export const EYE_STANDING = 1.62;
+/** Eye level of someone 6 ft 2 in (1.88 m) tall, about 11 cm under the crown. */
+export const EYE_STANDING = 1.77;
 export const PLAYER_RADIUS = 0.26;
 export const WALK_SPEED = 1.65;
 /** How far from the screen you can still reach the keyboard. */

@@ -31,8 +31,8 @@ import { OVERLAY_RESTORATION, overlayAt, Places } from "@/lib/places";
 import { drapeWalkPlaces, PlacesShown, ratTurn, spinRat } from "@/lib/placesDraw";
 import type { Pipes } from "@/lib/pipes";
 
-/** Metres from the ground to the eye. */
-export const EYE = 1.7;
+/** Metres from the ground to the eye: the same 6 ft 2 in walker as cubicles.exe. */
+export const EYE = 1.77;
 /** How far up and down you can look, radians. */
 export const PITCH_LIMIT = 0.6;
 /** Vertical field of view, radians. */
