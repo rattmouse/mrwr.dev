@@ -1506,6 +1506,7 @@ export default function DocumentWindow({
 
   return (
     <DesktopWindow
+      windowId={id}
       title={title}
       titleIcon={titleIcon}
       layout={layout}

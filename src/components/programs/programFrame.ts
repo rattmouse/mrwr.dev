@@ -41,6 +41,7 @@ export type ProgramProps = {
 export function windowFrame(id: ProgramWindowId, props: ProgramProps) {
   const def = programDef(id);
   return {
+    windowId: id,
     title: def.title,
     titleIcon: def.icon,
     normalWidth: def.size.width,

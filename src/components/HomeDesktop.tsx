@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import StartMenu from "@/components/StartMenu";
+import GhostCursors from "@/components/GhostCursors";
 import ProgramWindow from "@/components/windows/ProgramWindow";
 import DocumentWindow from "@/components/windows/DocumentWindow";
 import { NotepadIncoming } from "@/components/windows/NotepadWindow";
@@ -355,6 +356,8 @@ export default function HomeDesktop({ versions, searchHistory }: HomeDesktopProp
 
         return null;
       })}
+
+      {!poweredDown && <GhostCursors />}
 
       {!poweredDown && (
         <StartMenu

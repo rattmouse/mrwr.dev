@@ -32,6 +32,15 @@ try {
   sessionGroupingReady = false;
 }
 
+// Ghost cursors over the desktop, on a WebSocket. A missing module (or a
+// missing "ws" package) leaves the desktop without them and nothing else.
+let mountGhosts = () => {};
+try {
+  ({ mountGhosts } = require("./ghosts"));
+} catch (err) {
+  console.error("ghosts module missing — no ghost cursors", err);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MAX_QUERY_LOG_LENGTH = 200;
@@ -907,7 +916,7 @@ app.post("/log-search", (req, res) => {
   res.sendStatus(204); // No Content
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Serving ${OUT_DIR} on http://localhost:${PORT}`);
   console.log(
     `tripwire armed (log=${TRIPWIRE_LOG_FILE}, dotenv=${DOTENV_FILE || "none"}` +
@@ -927,3 +936,5 @@ app.listen(PORT, () => {
     pollReviews();
   }
 });
+
+mountGhosts(server);

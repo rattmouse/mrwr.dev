@@ -208,25 +208,29 @@ mkdir -p "$STAGE_DIR"
 cp -r "$REPO_ROOT/out/." "$STAGE_DIR/"
 cp "$REPO_ROOT/server.js" "$STAGE_DIR/server.js"
 # server.js require()s these at startup: search-guard.js flags hostile queries,
-# search-sessions.js groups live keystrokes into sessions for the notifier.
+# search-sessions.js groups live keystrokes into sessions for the notifier,
+# ghosts.js relays the desktop's ghost cursors.
 cp "$REPO_ROOT/search-guard.js" "$STAGE_DIR/search-guard.js"
 cp "$REPO_ROOT/search-sessions.js" "$STAGE_DIR/search-sessions.js"
+cp "$REPO_ROOT/ghosts.js" "$STAGE_DIR/ghosts.js"
 
-# The only third-party module server.js loads is "express" (plus Node
-# builtins and the zero-dependency ./search-guard.js copied just above) —
-# it's a static file server for the already-built out/, nothing else in
+# The only third-party modules server.js loads are "express" and "ws" (for
+# ghosts.js; plus Node builtins and the zero-dependency modules copied just
+# above) — it's a static file server for the already-built out/, nothing else in
 # package.json's dependencies (next, react, react95, styled-components,
 # the strudel packages — all build-time only) runs on prod. Shipping the
 # repo's real package.json had prod's `npm install` pulling in the entire
 # Next.js/React toolchain on every deploy, which is almost certainly what
 # was getting OOM-killed on a small prod box. Ship a minimal one instead.
 EXPRESS_SPEC=$(node -p "require('$REPO_ROOT/package.json').dependencies.express")
+WS_SPEC=$(node -p "require('$REPO_ROOT/package.json').dependencies.ws")
 cat > "$STAGE_DIR/package.json" <<PKGJSON
 {
   "name": "mrwr-dev-prod",
   "private": true,
   "dependencies": {
-    "express": "$EXPRESS_SPEC"
+    "express": "$EXPRESS_SPEC",
+    "ws": "$WS_SPEC"
   }
 }
 PKGJSON
