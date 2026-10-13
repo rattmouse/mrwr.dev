@@ -3,10 +3,10 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.2.4",
+      "version": "7.2.5",
       "era": "claude",
       "name": "Trees panels",
-      "date": "2026-10-09",
+      "date": "2026-10-12",
       "summary": "Layers sidebar; map dials column; selection info section; push-knob Reset",
       "issues": [],
       "changes": [
@@ -25,7 +25,9 @@
         "Added: game controller support (./trees, paint.exe). Stick pans, triggers zoom",
         "Added: game controller support (midi.exe). Left stick drives the thumbstick",
         "Added: game controller Start menu and taskbar. Back opens, d-pad moves, A picks, B backs out",
-        "Changed: approved searches appear in the search dropdown without a redeploy"
+        "Changed: approved searches appear in the search dropdown without a redeploy",
+        "Added: ghost cursors. Other visitors' pointers drift over the desktop as ashen phantoms",
+        "Added: ghost toggle in the taskbar tray, shown while ghosts are out. Carries the visitor count"
       ]
     },
     {

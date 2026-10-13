@@ -5,11 +5,13 @@ import { Button, Toolbar, Window, WindowContent, WindowHeader } from "react95";
 import { Z } from "@/constants/zIndex";
 import MeltFilter, { MELT_FILTER_ID, meltStyle } from "@/components/windows/MeltFilter";
 import FrameLightsStyle, { framesLit, lightStyles, type FrameLights } from "@/components/windows/FrameLights";
-import { Layout, WindowBox } from "@/components/windows/windowTypes";
+import { Layout, WindowBox, WindowId } from "@/components/windows/windowTypes";
 import { Turn, isUpright, toScreen, turnTransform, unturn } from "@/lib/windowTurn";
 import { canPersistDesktop } from "@/lib/desktopStorage";
 
 type DesktopWindowProps = {
+  /** Which window this is, so ghost cursors can find it on anyone's desktop. */
+  windowId?: WindowId;
   title: string;
   titleIcon?: string;
   layout: Layout;
@@ -68,6 +70,7 @@ type DesktopWindowProps = {
 };
 
 export default function DesktopWindow({
+  windowId,
   title,
   titleIcon,
   layout,
@@ -406,6 +409,7 @@ export default function DesktopWindow({
       // Lets things that float over the desktop (collections.exe's scattered
       // tiles) find the windows on screen and keep out of their way.
       data-desktop-window={isMinimized ? undefined : "true"}
+      data-window-id={isMinimized ? undefined : windowId}
     >
       <WindowHeader
         ref={headerRef}

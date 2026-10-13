@@ -5,6 +5,9 @@ export const Z = {
   // wanders at 5 and should be seen walking over it.
   WALLPAPER: 2,
   WINDOW: 10,
+  // Other visitors' pointers (GhostCursors): over every window, under
+  // anything floating and the taskbar, so they never hide a menu.
+  GHOSTS: 400,
   // Floating panels belong to a window but live above it, free of its frame —
   // party.webp's tool windows drift anywhere on the desktop. Still under the
   // taskbar so Start always wins.

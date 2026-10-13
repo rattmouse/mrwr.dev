@@ -10,6 +10,7 @@ import { MenuFolder, WINDOW_IDS, programDef } from "@/components/windows/program
 import SearchBox from "@/components/SearchBox";
 import TaskbarButtons, { PAD_RING, TaskbarItem } from "@/components/TaskbarButtons";
 import PerfMeter from "@/components/PerfMeter";
+import GhostTray from "@/components/GhostTray";
 import type { SearchHistorySession } from "@/lib/searchHistory.types";
 import { holdPad, useGamepad } from "@/lib/gamepad";
 
@@ -423,6 +424,8 @@ export default function StartMenu({
           onTaskAction={(id, action) => onTaskAction?.(id, action)}
           padAt={shell?.row === "bar" && shell.at > 0 ? (tasks[Math.min(shell.at, tasks.length) - 1]?.id ?? null) : null}
         />
+
+        <GhostTray />
 
         <PerfMeter windowCount={tasks.length} />
 
