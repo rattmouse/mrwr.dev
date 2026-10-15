@@ -558,14 +558,16 @@ function bufferSearchEntry(sessionId, entry) {
 // /wp-login.php, /phpmyadmin — none of which this site has or will ever have,
 // so any request for one is a bot, not a visitor. Those requests are recorded
 // to their own archive (never mixed into the search log), answered with a
-// plain 404, and summed up once a day through the search notifier. The archive
-// is also what scripts/content/refresh-probes.sh reads at build time.
+// plain 404, and — only with TRIPWIRE_DIGEST=1 — summed up once a day through
+// the search notifier. The archive is also what scripts/content/refresh-probes.sh
+// reads at build time.
 //
 // The one exception is .env, answered with DOTENV_FILE when that exists. The
 // file lives only on prod, never in the repo.
 const TRIPWIRE_LOG_FILE =
   process.env.TRIPWIRE_LOG_FILE || path.join(__dirname, "tripwire.ndjson");
 const DOTENV_FILE = process.env.DOTENV_FILE || "";
+const TRIPWIRE_DIGEST = Boolean(NOTIFY_KIND) && process.env.TRIPWIRE_DIGEST === "1";
 const TRIPWIRE_DIGEST_HOUR_UTC = (() => {
   const hour = Number.parseInt(process.env.TRIPWIRE_DIGEST_HOUR_UTC || "", 10);
   return Number.isInteger(hour) && hour >= 0 && hour < 24 ? hour : 16; // 9am Pacific (PDT)
@@ -753,7 +755,7 @@ async function sendProbeDigest() {
 }
 
 function scheduleProbeDigest() {
-  if (!NOTIFY_KIND) return;
+  if (!TRIPWIRE_DIGEST) return;
   const now = new Date();
   const next = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), TRIPWIRE_DIGEST_HOUR_UTC)
@@ -920,7 +922,7 @@ const server = app.listen(PORT, () => {
   console.log(`Serving ${OUT_DIR} on http://localhost:${PORT}`);
   console.log(
     `tripwire armed (log=${TRIPWIRE_LOG_FILE}, dotenv=${DOTENV_FILE || "none"}` +
-      (NOTIFY_KIND ? `, digest=${TRIPWIRE_DIGEST_HOUR_UTC}:00 UTC)` : ")")
+      (TRIPWIRE_DIGEST ? `, digest=${TRIPWIRE_DIGEST_HOUR_UTC}:00 UTC)` : ")")
   );
   scheduleProbeDigest();
   if (NOTIFY_KIND) {
