@@ -10,6 +10,8 @@ import type { SearchEntryLine } from "@/lib/searchPlayback";
 import type { SearchHistorySession } from "@/lib/searchHistory.types";
 import { useLiveSearchHistory } from "@/lib/liveSearchHistory";
 import { formatRelativeCompact } from "@/lib/relativeTime";
+import { likelyWindows } from "@/lib/windowSearch";
+import { PROGRAMS, type WindowId } from "@/components/windows/programs";
 
 const MAX_ROWS = 8;
 // Past searches older than this drop out of the dropdown. The build already
@@ -97,11 +99,37 @@ const Warn = styled.span`
   flex: 0 0 auto;
 `;
 
-const Empty = styled.li`
+const Label = styled.span`
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+const Dim = styled.span<{ $active: boolean }>`
+  flex: 0 0 auto;
+  opacity: ${({ $active }) => ($active ? 0.85 : 0.6)};
+`;
+
+const Icon = styled.img`
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  image-rendering: pixelated;
+`;
+
+const Heading = styled.li`
   list-style: none;
-  padding: 4px;
+  padding: 2px 4px 0;
   font-size: 11px;
   opacity: 0.7;
+`;
+
+const Divider = styled.li`
+  list-style: none;
+  margin: 2px 0;
+  border-top: 1px solid #808080;
+  border-bottom: 1px solid #fff;
 `;
 
 type HistoryRowProps = {
@@ -144,13 +172,60 @@ type SearchBoxProps = {
   history: SearchHistorySession[];
   /** Picking a past search hands it here, with the text its row shows; the desktop decides where it opens. */
   onOpen?: (session: SearchHistorySession, text: string) => void;
+  /** Picking a window the query looks like it means. */
+  onOpenWindow?: (id: WindowId) => void;
 };
 
-export default function SearchBox({ history: builtHistory, onOpen }: SearchBoxProps) {
+/**
+ * One line of the dropdown. Windows the query matches come first and take the
+ * place of the past searches; until something matches, the past searches show
+ * instead. With anything typed, the last line sends it in as feedback.
+ */
+type Choice =
+  | { kind: "window"; id: WindowId }
+  | { kind: "history"; session: SearchHistorySession }
+  | { kind: "feedback" };
+
+type FeedbackState = { text: string; status: "sending" | "sent" | "duplicate" | "failed" } | null;
+
+// Feedback this browser has already sent, by the same normalized form the
+// server compares (server.js normalizeFeedback), so the line says so instead
+// of sending it again. A convenience only — the server is what refuses repeats.
+const SENT_FEEDBACK_KEY = "searchFeedbackSent";
+const MAX_SENT_FEEDBACK = 200;
+
+function normalizeFeedback(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function loadSentFeedback(): string[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SENT_FEEDBACK_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSentFeedback(norm: string) {
+  try {
+    const next = [...loadSentFeedback().filter((t) => t !== norm), norm].slice(-MAX_SENT_FEEDBACK);
+    window.localStorage.setItem(SENT_FEEDBACK_KEY, JSON.stringify(next));
+  } catch {
+    // storage blocked — the server still refuses the repeat
+  }
+}
+
+export default function SearchBox({ history: builtHistory, onOpen, onOpenWindow }: SearchBoxProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const history = useLiveSearchHistory(builtHistory, open);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [feedback, setFeedback] = useState<FeedbackState>(null);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const lastSentRef = useRef<string>("");
@@ -176,12 +251,35 @@ export default function SearchBox({ history: builtHistory, onOpen }: SearchBoxPr
     return open ? history.filter((session) => isRecent(session, nowMs)) : [];
   }, [history, open]);
 
-  const matches = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return recent.filter((session) => matchesQuery(session, needle)).slice(0, MAX_ROWS);
-  }, [recent, query]);
+  const trimmed = query.trim();
 
-  const showDropdown = open && matches.length > 0;
+  const windowMatches = useMemo(() => likelyWindows(trimmed), [trimmed]);
+
+  // No window matched (yet): the past searches stay up, the ones that share
+  // the text first.
+  const historyRows = useMemo(() => {
+    if (windowMatches.length > 0) return [];
+    const needle = trimmed.toLowerCase();
+    if (!needle) return recent.slice(0, MAX_ROWS);
+    const hits = recent.filter((session) => matchesQuery(session, needle));
+    const rest = recent.filter((session) => !matchesQuery(session, needle));
+    return [...hits, ...rest].slice(0, MAX_ROWS);
+  }, [recent, trimmed, windowMatches]);
+
+  const choices = useMemo<Choice[]>(() => {
+    const list: Choice[] = windowMatches.map((id) => ({ kind: "window", id }));
+    for (const session of historyRows) list.push({ kind: "history", session });
+    if (trimmed) list.push({ kind: "feedback" });
+    return list;
+  }, [windowMatches, historyRows, trimmed]);
+
+  const showDropdown = open && choices.length > 0;
+
+  // Only read while the dropdown is up; storage is never touched on the server.
+  const alreadySent = useMemo(
+    () => open && !!trimmed && loadSentFeedback().includes(normalizeFeedback(trimmed)),
+    [open, trimmed, feedback],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -227,6 +325,51 @@ export default function SearchBox({ history: builtHistory, onOpen }: SearchBoxPr
     onOpen?.(session, headline(session));
   };
 
+  const pickWindow = (id: WindowId) => {
+    setOpen(false);
+    setActiveIndex(-1);
+    setQuery("");
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    onOpenWindow?.(id);
+  };
+
+  const sendFeedback = () => {
+    const text = trimmed;
+    if (!text) return;
+    if (feedback?.text === text && feedback.status !== "failed") return;
+    const norm = normalizeFeedback(text);
+    if (loadSentFeedback().includes(norm)) {
+      setFeedback({ text, status: "duplicate" });
+      return;
+    }
+    setFeedback({ text, status: "sending" });
+    fetch("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        sessionId: searchSessionIdRef.current || undefined,
+        at: new Date().toISOString(),
+      }),
+    })
+      .then((res) => {
+        // 204 is new feedback taken; 200 is the server saying it already has it.
+        const status = res.status === 204 ? "sent" : res.status === 200 ? "duplicate" : "failed";
+        if (status !== "failed") rememberSentFeedback(norm);
+        setFeedback((now) => (now?.text === text ? { text, status } : now));
+      })
+      .catch((err) => {
+        console.error("feedback failed", err);
+        setFeedback((now) => (now?.text === text ? { text, status: "failed" } : now));
+      });
+  };
+
+  const choose = (choice: Choice) => {
+    if (choice.kind === "window") pickWindow(choice.id);
+    else if (choice.kind === "history") pick(choice.session);
+    else sendFeedback();
+  };
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       setOpen(false);
@@ -240,15 +383,33 @@ export default function SearchBox({ history: builtHistory, onOpen }: SearchBoxPr
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((i) => (i + 1 >= matches.length ? 0 : i + 1));
+      setActiveIndex((i) => (i + 1 >= choices.length ? 0 : i + 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex((i) => (i <= 0 ? matches.length - 1 : i - 1));
-    } else if (event.key === "Enter" && activeIndex >= 0 && activeIndex < matches.length) {
-      event.preventDefault();
-      pick(matches[activeIndex]);
+      setActiveIndex((i) => (i <= 0 ? choices.length - 1 : i - 1));
+    } else if (event.key === "Enter") {
+      if (activeIndex >= 0 && activeIndex < choices.length) {
+        event.preventDefault();
+        choose(choices[activeIndex]);
+      } else if (windowMatches.length > 0) {
+        // Enter on its own opens the best guess. It never sends feedback —
+        // that takes picking the line.
+        event.preventDefault();
+        pickWindow(windowMatches[0]);
+      }
     }
   };
+
+  const feedbackLabel = (() => {
+    if (feedback?.text === trimmed) {
+      if (feedback.status === "sending") return "Sending feedback...";
+      if (feedback.status === "sent") return "Feedback sent. Thanks!";
+      if (feedback.status === "duplicate") return "Already sent as feedback. Thanks!";
+      return `Couldn't send. Try again: "${trimmed}"`;
+    }
+    if (alreadySent) return "Already sent as feedback";
+    return `Send "${trimmed}" as feedback`;
+  })();
 
   return (
     <div ref={wrapperRef} style={{ position: "relative", display: "inline-block" }}>
@@ -274,18 +435,51 @@ export default function SearchBox({ history: builtHistory, onOpen }: SearchBoxPr
 
       {showDropdown && (
         <Dropdown onMouseLeave={() => setActiveIndex(-1)}>
-          {matches.map((session, idx) => (
-            <HistoryRow
-              key={session.id}
-              session={session}
-              active={idx === activeIndex}
-              onHover={() => setActiveIndex(idx)}
-              onPick={() => pick(session)}
-            />
-          ))}
-          {query.trim() && (
-            <Empty aria-hidden>{`${matches.length} of ${recent.length} past searches`}</Empty>
-          )}
+          {windowMatches.length > 0 && <Heading aria-hidden>Open</Heading>}
+          {historyRows.length > 0 && trimmed && <Heading aria-hidden>No match yet · past searches</Heading>}
+          {choices.map((choice, idx) => {
+            const active = idx === activeIndex;
+            const hover = () => setActiveIndex(idx);
+            if (choice.kind === "history") {
+              return (
+                <HistoryRow
+                  key={choice.session.id}
+                  session={choice.session}
+                  active={active}
+                  onHover={hover}
+                  onPick={() => pick(choice.session)}
+                />
+              );
+            }
+            const def = choice.kind === "window" ? PROGRAMS[choice.id] : null;
+            return (
+              <React.Fragment key={choice.kind === "window" ? choice.id : "feedback"}>
+                {choice.kind === "feedback" && idx > 0 && <Divider aria-hidden />}
+                <Row
+                  $active={active}
+                  onMouseEnter={hover}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    choose(choice);
+                  }}
+                  title={def ? def.title : feedbackLabel}
+                >
+                  {def ? (
+                    <>
+                      <Icon src={def.icon} alt="" aria-hidden />
+                      <Label>{def.menu?.label ?? def.title}</Label>
+                      <Dim $active={active}>{def.title}</Dim>
+                    </>
+                  ) : (
+                    <>
+                      <Icon src="../w98_issues.ico" alt="" aria-hidden />
+                      <Label>{feedbackLabel}</Label>
+                    </>
+                  )}
+                </Row>
+              </React.Fragment>
+            );
+          })}
         </Dropdown>
       )}
     </div>

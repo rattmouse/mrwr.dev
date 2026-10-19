@@ -14,6 +14,8 @@ Environment=SEARCH_LOG_FILE=__APP_DIR__/shared/search-log.ndjson
 # Scanner requests the tripwire in server.js caught, same deal: outlives
 # releases, read back by scripts/content/refresh-probes.sh at build time.
 Environment=TRIPWIRE_LOG_FILE=__APP_DIR__/shared/tripwire.ndjson
+# Feedback sent from the search box, kept the same way.
+Environment=FEEDBACK_LOG_FILE=__APP_DIR__/shared/feedback.ndjson
 # Hand-placed on prod, never committed; absent ⇒ /.env is a plain 404.
 Environment=DOTENV_FILE=__APP_DIR__/shared/dotenv
 # Telegram search review (server.js): approved sessions served live at

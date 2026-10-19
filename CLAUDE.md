@@ -113,6 +113,16 @@ Orientation notes for working in this repo.
   and only from its own server. Deny adds it to the hide list (with its entry
   timestamps, `ats`, which `refresh-search-history.mjs` also matches on).
   `deploy.sh` counts approved sessions as already published.
+- The search dropdown's last line sends the typed text as feedback: `POST
+  /feedback` in `server.js`, appended to `FEEDBACK_LOG_FILE`
+  (`$PROD_BASE/shared/feedback.ndjson`) and sent straight out through the same
+  notifier — no idle wait, no review buttons. Rate-limited per browser session.
+  It stands in for the search it repeats: a matching search session still
+  waiting to go out is dropped, and one already sent means no feedback message.
+  The same words (case and punctuation aside) from the same browser session or
+  hashed address are taken once, remembered across restarts from the log.
+  The windows the dropdown suggests come from each `PROGRAMS` entry's title,
+  menu label, blurb and `search` words (`src/lib/windowSearch.ts`).
 - `src/data/probes.json` is the same deal again: gitignored, build-time only,
   refreshed by `scripts/content/refresh-probes.sh` (also run by `deploy.sh`).
   The build imports it, so the script always writes the file, empty when prod
