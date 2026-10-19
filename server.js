@@ -127,6 +127,25 @@ function appendSearchRecord(record) {
   appendNdjson(SEARCH_LOG_FILE, record);
 }
 
+// Feedback sent from the search box's last line ("Send … as feedback"). Its
+// own archive, same deal as the search log: outside the release dir in prod,
+// so it outlives release swaps. Each one also goes straight out through the
+// notifier — no idle wait, no review buttons.
+const FEEDBACK_LOG_FILE = process.env.FEEDBACK_LOG_FILE || path.join(__dirname, "feedback.ndjson");
+const FEEDBACK_MIN_INTERVAL_MS = 5 * 1000;
+const FEEDBACK_MAX_PER_SESSION = 20;
+const feedbackBySession = new Map();
+// Feedback already taken, as "<sender>|<normalized text>" for both the browser
+// session and the visitor's address, so the same words from the same person
+// count once. Seeded from FEEDBACK_LOG_FILE at startup, so a restart doesn't
+// forget them.
+const MAX_FEEDBACK_SEEN = 20000;
+const feedbackSeen = new Set();
+// Search sessions whose message has already gone out, per browser session, so
+// feedback that repeats one doesn't send its words a second time.
+const NOTIFIED_SESSION_TTL_MS = 60 * 60 * 1000;
+const notifiedSessions = new Map();
+
 // --- session notifier ---------------------------------------------------------
 
 function escapeHtml(value) {
@@ -512,6 +531,15 @@ function flushSession(key) {
       return entry;
     }),
   };
+
+  notifiedSessions.set(key, {
+    atMs: Date.now(),
+    texts: new Set(buf.entries.map((e) => normalizeFeedback(e.query))),
+  });
+  if (notifiedSessions.size > MAX_TRACKED_SESSIONS) {
+    const oldest = notifiedSessions.keys().next().value;
+    if (oldest && oldest !== key) notifiedSessions.delete(oldest);
+  }
 
   notifySearchSession({
     type: "search-session",
@@ -916,6 +944,129 @@ app.post("/log-search", (req, res) => {
   }
 
   res.sendStatus(204); // No Content
+});
+
+// What counts as "the same feedback": case, punctuation and spacing aside.
+function normalizeFeedback(text) {
+  return String(text ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+// The visitor's address, hashed — enough to tell a repeat sender, without
+// writing the address itself into the feedback log.
+function senderOf(req) {
+  return crypto.createHash("sha256").update(String(req.ip || "")).digest("hex").slice(0, 16);
+}
+
+function feedbackKeys(sessionId, from, norm) {
+  const keys = [`ip:${from}|${norm}`];
+  if (sessionId) keys.push(`s:${sessionId}|${norm}`);
+  return keys;
+}
+
+function rememberFeedback(keys) {
+  for (const key of keys) {
+    feedbackSeen.delete(key);
+    feedbackSeen.add(key);
+  }
+  while (feedbackSeen.size > MAX_FEEDBACK_SEEN) {
+    feedbackSeen.delete(feedbackSeen.values().next().value);
+  }
+}
+
+readNdjsonSince(FEEDBACK_LOG_FILE, 0).then((records) => {
+  for (const r of records) {
+    if (r.type !== "feedback" || !r.text) continue;
+    rememberFeedback(feedbackKeys(r.session, r.from || "", normalizeFeedback(r.text)));
+  }
+});
+
+// A browser session may send a few, not a flood: one every few seconds and a
+// handful in all (until a restart forgets them).
+function allowFeedback(sessionId, nowMs) {
+  const key = sessionId || "anon";
+  const seen = feedbackBySession.get(key) || { count: 0, lastMs: 0 };
+  if (nowMs - seen.lastMs < FEEDBACK_MIN_INTERVAL_MS) return false;
+  if (key !== "anon" && seen.count >= FEEDBACK_MAX_PER_SESSION) return false;
+  feedbackBySession.set(key, { count: seen.count + 1, lastMs: nowMs });
+  if (feedbackBySession.size > MAX_TRACKED_SESSIONS) {
+    const oldest = feedbackBySession.keys().next().value;
+    if (oldest && oldest !== key) feedbackBySession.delete(oldest);
+  }
+  return true;
+}
+
+// Feedback is usually the search its sender just typed, so it stands in for
+// that search's own message: a session still waiting to go out is dropped (its
+// records stay in the search log), and one that already went out means the
+// words have been seen, so the feedback sends nothing new.
+// Returns whether the feedback should still be sent.
+function supersedeSearchSession(sessionId, norm, nowMs) {
+  const key = sessionId || "anon";
+  const buf = pendingSessions.get(key);
+  if (buf && buf.entries.some((e) => normalizeFeedback(e.query) === norm)) {
+    if (buf.timer) clearTimeout(buf.timer);
+    pendingSessions.delete(key);
+    return true;
+  }
+  const sent = notifiedSessions.get(key);
+  if (sent && nowMs - sent.atMs < NOTIFIED_SESSION_TTL_MS && sent.texts.has(norm)) return false;
+  return true;
+}
+
+app.post("/feedback", (req, res) => {
+  const text = sanitizeForLog(req.body?.text);
+  const sessionId = sanitizeSessionId(req.body?.sessionId);
+  const clientAt = sanitizeClientTimestamp(req.body?.at);
+  const norm = normalizeFeedback(text);
+
+  if (!norm) {
+    return res.status(400).json({ error: "Missing text" });
+  }
+
+  const from = senderOf(req);
+  const keys = feedbackKeys(sessionId, from, norm);
+  // The same words from the same sender again: say it's taken, record nothing.
+  if (keys.some((key) => feedbackSeen.has(key))) {
+    return res.status(200).json({ status: "duplicate" });
+  }
+
+  const now = Date.now();
+  if (!allowFeedback(sessionId, now)) {
+    return res.status(429).json({ error: "Too many" });
+  }
+  rememberFeedback(keys);
+
+  const notify = supersedeSearchSession(sessionId, norm, now);
+  const { flagged, categories } = detectMaliciousSearch(text);
+  const record = {
+    type: "feedback",
+    text,
+    at: clientAt || new Date(now).toISOString(),
+    session: sessionId || undefined,
+    from,
+  };
+  if (flagged) {
+    record.flagged = true;
+    record.categories = categories;
+  }
+  if (!notify) record.notified = false;
+  console.log(record);
+  appendNdjson(FEEDBACK_LOG_FILE, record);
+
+  if (notify) {
+    const shown = flagged ? defang(text) : text;
+    sendNotification({
+      text: `${flagged ? "⚠ flagged feedback" : "Feedback"}\n${shown}`,
+      ntfy: { Title: "mrwr.dev feedback", Tags: flagged ? "warning" : "speech_balloon" },
+      payload: { type: "feedback", text: shown, at: record.at, session: record.session, flagged, categories },
+    }).catch((err) => console.error("feedback notify failed", err));
+  }
+
+  res.sendStatus(204);
 });
 
 const server = app.listen(PORT, () => {

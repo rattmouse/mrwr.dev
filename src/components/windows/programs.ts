@@ -27,6 +27,11 @@ export type ProgramDef = {
   /** Its Start menu entry, listed in the order this file gives. */
   menu?: { label: string; folder: MenuFolder };
   /**
+   * Words the taskbar's search box offers it for, on top of its title, its
+   * menu label and its blurb.
+   */
+  search?: string[];
+  /**
    * bash.exe lists it in the guest's home dir with this blurb, by its title or,
    * where the title isn't a file name, by `file`.
    */
@@ -40,6 +45,7 @@ export const PROGRAMS = {
     icon: "../w95_desktop.ico",
     size: { height: 160 },
     menu: { label: "Welcome", folder: "programs" },
+    search: ["home", "start", "hello", "intro", "mrwr"],
   },
   issues: {
     kind: "program",
@@ -47,6 +53,7 @@ export const PROGRAMS = {
     icon: "../w98_issues.ico",
     size: { height: 300 },
     menu: { label: "Issues", folder: "app" },
+    search: ["bug", "bugs", "issue", "problem", "broken", "github", "todo", "complaint", "request"],
     shell: { blurb: "every issue this site has ever had." },
   },
   changes: {
@@ -55,6 +62,7 @@ export const PROGRAMS = {
     icon: "../w95_changes.ico",
     size: { width: 420, height: 420 },
     menu: { label: "Changes", folder: "app" },
+    search: ["changelog", "version", "versions", "history", "release", "update", "new"],
     shell: { blurb: "the version history." },
   },
   bash: {
@@ -63,6 +71,7 @@ export const PROGRAMS = {
     icon: "../w98_console_prompt.ico",
     size: { width: 560, height: 360 },
     menu: { label: "Terminal", folder: "tools" },
+    search: ["terminal", "shell", "console", "command", "cmd", "cli", "bash", "prompt", "linux"],
   },
   notepad: {
     kind: "program",
@@ -70,6 +79,7 @@ export const PROGRAMS = {
     icon: "../w95_notepad.ico",
     size: { height: 300 },
     menu: { label: "Notepad", folder: "tools" },
+    search: ["text", "note", "notes", "write", "editor", "txt"],
     shell: { blurb: "a blank page, the way it used to be." },
   },
   paint: {
@@ -78,6 +88,7 @@ export const PROGRAMS = {
     icon: "../w95_paint.ico",
     size: { width: 560, height: 360 },
     menu: { label: "Paint", folder: "tools" },
+    search: ["draw", "drawing", "art", "brush", "pixel", "sketch", "image", "picture"],
     shell: { blurb: "a little painting program." },
   },
   player: {
@@ -86,6 +97,7 @@ export const PROGRAMS = {
     icon: "../w95_player.ico",
     size: { width: 440, height: 420 },
     menu: { label: "Media", folder: "tools" },
+    search: ["video", "audio", "media", "movie", "mp3", "mp4", "watch", "player"],
     shell: { blurb: "plays whatever you give it." },
   },
   collections: {
@@ -94,6 +106,7 @@ export const PROGRAMS = {
     icon: "../w98_collections_cards.ico",
     size: { width: 360, height: 392 },
     menu: { label: "Collections", folder: "toys" },
+    search: ["collection", "cards", "pokemon", "albums", "records", "vinyl", "songs", "paintings"],
   },
   music: {
     kind: "program",
@@ -101,6 +114,7 @@ export const PROGRAMS = {
     icon: "../w98_repl.ico",
     size: { height: 220 },
     menu: { label: "Sounds", folder: "toys" },
+    search: ["strudel", "music", "beats", "synth", "sound", "livecode", "code"],
     shell: { blurb: "live-code some music." },
   },
   midi: {
@@ -109,6 +123,7 @@ export const PROGRAMS = {
     icon: "../w98_music.ico",
     size: { width: 560, height: 480 },
     menu: { label: "Keys", folder: "toys" },
+    search: ["piano", "keyboard", "keys", "midi", "synth", "music", "instrument"],
     shell: { blurb: "a MIDI keyboard, no piano required." },
   },
   party: {
@@ -117,6 +132,7 @@ export const PROGRAMS = {
     icon: "../w98_regedit.ico",
     size: { width: 560, height: 460 },
     menu: { label: "Party", folder: "toys" },
+    search: ["party", "guys", "figures", "dance", "people"],
     shell: { blurb: "a party that broke out of its picture frame." },
   },
   marbles: {
@@ -125,6 +141,7 @@ export const PROGRAMS = {
     icon: "../w98_world_star.ico",
     size: { width: 560, height: 420 },
     menu: { label: "Marbles", folder: "toys" },
+    search: ["marbles", "marble", "physics", "ball", "balls", "game", "toy"],
     shell: { blurb: "a physics toy: marbles on a course." },
   },
   tasks: {
@@ -133,6 +150,7 @@ export const PROGRAMS = {
     icon: "../w98_installer_file_gear.ico",
     size: { width: 620, height: 480 },
     menu: { label: "Tasks", folder: "toys" },
+    search: ["tasks", "work", "workday", "job", "office", "game"],
     shell: { blurb: "survive the workday." },
   },
   trees: {
@@ -141,6 +159,7 @@ export const PROGRAMS = {
     icon: "../w95_tree.ico",
     size: { width: 720, height: 560 },
     menu: { label: "Map", folder: "tools" },
+    search: ["map", "trees", "tree", "seattle", "park", "parks", "cherry", "blossom", "nature", "walk"],
     shell: { blurb: "every street tree in Seattle, through the year.", file: "trees.exe" },
   },
   cubicles: {
@@ -149,6 +168,7 @@ export const PROGRAMS = {
     icon: "../w98_joystick.ico",
     size: { width: 640, height: 460 },
     menu: { label: "Cubicles", folder: "toys" },
+    search: ["cubicles", "office", "3d", "fps", "walk", "game", "explore"],
     shell: { blurb: "a first-person office you can walk around." },
   },
   facade: {
@@ -157,6 +177,7 @@ export const PROGRAMS = {
     icon: "../w98_certificate_red_line.ico",
     size: { width: 760, height: 520 },
     menu: { label: "Analyzer", folder: "app" },
+    search: ["analyze", "analyzer", "ai", "file", "files", "upload", "intelligence", "facade"],
     shell: { blurb: "super intelligence that opens files of any type." },
   },
   about: {
@@ -165,6 +186,7 @@ export const PROGRAMS = {
     icon: "../w95_default.ico",
     size: { height: 200 },
     menu: { label: "About", folder: "documents" },
+    search: ["about", "me", "who", "bio", "resume", "info"],
   },
   projects: {
     kind: "document",
@@ -172,6 +194,7 @@ export const PROGRAMS = {
     icon: "../w95_default.ico",
     size: { width: 340, height: 360 },
     menu: { label: "Projects", folder: "documents" },
+    search: ["projects", "project", "github", "code", "portfolio", "repos"],
   },
   demos: {
     kind: "document",
@@ -179,6 +202,7 @@ export const PROGRAMS = {
     icon: "../w95_default.ico",
     size: { width: 340, height: 360 },
     menu: { label: "Demos", folder: "documents" },
+    search: ["demo", "demos", "examples", "try"],
   },
   contact: {
     kind: "document",
@@ -186,6 +210,7 @@ export const PROGRAMS = {
     icon: "../w95_default.ico",
     size: { height: 200 },
     menu: { label: "Contact", folder: "documents" },
+    search: ["contact", "email", "mail", "reach", "hire", "message"],
   },
 } as const satisfies Record<string, ProgramDef>;
 

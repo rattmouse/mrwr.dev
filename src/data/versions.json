@@ -3,10 +3,10 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.2.6",
+      "version": "7.2.7",
       "era": "claude",
       "name": "Trees panels",
-      "date": "2026-10-15",
+      "date": "2026-10-19",
       "summary": "Layers sidebar; map dials column; selection info section; push-knob Reset",
       "issues": [],
       "changes": [
@@ -28,7 +28,10 @@
         "Changed: approved searches appear in the search dropdown without a redeploy",
         "Added: ghost cursors. Other visitors' pointers drift over the desktop as ashen phantoms",
         "Added: ghost toggle in the taskbar tray, shown while ghosts are out. Carries the visitor count",
-        "Changed: daily caught-probes digest no longer sent to the notifier. Opt back in per server"
+        "Changed: daily caught-probes digest no longer sent to the notifier. Opt back in per server",
+        "Changed: search box suggests the windows a query most likely means. Enter opens the best guess",
+        "Added: send-as-feedback line at the bottom of the search dropdown. Repeats from one sender ignored",
+        "Changed: past searches stay listed in the search dropdown until a window matches"
       ]
     },
     {

@@ -429,7 +429,7 @@ export default function StartMenu({
 
         <PerfMeter windowCount={tasks.length} />
 
-        <SearchBox history={searchHistory} onOpen={onOpenSearch} />
+        <SearchBox history={searchHistory} onOpen={onOpenSearch} onOpenWindow={openWindow} />
       </Toolbar>
     </AppBar>
   );
