@@ -31,7 +31,8 @@
         "Changed: daily caught-probes digest no longer sent to the notifier. Opt back in per server",
         "Changed: search box suggests the windows a query most likely means. Enter opens the best guess",
         "Added: send-as-feedback line at the bottom of the search dropdown. Repeats from one sender ignored",
-        "Changed: past searches stay listed in the search dropdown until a window matches"
+        "Changed: past searches stay listed in the search dropdown until a window matches",
+        "Fixed: ghost cursor status no longer trips a React snapshot warning on load"
       ]
     },
     {

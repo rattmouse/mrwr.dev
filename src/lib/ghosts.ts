@@ -63,6 +63,11 @@ function ghostsChanged() {
   if (status.visible !== ghosts.size) setStatus({ visible: ghosts.size });
 }
 
+// The prerendered page's status. One object, not a fresh one per call: React
+// compares snapshots by identity, and a new one every time reads as a change
+// that never settles.
+const SERVER_STATUS: GhostStatus = { enabled: false, others: null, visible: 0 };
+
 export const ghostStatusStore = {
   subscribe(fn: () => void) {
     statusListeners.add(fn);
@@ -76,7 +81,7 @@ export const ghostStatusStore = {
     return status;
   },
   onServer(): GhostStatus {
-    return { enabled: false, others: null, visible: 0 };
+    return SERVER_STATUS;
   },
 };
 
