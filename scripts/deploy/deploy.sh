@@ -4,7 +4,7 @@
 # Usage:
 #   scripts/deploy/deploy.sh [--allow-dirty] [--skip-build] [--skip-issues]
 #                            [--skip-search-history] [--skip-projects]
-#                            [--skip-probes] [--skip-trees]
+#                            [--skip-probes] [--skip-trees] [--skip-cards]
 #                            [--yes-search-history]
 #
 # Run this from whatever machine has the repo checked out and can reach prod
@@ -34,6 +34,7 @@ SKIP_SEARCH_HISTORY=0
 SKIP_PROJECTS=0
 SKIP_PROBES=0
 SKIP_TREES=0
+SKIP_CARDS=0
 YES_SEARCH_HISTORY=0
 for arg in "$@"; do
   case "$arg" in
@@ -44,8 +45,9 @@ for arg in "$@"; do
     --skip-projects) SKIP_PROJECTS=1 ;;
     --skip-probes) SKIP_PROBES=1 ;;
     --skip-trees) SKIP_TREES=1 ;;
+    --skip-cards) SKIP_CARDS=1 ;;
     --yes-search-history) YES_SEARCH_HISTORY=1 ;;
-    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes, --skip-trees, --yes-search-history)" ;;
+    *) fail "Unknown argument: $arg (known: --allow-dirty, --skip-build, --skip-issues, --skip-search-history, --skip-projects, --skip-probes, --skip-trees, --skip-cards, --yes-search-history)" ;;
   esac
 done
 
@@ -185,6 +187,19 @@ if [[ "$SKIP_BUILD" -ne 1 ]]; then
       || warn "Street-tree refresh failed; shipping public/trees/ as-is."
   else
     warn "Skipping street-tree refresh (--skip-trees) — shipping public/trees/ as-is."
+  fi
+
+  if [[ "$SKIP_CARDS" -ne 1 ]]; then
+    log "Refreshing Pokémon cards from the card-binder..."
+    # public/collections/cards.json + cards/ are gitignored — the Collections
+    # window's Cards tab, read from ../card-binder/binder.db. --keep-count
+    # holds the shelf at the size cards.json already is, and scans already on
+    # disk are reused. Best-effort: no binder (or no Node 22) ships the cards
+    # already in the tree.
+    "$REPO_ROOT/scripts/content/refresh-pokemon-cards.sh" --keep-count \
+      || warn "Card refresh failed; shipping public/collections/cards.json as-is."
+  else
+    warn "Skipping card refresh (--skip-cards) — shipping public/collections/cards.json as-is."
   fi
 
   log "Installing dependencies..."

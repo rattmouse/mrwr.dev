@@ -110,8 +110,9 @@ This runs the same sequence a deploy does, minus anything that touches prod:
 
 1. refreshes `src/data/issues.json` from GitHub (**required** — it's
    gitignored and imported at build time, so the build fails without it)
-2. refreshes the search history from prod's archive, and the project
-   metadata from GitHub (both best-effort; a failure just warns)
+2. refreshes the search history from prod's archive, the project
+   metadata from GitHub, and the Pokémon cards from `../card-binder`
+   (all best-effort; a failure just warns)
 3. `npm ci`
 4. eslint — **report-only**, full output written to `.deploy/lint.txt`
 5. `npm run build`

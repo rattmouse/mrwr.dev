@@ -19,10 +19,15 @@
 //   scripts/content/refresh-pokemon-cards.sh                  # top 40 cards
 //   scripts/content/refresh-pokemon-cards.sh --limit 100
 //   scripts/content/refresh-pokemon-cards.sh --all
+//   scripts/content/refresh-pokemon-cards.sh --keep-count     # as many as cards.json has now
 //   scripts/content/refresh-pokemon-cards.sh --db /path/to/binder.db
+//
+// deploy.sh runs it with --keep-count, so a deploy brings the shelf up to date
+// with the binder without changing its size. Scans already in
+// public/collections/cards/ are reused, so only newly picked cards download.
 
 import { DatabaseSync } from "node:sqlite";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,6 +49,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--all") opts.limit = Number.POSITIVE_INFINITY;
     else if (arg === "--limit") opts.limit = Number(argv[++i]);
+    else if (arg === "--keep-count") opts.keepCount = true;
     else if (arg === "--db") opts.db = resolve(argv[++i]);
     else throw new Error(`unknown argument: ${arg}`);
   }
@@ -102,14 +108,29 @@ const QUERY = `
 
 const EXT_BY_TYPE = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
-/** Copy one scan into public/collections/cards/, named <print>-<size>.<ext>. */
-async function download(url, printId, size) {
+/** How many tiles the current cards.json holds, or null without a usable one. */
+async function currentCount() {
+  try {
+    const tiles = JSON.parse(await readFile(OUT_PATH, "utf8"));
+    return Array.isArray(tiles) && tiles.length > 0 ? tiles.length : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy one scan into public/collections/cards/, named <print>-<size>.<ext>.
+ * A scan already there from an earlier run is reused rather than fetched again.
+ */
+async function download(url, printId, size, existing) {
+  const slug = printId.replace(/[^A-Za-z0-9._-]/g, "-");
+  const have = existing.find((name) => name.startsWith(`${slug}-${size}.`));
+  if (have) return `${IMAGE_PUBLIC}/${have}`;
   const res = await fetch(url, { headers: { accept: "image/*" } });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   const buf = Buffer.from(await res.arrayBuffer());
   const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
   const ext = EXT_BY_TYPE[type] ?? "png";
-  const slug = printId.replace(/[^A-Za-z0-9._-]/g, "-");
   const name = `${slug}-${size}.${ext}`;
   await writeFile(resolve(IMAGE_DIR, name), buf);
   return `${IMAGE_PUBLIC}/${name}`;
@@ -117,6 +138,11 @@ async function download(url, printId, size) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.keepCount) {
+    const count = await currentCount();
+    if (count) opts.limit = count;
+    else console.log(`no cards.json to match yet; taking the default ${opts.limit}`);
+  }
 
   let db;
   try {
@@ -137,23 +163,27 @@ async function main() {
     return;
   }
 
-  const picked = Number.isFinite(opts.limit) ? rows.slice(0, opts.limit) : rows;
-  console.log(`${rows.length} cards in the binder; taking the top ${picked.length} by value`);
+  const target = Math.min(opts.limit, rows.length);
+  console.log(`${rows.length} cards in the binder; taking the top ${target} by value`);
 
   await mkdir(IMAGE_DIR, { recursive: true });
+  const existing = await readdir(IMAGE_DIR);
 
+  // A card whose scan won't download is passed over for the next one down, so
+  // the shelf keeps its size (and --keep-count doesn't shrink it run by run).
   const tiles = [];
   const kept = new Set();
-  for (const row of picked) {
+  for (const row of rows) {
+    if (tiles.length >= target) break;
     try {
       // The big scan is what the maximized window shows; the small one is the
       // desktop tile. Fall back to the one that exists if the other doesn't.
       const largeUrl = row.image_large || row.image_small;
       if (!largeUrl) throw new Error("no scan on record");
-      const image = await download(largeUrl, row.print_id, "large");
+      const image = await download(largeUrl, row.print_id, "large", existing);
       kept.add(image.split("/").pop());
       if (row.image_small) {
-        kept.add((await download(row.image_small, row.print_id, "small")).split("/").pop());
+        kept.add((await download(row.image_small, row.print_id, "small", existing)).split("/").pop());
       }
 
       const number = formatNumber(row.collector_number, row.printed_total);
@@ -180,6 +210,13 @@ async function main() {
     } catch (err) {
       console.warn(`  ${row.print_id}: skipped (${err.message})`);
     }
+  }
+
+  // Nothing came through (offline, say): keep the shelf that's already there
+  // rather than replace it with an empty one.
+  if (tiles.length === 0) {
+    console.warn("no scans could be fetched — leaving cards.json and its scans as they were");
+    return;
   }
 
   // Drop scans left behind by a previous, longer run so the directory always

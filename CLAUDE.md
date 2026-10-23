@@ -90,9 +90,14 @@ Orientation notes for working in this repo.
   `scripts/content/refresh-pokemon-cards.sh`. That one reads the **card-binder**
   app's SQLite collection (`../card-binder/binder.db`, read-only; needs Node 22+
   for `node:sqlite`), takes the most valuable cards and copies their scans
-  locally rather than hotlinking. `deploy.sh` does **not** run it — the
-  collection only changes when you scan something new, so run it by hand. Mind
-  the size: the default 40 cards is ~32MB, and `--all` would be 300MB+.
+  locally rather than hotlinking. `deploy.sh` (and `containers/ci.sh ci`) runs
+  it with `--keep-count`: the shelf stays the size `cards.json` already is,
+  scans already on disk are reused so only new picks download, and a failure
+  is non-fatal (`--skip-cards` skips it). To change the size, run it by hand
+  with `--limit N`; later deploys keep N. `containers/ci.sh` mounts
+  `../card-binder` at `/card-binder` (read-write: the db is WAL) so the
+  container finds it. Mind the size: the default 40 cards is ~32MB, and
+  `--all` would be 300MB+.
 - `search-sessions.js` (repo root, also shipped by `deploy.sh`) holds the
   session-grouping heuristics shared by `refresh-search-history.mjs` and
   `server.js`. At runtime `server.js` buffers keystroke records per browser
