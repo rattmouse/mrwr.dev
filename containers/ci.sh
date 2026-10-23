@@ -90,6 +90,17 @@ cred_args() {
   [[ ${#args[@]} -gt 0 ]] && printf '%s\n' "${args[@]}"
 }
 
+# The card-binder app's directory, beside the repo, for the Pokémon card
+# refresh. It lands at /card-binder, which is where ../card-binder from
+# /workspace resolves, so the refresh finds it without being told. Not
+# read-only: the database is in WAL mode, and even a read-only SQLite open has
+# to touch its -shm file. The refresh itself opens it read-only.
+binder_args() {
+  local binder="$REPO_ROOT/../card-binder"
+  [[ -d "$binder" ]] && printf '%s\n' -v "$(cd "$binder" && pwd):/card-binder"
+  return 0
+}
+
 have_image() { podman image exists "$IMAGE"; }
 
 ensure_image() {
@@ -151,7 +162,7 @@ cmd_run() {
   ensure_gh_token
   [[ $# -gt 0 ]] || set -- bash
   # shellcheck disable=SC2046
-  podman run --rm $(tty_args) $(common_args) $(cred_args) "$IMAGE" "$@"
+  podman run --rm $(tty_args) $(common_args) $(cred_args) $(binder_args) "$IMAGE" "$@"
 }
 
 # The same sequence deploy.sh runs, stopping before it touches prod: refresh
@@ -176,6 +187,8 @@ cmd_ci() {
       || echo "[ci] warning: probe refresh failed; building with whatever is in the tree." >&2
     scripts/content/refresh-trees.sh \
       || echo "[ci] warning: street-tree refresh failed; trees.exe will say its data is missing." >&2
+    scripts/content/refresh-pokemon-cards.sh --keep-count \
+      || echo "[ci] warning: card refresh failed; building with whatever is in the tree." >&2
 
     # Every PR bumps the version (node scripts/version.mjs bump patch). On a
     # branch, fail unless it is ahead of main; on main itself there is nothing

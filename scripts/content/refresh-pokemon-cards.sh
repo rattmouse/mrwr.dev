@@ -7,13 +7,15 @@
 # elsewhere), takes the most valuable cards and copies their scans locally. The
 # outputs are gitignored, like everything else under public/collections/.
 #
-# Unlike the issue/project refreshes this is not wired into a deploy: the
-# collection only changes when you scan something new, so run it by hand and the
-# downloaded scans serve every build after that.
+# deploy.sh runs it with --keep-count, so every deploy picks up newly scanned
+# cards while the shelf stays the size cards.json already is. Scans already
+# downloaded are reused, so only new picks hit the network. Run it by hand with
+# --limit to change the size; later deploys keep the new one.
 #
 #   scripts/content/refresh-pokemon-cards.sh                 # top 40 cards
 #   scripts/content/refresh-pokemon-cards.sh --limit 100
 #   scripts/content/refresh-pokemon-cards.sh --all
+#   scripts/content/refresh-pokemon-cards.sh --keep-count    # as many as cards.json has
 #
 # Needs Node 22+ (node:sqlite) and network access to the binder's image host.
 

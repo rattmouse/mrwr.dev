@@ -3,13 +3,14 @@
   "generatedNote": "Hand-curated. Big user-facing milestones, grouped by who helped build them.",
   "versions": [
     {
-      "version": "7.2.7",
+      "version": "7.2.8",
       "era": "claude",
       "name": "Trees panels",
-      "date": "2026-10-19",
+      "date": "2026-10-22",
       "summary": "Layers sidebar; map dials column; selection info section; push-knob Reset",
       "issues": [],
       "changes": [
+        "Changed: Cards tab kept current with the binder on every deploy (collections.exe)",
         "Changed: layout (./trees). Layers left of the map, map dials right, tree controls below",
         "Changed: Reset button replaced with a push knob (./trees)",
         "Changed: selection details moved to an info section under the layers (./trees)",
